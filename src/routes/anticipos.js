@@ -1,34 +1,34 @@
 const express = require('express');
 const router = express.Router();
+const { body } = require('express-validator');
 const { validate } = require('../middlewares/validation');
 const anticipoController = require('../controllers/anticipoExcedenteController');
 const { authenticate, authorize, authorizePermission } = require('../middlewares/auth');
 const { upload } = require('../config/cloudinary');
-const { createValidation } = require('../validators/anticiposValidator');
 
-// ============================================
-// RUTAS PÚBLICAS (solo lectura para admin/conductor)
-// ============================================
+// GET / → admin ve todos, conductor solo los suyos
 router.get('/', authenticate, authorizePermission('listar_anticipo'), anticipoController.getAll);
+
+// GET /:id → admin ve cualquiera, conductor solo el suyo
 router.get('/:id', authenticate, authorizePermission('consultar_anticipo'), anticipoController.getById);
 
-// ============================================
-// RUTAS PROTEGIDAS
-// ============================================
+// POST / → admin envía idConductor, conductor se asocia automáticamente
+router.post('/', authenticate, authorize('admin', 'conductor'),
+  body('valorAnticipo').notEmpty().withMessage('Valor del anticipo es requerido'),
+  validate,
+  anticipoController.create
+);
 
-// Crear anticipo - admin o conductor
-router.post('/', authenticate, authorize('admin', 'conductor'), createValidation, validate, anticipoController.create);
-
-// Actualizar anticipo - admin o conductor (solo el conductor owner o admin)
+// PUT /:id → admin o conductor (conductor solo puede actualizar el suyo)
 router.put('/:id', authenticate, authorize('admin', 'conductor'), anticipoController.update);
 
-// Subir soporte a Cloudinary
-router.post('/:id/soporte', authenticate, authorize('admin', 'conductor'), 
-  upload.single('soporte'), 
+// POST /:id/soporte → subir soporte a Cloudinary
+router.post('/:id/soporte', authenticate, authorize('admin', 'conductor'),
+  upload.single('soporte'),
   anticipoController.updateSoporte
 );
 
-// Eliminar anticipo - solo admin
+// DELETE /:id → solo admin
 router.delete('/:id', authenticate, authorize('admin'), anticipoController.delete);
 
 module.exports = router;
