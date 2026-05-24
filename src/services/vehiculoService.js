@@ -1,5 +1,6 @@
 const { Vehiculo, Conductor, PropietarioVehiculo, Ruta, Usuario, Destino } = require('../models');
 const AppError = require('../errors/appError');
+const { tieneRutasActivasPorVehiculo } = require('../middlewares/validateDependencies');
 
 const getAll = async ({ estado, habilitado }) => {
   const where = {};
@@ -120,17 +121,6 @@ const update = async (id, data) => {
   return vehiculo;
 };
 
-const deleteVehiculo = async (id) => {
-  const vehiculo = await Vehiculo.findByPk(id);
-
-  if (!vehiculo) {
-    throw new AppError('Vehículo no encontrado', 404);
-  }
-
-  await vehiculo.update({ habilitado: false });
-
-  return { message: 'Vehículo deshabilitado exitosamente' };
-};
 
 const getRutas = async (id) => {
   const vehiculo = await Vehiculo.findByPk(id);
@@ -198,13 +188,47 @@ const assignDriver = async (id, idConductor) => {
   return vehiculo;
 };
 
+const toggleHabilitado = async (id) => {
+  const vehiculo = await Vehiculo.findByPk(id);
+  if (!vehiculo) throw new AppError('Vehículo no encontrado', 404);
+  if (vehiculo.habilitado === true) {
+    const rutasActivas = await tieneRutasActivasPorVehiculo(id);
+    if (rutasActivas) throw new AppError('No se puede inhabilitar un vehículo con rutas activas', 400);
+  }
+  vehiculo.habilitado = !vehiculo.habilitado;
+  await vehiculo.save();
+
+  // Sincronizar estado del propietario: si ya no tiene vehículos habilitados, inhabilitar propietario.
+  try {
+    const idPropietario = vehiculo.idPropietario;
+    if (idPropietario) {
+      const vehiculosActivosCount = await Vehiculo.count({ where: { idPropietario, habilitado: true } });
+      const propietario = await PropietarioVehiculo.findByPk(idPropietario);
+      if (propietario) {
+        if (vehiculosActivosCount === 0 && propietario.habilitado) {
+          propietario.habilitado = false;
+          await propietario.save();
+        } else if (vehiculosActivosCount > 0 && !propietario.habilitado) {
+          propietario.habilitado = true;
+          await propietario.save();
+        }
+      }
+    }
+  } catch (err) {
+    // No bloquear la operación por errores secundarios de sincronización
+    console.error('Error sincronizando propietario tras toggle vehículo:', err.message || err);
+  }
+
+  return vehiculo;
+};
+
 module.exports = {
   getAll,
   getById,
   create,
   update,
-  delete: deleteVehiculo,
   getRutas,
   cambiarEstado,
   assignDriver
+  , toggleHabilitado
 };

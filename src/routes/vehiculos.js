@@ -11,9 +11,9 @@ router.get('/', authorizePermission('listar_vehiculo'), vehiculoController.getAl
 router.get('/:id', authorizePermission('consultar_vehiculo'), vehiculoController.getById);
 router.post('/', authorizePermission('registrar_vehiculo'), createValidation, validate, vehiculoController.create);
 router.put('/:id', authorizePermission('actualizar_vehiculo'), vehiculoController.update);
-router.delete('/:id', authorizePermission('actualizar_vehiculo'), vehiculoController.delete);
 
 // Ruta específica para cambiar estado del vehículo
 router.patch('/:id/estado', cambiarEstadoValidation, validate, vehiculoController.cambiarEstado);
+router.patch('/:id/toggle-habilitado', authorizePermission('actualizar_vehiculo'), vehiculoController.toggleHabilitado);
 
 module.exports = router;

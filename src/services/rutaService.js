@@ -1,5 +1,6 @@
 const { Ruta, Vehiculo, Conductor, Destino, EncomiendaVenta, Usuario, Cliente } = require('../models');
 const AppError = require('../errors/appError');
+const { tieneEncomiendasActivasPorRuta } = require('../middlewares/validateDependencies');
 
 const getAll = async ({ habilitado }) => {
   const where = {};
@@ -83,17 +84,6 @@ const update = async (id, data) => {
   return ruta;
 };
 
-const deleteRuta = async (id) => {
-  const ruta = await Ruta.findByPk(id);
-
-  if (!ruta) {
-    throw new AppError('Ruta no encontrada', 404);
-  }
-
-  await ruta.update({ habilitado: false });
-
-  return { message: 'Ruta deshabilitada exitosamente' };
-};
 
 const getEncomiendas = async (id) => {
   const ruta = await Ruta.findByPk(id);
@@ -125,12 +115,24 @@ const getAvailable = async ({ idDestino }) => {
   return rutas;
 };
 
+const toggleHabilitado = async (id) => {
+  const ruta = await Ruta.findByPk(id);
+  if (!ruta) throw new AppError('Ruta no encontrada', 404);
+  if (ruta.habilitado === true) {
+    const encomiendasActivas = await tieneEncomiendasActivasPorRuta(id);
+    if (encomiendasActivas) throw new AppError('No se puede inhabilitar una ruta con encomiendas activas', 400);
+  }
+  ruta.habilitado = !ruta.habilitado;
+  await ruta.save();
+  return ruta;
+};
+
 module.exports = {
   getAll,
   getById,
   create,
   update,
-  delete: deleteRuta,
   getEncomiendas,
   getAvailable
+  , toggleHabilitado
 };

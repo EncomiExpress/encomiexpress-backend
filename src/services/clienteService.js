@@ -1,6 +1,7 @@
 const { Cliente } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
+const { tieneEncomiendasActivasPorCliente } = require('../middlewares/validateDependencies');
 
 const getAll = async () => {
   const clientes = await Cliente.findAll({
@@ -93,7 +94,13 @@ const toggleHabilitado = async (id) => {
     throw new AppError('Cliente no encontrado', 404);
   }
 
-  await cliente.update({ habilitado: !cliente.habilitado });
+  if (cliente.habilitado === true) {
+    const encomiendasActivas = await tieneEncomiendasActivasPorCliente(id);
+    if (encomiendasActivas) throw new AppError('No se puede inhabilitar un cliente con encomiendas activas', 400);
+  }
+
+  cliente.habilitado = !cliente.habilitado;
+  await cliente.save();
 
   return cliente;
 };

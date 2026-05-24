@@ -1,6 +1,7 @@
 const { Conductor, Usuario, Vehiculo, AnticipoExcedente, Ruta } = require('../models');
 const bcrypt = require('bcryptjs');
 const AppError = require('../errors/appError');
+const { tieneRutasActivas, tieneVehiculosActivos, tieneAnticiposPendientes } = require('../middlewares/validateDependencies');
 
 const getAll = async ({ estado, habilitado }) => {
   const where = {};
@@ -133,17 +134,6 @@ const update = async (id, data) => {
   return conductorActualizado;
 };
 
-const deleteConductor = async (id) => {
-  const conductor = await Conductor.findByPk(id);
-
-  if (!conductor) {
-    throw new AppError('Conductor no encontrado', 404);
-  }
-
-  await conductor.update({ habilitado: false });
-
-  return { message: 'Conductor deshabilitado exitosamente' };
-};
 
 const getVehiculos = async (id) => {
   const conductor = await Conductor.findByPk(id);
@@ -222,15 +212,34 @@ const getMisAnticipos = async (idUsuario, rolNombre) => {
 
   return anticipos;
 };
+const toggleHabilitado = async (id) => {
+  const conductor = await Conductor.findByPk(id);
+  if (!conductor) throw new AppError('Conductor no encontrado', 404);
+
+  if (conductor.habilitado === true) {
+    const rutasActivas = await tieneRutasActivas(id);
+    if (rutasActivas) throw new AppError('No se puede inhabilitar un conductor con rutas activas', 400);
+
+    const vehiculosActivos = await tieneVehiculosActivos(id);
+    if (vehiculosActivos) throw new AppError('No se puede inhabilitar un conductor con vehículos asignados activos', 400);
+
+    const anticiposPendientes = await tieneAnticiposPendientes(id);
+    if (anticiposPendientes) throw new AppError('No se puede inhabilitar un conductor con anticipos pendientes de legalización', 400);
+  }
+
+  conductor.habilitado = !conductor.habilitado;
+  await conductor.save();
+  return conductor;
+};
 
 module.exports = {
   getAll,
   getById,
   create,
   update,
-  delete: deleteConductor,
   getVehiculos,
   getAnticipos,
   cambiarEstado,
-  getMisAnticipos
+  getMisAnticipos,
+  toggleHabilitado
 };

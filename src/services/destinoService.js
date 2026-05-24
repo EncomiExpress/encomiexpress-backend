@@ -1,5 +1,6 @@
 const { Destino, Ruta } = require('../models');
 const AppError = require('../errors/appError');
+const { tieneRutasActivasPorDestino } = require('../middlewares/validateDependencies');
 
 const getAll = async ({ habilitado }) => {
   const where = {};
@@ -50,17 +51,6 @@ const update = async (id, data) => {
   return destino;
 };
 
-const deleteDestino = async (id) => {
-  const destino = await Destino.findByPk(id);
-
-  if (!destino) {
-    throw new AppError('Destino no encontrado', 404);
-  }
-
-  await destino.update({ habilitado: false });
-
-  return { message: 'Destino deshabilitado exitosamente' };
-};
 
 const getRutas = async (id) => {
   const destino = await Destino.findByPk(id);
@@ -75,11 +65,23 @@ const getRutas = async (id) => {
   return rutas;
 };
 
+const toggleHabilitado = async (id) => {
+  const destino = await Destino.findByPk(id);
+  if (!destino) throw new AppError('Destino no encontrado', 404);
+  if (destino.habilitado === true) {
+    const rutasActivas = await tieneRutasActivasPorDestino(id);
+    if (rutasActivas) throw new AppError('No se puede inhabilitar un destino con rutas activas', 400);
+  }
+  destino.habilitado = !destino.habilitado;
+  await destino.save();
+  return destino;
+};
+
 module.exports = {
   getAll,
   getById,
   create,
   update,
-  delete: deleteDestino,
   getRutas
+  , toggleHabilitado
 };

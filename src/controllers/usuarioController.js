@@ -39,13 +39,8 @@ exports.update = async (req, res, next) => {
 };
 
 exports.delete = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    await usuarioService.delete(id);
-    res.json({ success: true, message: 'Usuario deshabilitado exitosamente' });
-  } catch (error) {
-    next(error);
-  }
+  // Método obsoleto: use PATCH /usuarios/:id/toggle-habilitado
+  res.status(405).json({ success: false, message: 'Método obsoleto. Use PATCH /usuarios/:id/toggle-habilitado para inhabilitar/restaurar.' });
 };
 
 exports.changePassword = async (req, res, next) => {
@@ -61,7 +56,7 @@ exports.changePassword = async (req, res, next) => {
 exports.toggleHabilitado = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const usuario = await usuarioService.toggleHabilitado(id);
+    const usuario = await usuarioService.toggleHabilitado(id, req.usuario.idUsuario);
     res.json({ success: true, message: usuario.habilitado ? 'Usuario habilitado exitosamente' : 'Usuario inhabilitado exitosamente', data: usuario });
   } catch (error) {
     next(error);

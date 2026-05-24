@@ -40,13 +40,8 @@ exports.update = async (req, res) => {
 };
 
 exports.remove = async (req, res) => {
-  try {
-    const { id } = req.params;
-    await rutaService.delete(id);
-    res.json({ success: true, message: 'Ruta deshabilitada exitosamente' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message || 'Error al eliminar ruta', error: error.message });
-  }
+  // Método obsoleto: use PATCH /rutas/:id/toggle-habilitado
+  res.status(405).json({ success: false, message: 'Método obsoleto. Use PATCH /rutas/:id/toggle-habilitado para inhabilitar/restaurar.' });
 };
 
 exports.getEncomiendas = async (req, res) => {
@@ -66,5 +61,15 @@ exports.getAvailable = async (req, res) => {
     res.json({ success: true, data: rutas });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message || 'Error al obtener rutas disponibles', error: error.message });
+  }
+};
+
+exports.toggleHabilitado = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const ruta = await rutaService.toggleHabilitado(id);
+    res.json({ success: true, message: `Ruta ${ruta.habilitado ? 'habilitada' : 'inhabilitada'} exitosamente`, data: ruta });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message || 'Error al cambiar estado de la ruta', error: error.message });
   }
 };

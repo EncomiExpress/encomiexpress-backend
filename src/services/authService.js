@@ -18,7 +18,7 @@ const login = async (email, password) => {
   });
 
   if (!usuario) {
-    throw new AppError('Credenciales inválidas', 401);
+    throw new AppError('Correo o contraseña incorrecta', 401);
   }
 
   if (!usuario.habilitado) {
@@ -27,7 +27,7 @@ const login = async (email, password) => {
 
   const isPasswordValid = await bcrypt.compare(password, usuario.password);
   if (!isPasswordValid) {
-    throw new AppError('Credenciales inválidas', 401);
+    throw new AppError('Correo o contraseña incorrecta', 401);
   }
 
   const permisos = usuario.rol?.permisos?.map(p => p.nombre) ?? [];

@@ -28,7 +28,7 @@ router.post('/:id/soporte', authenticate, authorize('admin', 'conductor'),
   anticipoController.updateSoporte
 );
 
-// Eliminar anticipo - solo admin
-router.delete('/:id', authenticate, authorize('admin'), anticipoController.delete);
+// Toggle habilitado
+router.patch('/:id/toggle-habilitado', authenticate, authorize('admin'), authorizePermission('actualizar_anticipo'), anticipoController.toggleHabilitado);
 
 module.exports = router;

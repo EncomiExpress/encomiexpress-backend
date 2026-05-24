@@ -10,7 +10,7 @@ router.get('/', authorizePermission('listar_destino'), destinoController.getAll)
 router.get('/:id', authorizePermission('consultar_destino'), destinoController.getById);
 router.post('/', authorizePermission('registrar_destino'), createValidation, validate, destinoController.create);
 router.put('/:id', authorizePermission('actualizar_destino'), destinoController.update);
-router.delete('/:id', authorizePermission('actualizar_destino'), destinoController.delete);
+router.patch('/:id/toggle-habilitado', authorizePermission('actualizar_destino'), destinoController.toggleHabilitado);
 
 module.exports = router;
 

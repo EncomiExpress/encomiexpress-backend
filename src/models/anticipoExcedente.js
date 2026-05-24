@@ -36,6 +36,10 @@ const AnticipoExcedente = sequelize.define('AnticipoExcedente', {
     type: DataTypes.STRING(500),
     allowNull: true
   },
+  habilitado: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true
+  },
   fechaEntrega: {
     type: DataTypes.DATEONLY,
     allowNull: true

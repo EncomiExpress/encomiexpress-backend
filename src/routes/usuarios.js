@@ -13,7 +13,6 @@ router.get('/:id', authorizePermission('consultar_usuario'), usuarioController.g
 router.post('/', authorizePermission('registrar_usuario'), createValidation, validate, usuarioController.create);
 router.put('/:id', authorizePermission('actualizar_usuario'), updateValidation, validate, usuarioController.update);
 router.patch('/:id/toggle-habilitado', authorizePermission('inhabilitar_usuario'), usuarioController.toggleHabilitado);
-router.delete('/:id', authorizePermission('inhabilitar_usuario'), usuarioController.delete);
 router.post('/:id/change-password', authorizePermission('actualizar_usuario'), changePasswordValidation, validate, usuarioController.changePassword);
 
 module.exports = router;

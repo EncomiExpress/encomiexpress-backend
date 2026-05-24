@@ -163,17 +163,17 @@ POST http://localhost:3000/api/seed
 
 - Base URL: `http://localhost:3000/api`
 - Autenticación: `POST /auth/login`
-- Usuarios: `GET/POST/PUT/DELETE /usuarios`
+ - Usuarios: `GET/POST/PUT /usuarios`, `PATCH /usuarios/:id/toggle-habilitado` (rehabilitar/inhabilitar)
 - Roles: `GET/POST/PUT/DELETE /roles`
 - Permisos: `GET /permisos`
 - Clientes: `GET/POST/PUT /clientes`
-- Conductores: `GET/POST /conductores`, `GET /conductores/:id/vehiculos`
-- Propietarios: `GET/POST/PUT /propietarios`
-- Vehículos: `GET/POST/PUT /vehiculos`
-- Destinos: `GET/POST/PUT /destinos`
-- Rutas: `GET/POST /rutas`, `GET /rutas/disponibles`, `GET /rutas/:id/encomiendas`
+ - Conductores: `GET/POST /conductores`, `GET /conductores/:id/vehiculos`, `PATCH /conductores/:id/toggle-habilitado`
+ - Propietarios: `GET/POST/PUT /propietarios`, `PATCH /propietarios/:id/toggle-habilitado`
+ - Vehículos: `GET/POST/PUT /vehiculos`, `PATCH /vehiculos/:id/toggle-habilitado`
+ - Destinos: `GET/POST/PUT /destinos`, `PATCH /destinos/:id/toggle-habilitado`
+ - Rutas: `GET/POST /rutas`, `GET /rutas/disponibles`, `GET /rutas/:id/encomiendas`, `PATCH /rutas/:id/toggle-habilitado`
 - Encomiendas: `GET/POST /encomiendas`, `GET /encomiendas/track/:numeroGuia`, `PUT /encomiendas/:id/estado`, `POST /encomiendas/:id/pagar`
-- Anticipos: `GET/POST /anticipos`, `POST /anticipos/liquidar/:id`
+ - Anticipos: `GET/POST /anticipos`, `POST /anticipos/liquidar/:id`, `PATCH /anticipos/:id/toggle-habilitado`
 - Health check: `GET /health`
 - Seed: `POST /seed`
 

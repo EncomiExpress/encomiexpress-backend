@@ -2,6 +2,8 @@ const bcrypt = require('bcryptjs');
 const { Usuario, Rol } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
+const { Conductor, Cliente } = require('../models');
+const { tieneRutasActivas, tieneVehiculosActivos, tieneAnticiposPendientes, tieneEncomiendasActivasPorCliente } = require('../middlewares/validateDependencies');
 
 const getAll = async () => {
   const usuarios = await Usuario.findAll({
@@ -67,6 +69,16 @@ const update = async (id, data) => {
     throw new AppError('Usuario no encontrado', 404);
   }
 
+  // Evitar inhabilitar al usuario administrador
+  try {
+    const rol = await Rol.findByPk(usuario.idRol);
+    if (rol && String(rol.nombre).toLowerCase() === 'admin') {
+      throw new AppError('No se puede inhabilitar el usuario administrador', 400);
+    }
+  } catch (e) {
+    // Si ocurre cualquier error al verificar rol, no bloquear explícitamente; dejar que otras validaciones manejen el caso.
+  }
+
   if (email && email !== usuario.email) {
     const existingEmail = await Usuario.findOne({ where: { email } });
     if (existingEmail) {
@@ -99,17 +111,6 @@ const update = async (id, data) => {
   };
 };
 
-const deleteUsuario = async (id) => {
-  const usuario = await Usuario.findByPk(id);
-
-  if (!usuario) {
-    throw new AppError('Usuario no encontrado', 404);
-  }
-
-  await usuario.update({ habilitado: false });
-
-  return { message: 'Usuario deshabilitado exitosamente' };
-};
 
 const changePassword = async (id, { currentPassword, newPassword }) => {
   const usuario = await Usuario.findByPk(id);
@@ -129,14 +130,43 @@ const changePassword = async (id, { currentPassword, newPassword }) => {
   return { message: 'Password actualizado exitosamente' };
 };
 
-const toggleHabilitado = async (id) => {
+const toggleHabilitado = async (id, currentUserId) => {
+  if (parseInt(id) === currentUserId) {
+    throw new AppError('No puedes inhabilitar tu propio usuario', 400);
+  }
   const usuario = await Usuario.findByPk(id);
 
   if (!usuario) {
     throw new AppError('Usuario no encontrado', 404);
   }
 
-  await usuario.update({ habilitado: !usuario.habilitado });
+  if (usuario.habilitado === true) {
+    // Si el usuario está asociado a un conductor, validar dependencias activas
+    const conductor = await Conductor.findOne({ where: { idUsuario: usuario.idUsuario } });
+    if (conductor) {
+      const rutasActivas = await tieneRutasActivas(conductor.idConductor);
+      if (rutasActivas) throw new AppError('No se puede inhabilitar el usuario porque el conductor asociado tiene rutas activas', 400);
+
+      const vehiculosActivos = await tieneVehiculosActivos(conductor.idConductor);
+      if (vehiculosActivos) throw new AppError('No se puede inhabilitar el usuario porque el conductor asociado tiene vehículos activos', 400);
+
+      const anticiposPendientes = await tieneAnticiposPendientes(conductor.idConductor);
+      if (anticiposPendientes) throw new AppError('No se puede inhabilitar el usuario porque el conductor asociado tiene anticipos pendientes', 400);
+    }
+    // Si el usuario corresponde a un cliente (mismo número de identificación), validar encomiendas activas
+    try {
+      const cliente = await Cliente.findOne({ where: { numeroIdentificacion: usuario.numeroIdentificacion } });
+      if (cliente) {
+        const encomiendasActivas = await tieneEncomiendasActivasPorCliente(cliente.id);
+        if (encomiendasActivas) throw new AppError('No se puede inhabilitar el usuario porque el cliente asociado tiene encomiendas activas', 400);
+      }
+    } catch (e) {
+      // No bloquear el flujo si ocurre un error al verificar cliente; dejar que la inhabilitación continúe según otras reglas.
+    }
+  }
+
+  usuario.habilitado = !usuario.habilitado;
+  await usuario.save();
 
   return usuario;
 };
@@ -146,7 +176,6 @@ module.exports = {
   getById,
   create,
   update,
-  delete: deleteUsuario,
   changePassword,
   toggleHabilitado
 };

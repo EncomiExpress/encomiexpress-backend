@@ -11,6 +11,6 @@ router.get('/', authorizePermission('listar_ruta'), rutaController.getAll);
 router.get('/:id', authorizePermission('consultar_ruta'), rutaController.getById);
 router.post('/', authorizePermission('registrar_ruta'), createValidation, validate, rutaController.create);
 router.put('/:id', authorizePermission('actualizar_ruta'), rutaController.update);
-router.delete('/:id', authorizePermission('actualizar_ruta'), rutaController.remove);
+router.patch('/:id/toggle-habilitado', authorizePermission('actualizar_ruta'), rutaController.toggleHabilitado);
 
 module.exports = router;

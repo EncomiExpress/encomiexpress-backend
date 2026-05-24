@@ -40,13 +40,8 @@ exports.update = async (req, res, next) => {
 };
 
 exports.delete = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    await vehiculoService.delete(id);
-    res.json({ success: true, message: 'Vehículo deshabilitado exitosamente' });
-  } catch (error) {
-    next(error);
-  }
+  // Método obsoleto: use PATCH /vehiculos/:id/toggle-habilitado
+  res.status(405).json({ success: false, message: 'Método obsoleto. Use PATCH /vehiculos/:id/toggle-habilitado para inhabilitar/restaurar.' });
 };
 
 exports.getRutas = async (req, res, next) => {
@@ -74,6 +69,20 @@ exports.assignDriver = async (req, res, next) => {
     const { id } = req.params;
     const vehiculo = await vehiculoService.assignDriver(id, req.body.idConductor);
     res.json({ success: true, message: 'Conductor asignado exitosamente', data: vehiculo });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.toggleHabilitado = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const vehiculo = await vehiculoService.toggleHabilitado(id);
+    res.json({
+      success: true,
+      message: `Vehículo ${vehiculo.habilitado ? 'habilitado' : 'inhabilitado'} exitosamente`,
+      data: vehiculo
+    });
   } catch (error) {
     next(error);
   }

@@ -1,5 +1,6 @@
 const { PropietarioVehiculo, Vehiculo } = require('../models');
 const AppError = require('../errors/appError');
+const { tieneVehiculosActivosPorPropietario } = require('../middlewares/validateDependencies');
 
 const getAll = async ({ habilitado }) => {
   const where = {};
@@ -79,17 +80,6 @@ const update = async (id, data) => {
   return propietario;
 };
 
-const deletePropietario = async (id) => {
-  const propietario = await PropietarioVehiculo.findByPk(id);
-
-  if (!propietario) {
-    throw new AppError('Propietario no encontrado', 404);
-  }
-
-  await propietario.update({ habilitado: false });
-
-  return { message: 'Propietario deshabilitado exitosamente' };
-};
 
 const getVehiculos = async (id) => {
   const propietario = await PropietarioVehiculo.findByPk(id);
@@ -104,11 +94,23 @@ const getVehiculos = async (id) => {
   return vehiculos;
 };
 
+const toggleHabilitado = async (id) => {
+  const propietario = await PropietarioVehiculo.findByPk(id);
+  if (!propietario) throw new AppError('Propietario no encontrado', 404);
+  if (propietario.habilitado === true) {
+    const vehiculosActivos = await tieneVehiculosActivosPorPropietario(id);
+    if (vehiculosActivos) throw new AppError('No se puede inhabilitar un propietario con vehículos activos', 400);
+  }
+  propietario.habilitado = !propietario.habilitado;
+  await propietario.save();
+  return propietario;
+};
+
 module.exports = {
   getAll,
   getById,
   create,
   update,
-  delete: deletePropietario,
   getVehiculos
+  , toggleHabilitado
 };

@@ -40,13 +40,8 @@ exports.update = async (req, res, next) => {
 };
 
 exports.delete = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    await propietarioService.delete(id);
-    res.json({ success: true, message: 'Propietario deshabilitado exitosamente' });
-  } catch (error) {
-    next(error);
-  }
+  // Método obsoleto: use PATCH /propietarios/:id/toggle-habilitado
+  res.status(405).json({ success: false, message: 'Método obsoleto. Use PATCH /propietarios/:id/toggle-habilitado para inhabilitar/restaurar.' });
 };
 
 exports.getVehiculos = async (req, res, next) => {
@@ -54,6 +49,20 @@ exports.getVehiculos = async (req, res, next) => {
     const { id } = req.params;
     const vehiculos = await propietarioService.getVehiculos(id);
     res.json({ success: true, data: vehiculos });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.toggleHabilitado = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const propietario = await propietarioService.toggleHabilitado(id);
+    res.json({
+      success: true,
+      message: `Propietario ${propietario.habilitado ? 'habilitado' : 'inhabilitado'} exitosamente`,
+      data: propietario
+    });
   } catch (error) {
     next(error);
   }

@@ -23,6 +23,9 @@ router.get('/:id', encomiendaVentaController.getById);
 // GET /api/encomiendas/guia/:numeroGuia - Buscar por número de guía
 router.get('/guia/:numeroGuia', encomiendaVentaController.getByGuia);
 
+// Ruta pública de seguimiento por token
+router.get('/public/:token', encomiendaVentaController.getPublicByToken);
+
 // ============================================
 // Rutas protegidas
 // ============================================

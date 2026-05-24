@@ -11,6 +11,6 @@ router.get('/', authorizePermission('gestion_transporte'), propietarioController
 router.get('/:id', authorizePermission('gestion_transporte'), propietarioController.getById);
 router.post('/', authorizePermission('gestion_transporte'), createValidation, validate, propietarioController.create);
 router.put('/:id', authorizePermission('gestion_transporte'), propietarioController.update);
-router.delete('/:id', authorizePermission('gestion_transporte'), propietarioController.delete);
+router.patch('/:id/toggle-habilitado', authorizePermission('gestion_transporte'), propietarioController.toggleHabilitado);
 
 module.exports = router;

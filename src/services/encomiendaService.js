@@ -1,6 +1,8 @@
 const { EncomiendaVenta, Destinatario, Paquete, Cliente, Ruta, Vehiculo, Conductor, Destino, sequelize } = require('../models');
 const { Usuario } = require('../models');
 const AppError = require('../errors/appError');
+const crypto = require('crypto');
+const { sendTrackingEmail } = require('../config/email');
 
 const ESTADOS_VALIDOS = ['Pendiente de Recogida', 'En Recogida', 'Programada', 'En Tránsito', 'Entregado', 'Devuelto', 'Activo', 'Inactivo'];
 const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia', 'Nequi'];
@@ -11,6 +13,10 @@ const generarNumeroGuia = async () => {
   const timestamp = Date.now().toString().slice(-8);
   const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
   return `${prefix}-${timestamp}-${random}`;
+};
+
+const generarTokenSeguimiento = (numeroGuia) => {
+  return crypto.createHash('sha256').update(numeroGuia + (process.env.JWT_SECRET || 'secret')).digest('hex').substring(0, 32);
 };
 
 const getAll = async ({ estado, idCliente, fechaInicio, fechaFin }) => {
@@ -146,9 +152,12 @@ const create = async (data) => {
     const valorImpuestos = impuestos || 0;
     const total = (valorServicio || 0) + valorImpuestos;
 
+    const tokenSeguimiento = generarTokenSeguimiento(numeroGuia);
+
     const encomienda = await EncomiendaVenta.create({
       idCliente,
       idRuta,
+      tokenSeguimiento,
       numeroGuia,
       numeroFactura: numeroFactura || null,
       fechaEstimadaEntrega: fechaEstimadaEntrega || null,
@@ -194,6 +203,16 @@ const create = async (data) => {
         { model: Paquete, as: 'paquetes' }
       ]
     });
+
+    // Enviar correo de seguimiento si el cliente tiene email
+    try {
+      const clienteEmail = cliente.email || null;
+      if (clienteEmail) {
+        await sendTrackingEmail(clienteEmail, numeroGuia, tokenSeguimiento);
+      }
+    } catch (e) {
+      console.error('Error enviando correo de seguimiento:', e.message || e);
+    }
 
     return encomiendaCompleta;
   } catch (error) {
@@ -437,4 +456,26 @@ module.exports = {
   toggleHabilitado,
   agregarPaquete,
   agregarDestinatario
+};
+
+const getPublicByToken = async (token) => {
+  const encomienda = await EncomiendaVenta.findOne({
+    where: { tokenSeguimiento: token, habilitado: true },
+    include: [
+      { model: Cliente, as: 'cliente', attributes: ['nombre', 'apellido'] },
+      { model: Ruta, as: 'ruta', attributes: ['idRuta'], include: [{ model: Destino, as: 'destino', attributes: ['ciudad', 'departamento'] }] },
+      { model: Destinatario, as: 'destinatarios', limit: 1 },
+      { model: Paquete, as: 'paquetes', limit: 1 }
+    ]
+  });
+  if (!encomienda) throw new AppError('Encomienda no encontrada', 404);
+  return {
+    numeroGuia: encomienda.numeroGuia,
+    estado: encomienda.estado,
+    fechaRegistro: encomienda.fechaRegistro,
+    fechaEstimadaEntrega: encomienda.fechaEstimadaEntrega,
+    remitente: `${encomienda.cliente?.nombre || ''} ${encomienda.cliente?.apellido || ''}`.trim(),
+    destinatario: encomienda.destinatarios && encomienda.destinatarios[0] ? encomienda.destinatarios[0].nombreDestinatario : null,
+    destino: encomienda.ruta && encomienda.ruta.destino ? `${encomienda.ruta.destino.ciudad} - ${encomienda.ruta.destino.departamento}` : null
+  };
 };

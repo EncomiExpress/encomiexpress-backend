@@ -57,6 +57,11 @@ const EncomiendaVenta = sequelize.define('EncomiendaVenta', {
     type: DataTypes.DECIMAL(12, 2),
     defaultValue: 0
   },
+  tokenSeguimiento: {
+    type: DataTypes.STRING(64),
+    allowNull: true,
+    unique: true
+  },
   metodoPago: {
     type: DataTypes.STRING(30),
     allowNull: true

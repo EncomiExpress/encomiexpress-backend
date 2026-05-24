@@ -64,13 +64,8 @@ exports.entregarExcedente = async (req, res, next) => {
 };
 
 exports.delete = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    await anticipoService.delete(id);
-    res.json({ success: true, message: 'Anticipo eliminado exitosamente' });
-  } catch (error) {
-    next(error);
-  }
+  // Método obsoleto: use PATCH /anticipos/:id/toggle-habilitado
+  res.status(405).json({ success: false, message: 'Método obsoleto. Use PATCH /anticipos/:id/toggle-habilitado para inhabilitar/restaurar.' });
 };
 
 exports.createMisAnticipo = async (req, res, next) => {
@@ -92,6 +87,20 @@ exports.updateSoporte = async (req, res, next) => {
     const fileUrl = req.file.path;
     const result = await anticipoService.updateSoporte(id, fileUrl);
     res.json({ success: true, message: 'Soporte subido exitosamente', data: { soporte: fileUrl } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.toggleHabilitado = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const anticipo = await anticipoService.toggleHabilitado(id);
+    res.json({
+      success: true,
+      message: `Anticipo ${anticipo.habilitado ? 'habilitado' : 'inhabilitado'} exitosamente`,
+      data: anticipo
+    });
   } catch (error) {
     next(error);
   }

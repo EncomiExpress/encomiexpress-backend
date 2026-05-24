@@ -156,17 +156,6 @@ const entregarExcedente = async (id, { soporte }) => {
   return anticipo;
 };
 
-const deleteAnticipo = async (id) => {
-  const anticipo = await AnticipoExcedente.findByPk(id);
-
-  if (!anticipo) {
-    throw new AppError('Anticipo no encontrado', 404);
-  }
-
-  await anticipo.destroy();
-
-  return { message: 'Anticipo eliminado exitosamente' };
-};
 
 const createMisAnticipo = async (idUsuario, rolNombre, data) => {
   if (rolNombre !== 'conductor') {
@@ -217,6 +206,29 @@ const updateSoporte = async (id, fileUrl) => {
   return { soporte: fileUrl };
 };
 
+const toggleHabilitado = async (id) => {
+  const anticipo = await AnticipoExcedente.findByPk(id);
+  if (!anticipo) throw new AppError('Anticipo no encontrado', 404);
+  if (anticipo.habilitado === true) {
+    // No permitir inhabilitar anticipos que estén pendientes
+    if (anticipo.estado === 'pendiente') {
+      throw new AppError('No se puede inhabilitar un anticipo pendiente', 400);
+    }
+  }
+  anticipo.habilitado = !anticipo.habilitado;
+  await anticipo.save();
+
+  try {
+    const app = require('../app');
+    const io = app.get('io');
+    if (io) io.emit('anticipo_updated', anticipo);
+  } catch (e) {
+    // no bloquear por fallos al emitir eventos
+  }
+
+  return anticipo;
+};
+
 module.exports = {
   getAll,
   getById,
@@ -224,7 +236,8 @@ module.exports = {
   update,
   liquidar,
   entregarExcedente,
-  delete: deleteAnticipo,
   createMisAnticipo,
   updateSoporte
+  ,
+  toggleHabilitado
 };

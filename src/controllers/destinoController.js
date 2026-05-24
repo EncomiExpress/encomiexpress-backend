@@ -41,13 +41,8 @@ exports.update = async (req, res, next) => {
 };
 
 exports.delete = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    await destinoService.delete(id);
-    res.json({ success: true, message: 'Destino deshabilitado exitosamente' });
-  } catch (error) {
-    next(error);
-  }
+  // Método obsoleto: use PATCH /destinos/:id/toggle-habilitado
+  res.status(405).json({ success: false, message: 'Método obsoleto. Use PATCH /destinos/:id/toggle-habilitado para inhabilitar/restaurar.' });
 };
 
 exports.getRutas = async (req, res, next) => {
@@ -55,6 +50,16 @@ exports.getRutas = async (req, res, next) => {
     const { id } = req.params;
     const rutas = await destinoService.getRutas(id);
     res.json({ success: true, data: rutas });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.toggleHabilitado = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const destino = await destinoService.toggleHabilitado(id);
+    res.json({ success: true, message: `Destino ${destino.habilitado ? 'habilitado' : 'inhabilitado'} exitosamente`, data: destino });
   } catch (error) {
     next(error);
   }

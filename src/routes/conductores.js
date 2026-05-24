@@ -161,9 +161,9 @@ router.get('/:id/anticipos', conductorController.getAnticipos);
 // ============================================
 router.post('/', authorize('admin'), createValidation, validate, conductorController.create);
 router.put('/:id', authorize('admin'), updateValidation, validate, conductorController.update);
-router.delete('/:id', authorize('admin'), conductorController.delete);
 
 // Ruta específica para cambiar estado del conductor
 router.patch('/:id/estado', authorize('admin'), cambiarEstadoValidation, validate, conductorController.cambiarEstado);
+router.patch('/:id/toggle-habilitado', authorize('admin'), conductorController.toggleHabilitado);
 
 module.exports = router;
