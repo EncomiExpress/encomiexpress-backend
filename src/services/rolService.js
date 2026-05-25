@@ -13,7 +13,8 @@ const getAll = async () => {
   });
   return roles.map(rol => ({
     ...rol.toJSON(),
-    permisos: rol.permisos.map(p => p.nombre)
+    permisos: rol.permisos.map(p => p.nombre),
+    permisosIds: rol.permisos.map(p => p.idPermiso)
   }));
 };
 
@@ -34,7 +35,8 @@ const getById = async (id) => {
 
   return {
     ...rol.toJSON(),
-    permisos: rol.permisos.map(p => p.nombre)
+    permisos: rol.permisos.map(p => p.nombre),
+    permisosIds: rol.permisos.map(p => p.idPermiso)
   };
 };
 
@@ -72,7 +74,8 @@ const create = async (data) => {
 
   return {
     ...rolCreado.toJSON(),
-    permisos: rolCreado.permisos.map(p => p.nombre)
+    permisos: rolCreado.permisos.map(p => p.nombre),
+    permisosIds: rolCreado.permisos.map(p => p.idPermiso)
   };
 };
 
@@ -119,7 +122,31 @@ const update = async (id, data) => {
 
   return {
     ...rolActualizado.toJSON(),
-    permisos: rolActualizado.permisos.map(p => p.nombre)
+    permisos: rolActualizado.permisos.map(p => p.nombre),
+    permisosIds: rolActualizado.permisos.map(p => p.idPermiso)
+  };
+};
+
+const toggleHabilitado = async (id) => {
+  const rol = await Rol.findByPk(id, {
+    include: [
+      {
+        model: Permiso,
+        as: 'permisos',
+        through: { attributes: [] }
+      }
+    ]
+  });
+  if (!rol) {
+    throw new AppError('Rol no encontrado', 404);
+  }
+
+  await rol.update({ habilitado: !rol.habilitado });
+
+  return {
+    ...rol.toJSON(),
+    permisos: rol.permisos.map(p => p.nombre),
+    permisosIds: rol.permisos.map(p => p.idPermiso)
   };
 };
 
@@ -146,6 +173,7 @@ module.exports = {
   getById,
   create,
   update,
+  toggleHabilitado,
   delete: deleteRol,
   getAllPermisos
 };
