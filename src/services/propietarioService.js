@@ -111,6 +111,6 @@ module.exports = {
   getById,
   create,
   update,
-  getVehiculos
-  , toggleHabilitado
+  getVehiculos,
+  toggleHabilitado
 };

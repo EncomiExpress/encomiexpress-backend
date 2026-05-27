@@ -142,6 +142,7 @@ const toggleHabilitado = async (id) => {
   }
 
   await rol.update({ habilitado: !rol.habilitado });
+  await rol.reload();
 
   return {
     ...rol.toJSON(),
