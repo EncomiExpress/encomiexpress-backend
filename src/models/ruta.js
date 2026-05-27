@@ -8,6 +8,10 @@ const Ruta = sequelize.define('Ruta', {
     autoIncrement: true,
     field: 'idRuta'
   },
+  nombreRuta: {
+    type: DataTypes.STRING(150),
+    allowNull: true
+  },
   idVehiculo: {
     type: DataTypes.INTEGER,
     allowNull: false
@@ -20,12 +24,25 @@ const Ruta = sequelize.define('Ruta', {
     type: DataTypes.INTEGER,
     allowNull: false
   },
+  fechaSalida: {
+    type: DataTypes.DATEONLY,
+    allowNull: true
+  },
   horaSalida: {
     type: DataTypes.TIME,
     allowNull: true
   },
   horaLlegadaEstimada: {
     type: DataTypes.TIME,
+    allowNull: true
+  },
+  estado: {
+    type: DataTypes.STRING(30),
+    allowNull: false,
+    defaultValue: 'Programada'
+  },
+  observaciones: {
+    type: DataTypes.TEXT,
     allowNull: true
   },
   habilitado: {

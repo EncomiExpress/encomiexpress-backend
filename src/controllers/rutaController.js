@@ -25,7 +25,7 @@ exports.create = async (req, res) => {
     const ruta = await rutaService.create(req.body);
     res.status(201).json({ success: true, message: 'Ruta creada exitosamente', data: ruta });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message || 'Error al crear ruta', error: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al crear ruta' });
   }
 };
 
@@ -35,13 +35,26 @@ exports.update = async (req, res) => {
     const ruta = await rutaService.update(id, req.body);
     res.json({ success: true, message: 'Ruta actualizada exitosamente', data: ruta });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message || 'Error al actualizar ruta', error: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al actualizar ruta' });
   }
 };
 
 exports.remove = async (req, res) => {
-  // Método obsoleto: use PATCH /rutas/:id/toggle-habilitado
   res.status(405).json({ success: false, message: 'Método obsoleto. Use PATCH /rutas/:id/toggle-habilitado para inhabilitar/restaurar.' });
+};
+
+exports.updateEstado = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { estado } = req.body;
+    if (!estado) {
+      return res.status(400).json({ success: false, message: 'El campo "estado" es requerido' });
+    }
+    const ruta = await rutaService.updateEstado(id, estado);
+    res.json({ success: true, message: `Estado actualizado a "${ruta.estado}"`, data: ruta });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al actualizar estado' });
+  }
 };
 
 exports.getEncomiendas = async (req, res) => {
@@ -50,7 +63,7 @@ exports.getEncomiendas = async (req, res) => {
     const encomiendas = await rutaService.getEncomiendas(id);
     res.json({ success: true, data: encomiendas });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message || 'Error al obtener encomiendas', error: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al obtener encomiendas' });
   }
 };
 
@@ -60,7 +73,7 @@ exports.getAvailable = async (req, res) => {
     const rutas = await rutaService.getAvailable({ idDestino });
     res.json({ success: true, data: rutas });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message || 'Error al obtener rutas disponibles', error: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al obtener rutas disponibles' });
   }
 };
 
@@ -70,6 +83,6 @@ exports.toggleHabilitado = async (req, res) => {
     const ruta = await rutaService.toggleHabilitado(id);
     res.json({ success: true, message: `Ruta ${ruta.habilitado ? 'habilitada' : 'inhabilitada'} exitosamente`, data: ruta });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message || 'Error al cambiar estado de la ruta', error: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al cambiar estado de la ruta' });
   }
 };
