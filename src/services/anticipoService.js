@@ -195,6 +195,18 @@ const createMisAnticipo = async (idUsuario, rolNombre, data) => {
   return anticipo;
 };
 
+const cambiarEstado = async (id, estado) => {
+  const estadosValidos = ['pendiente', 'entregado', 'en legalización', 'legalizado', 'excedente pendiente', 'cerrado'];
+  if (!estadosValidos.includes(estado)) {
+    throw new AppError(`Estado inválido. Debe ser uno de: ${estadosValidos.join(', ')}`, 400);
+  }
+  const anticipo = await AnticipoExcedente.findByPk(id);
+  if (!anticipo) throw new AppError('Anticipo no encontrado', 404);
+  anticipo.estado = estado;
+  await anticipo.save();
+  return anticipo;
+};
+
 const updateSoporte = async (id, fileUrl) => {
   const anticipo = await AnticipoExcedente.findByPk(id);
   if (!anticipo) {
@@ -237,7 +249,7 @@ module.exports = {
   liquidar,
   entregarExcedente,
   createMisAnticipo,
-  updateSoporte
-  ,
+  updateSoporte,
+  cambiarEstado,
   toggleHabilitado
 };

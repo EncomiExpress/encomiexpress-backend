@@ -2,7 +2,20 @@ const { body } = require('express-validator');
 
 const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia', 'Nequi'];
 const ESTADOS_PAGO_VALIDOS = ['Pendiente', 'Pagado'];
-const ESTADOS_ENCOMIENDA_VALIDOS = ['Pendiente de Recogida', 'En Recogida', 'Programada', 'En Tránsito', 'Entregado', 'Devuelto', 'Activo', 'Inactivo'];
+
+// ⚠️ FIX: los estados deben estar en minúsculas porque el modelo los almacena
+// en minúsculas (ver encomiendaService.js → cambiarEstado → estado.toLowerCase())
+// y el frontend también los envía en minúsculas.
+const ESTADOS_ENCOMIENDA_VALIDOS = [
+  'pendiente de recogida',
+  'en recogida',
+  'programada',
+  'en tránsito',
+  'entregado',
+  'devuelto',
+  'activo',
+  'inactivo',
+];
 
 const createValidation = [
   body('idCliente').notEmpty().withMessage('Cliente es requerido'),
@@ -13,10 +26,16 @@ const createValidation = [
   body('observaciones').optional().isString().withMessage('Observaciones debe ser un texto'),
   body('valorServicio').optional().isFloat({ min: 0 }).withMessage('Valor del servicio debe ser un número positivo'),
   body('impuestos').optional().isFloat({ min: 0 }).withMessage('Impuestos debe ser un número positivo'),
-  body('metodoPago').optional().isIn(METODOS_PAGO_VALIDOS).withMessage(`Método de pago inválido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`),
-  body('estadoPago').optional().isIn(ESTADOS_PAGO_VALIDOS).withMessage(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`),
+  body('metodoPago')
+    .optional()
+    .isIn(METODOS_PAGO_VALIDOS)
+    .withMessage(`Método de pago inválido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`),
+  body('estadoPago')
+    .optional()
+    .isIn(ESTADOS_PAGO_VALIDOS)
+    .withMessage(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`),
   body('destinatario').optional().isObject().withMessage('Destinatario debe ser un objeto'),
-  body('paquetes').optional().isArray().withMessage('Paquetes debe ser un array')
+  body('paquetes').optional().isArray().withMessage('Paquetes debe ser un array'),
 ];
 
 const updateValidation = [
@@ -26,14 +45,25 @@ const updateValidation = [
   body('observaciones').optional(),
   body('valorServicio').optional().isFloat({ min: 0 }).withMessage('Valor del servicio debe ser un número positivo'),
   body('impuestos').optional().isFloat({ min: 0 }).withMessage('Impuestos debe ser un número positivo'),
-  body('metodoPago').optional().isIn(METODOS_PAGO_VALIDOS).withMessage(`Método de pago inválido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`),
-  body('estadoPago').optional().isIn(ESTADOS_PAGO_VALIDOS).withMessage(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`)
+  body('metodoPago')
+    .optional()
+    .isIn(METODOS_PAGO_VALIDOS)
+    .withMessage(`Método de pago inválido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`),
+  body('estadoPago')
+    .optional()
+    .isIn(ESTADOS_PAGO_VALIDOS)
+    .withMessage(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`),
 ];
 
 const cambiarEstadoValidation = [
   body('estado')
-    .notEmpty().withMessage('Estado es requerido')
-    .isIn(ESTADOS_ENCOMIENDA_VALIDOS).withMessage(`Estado inválido. Opciones: ${ESTADOS_ENCOMIENDA_VALIDOS.join(', ')}`)
+    .notEmpty()
+    .withMessage('Estado es requerido')
+    // ⚠️ FIX: normalizar a minúsculas antes de validar para aceptar
+    // tanto 'En Tránsito' como 'en tránsito'
+    .customSanitizer((value) => (typeof value === 'string' ? value.toLowerCase() : value))
+    .isIn(ESTADOS_ENCOMIENDA_VALIDOS)
+    .withMessage(`Estado inválido. Opciones: ${ESTADOS_ENCOMIENDA_VALIDOS.join(', ')}`),
 ];
 
 const agregarPaqueteValidation = [
@@ -42,13 +72,19 @@ const agregarPaqueteValidation = [
   body('alto').optional().isFloat({ min: 0 }),
   body('ancho').optional().isFloat({ min: 0 }),
   body('profundidad').optional().isFloat({ min: 0 }),
-  body('valorDeclarado').optional().isFloat({ min: 0 })
+  body('valorDeclarado').optional().isFloat({ min: 0 }),
 ];
 
 const agregarDestinatarioValidation = [
   body('nombreDestinatario').notEmpty().withMessage('Nombre del destinatario es requerido'),
-  body('telefonoDestinatario').optional().isMobilePhone().withMessage('Teléfono del destinatario inválido'),
-  body('direccionDestinatario').optional().isString().withMessage('Dirección del destinatario debe ser un texto')
+  body('telefonoDestinatario')
+    .optional()
+    .isMobilePhone()
+    .withMessage('Teléfono del destinatario inválido'),
+  body('direccionDestinatario')
+    .optional()
+    .isString()
+    .withMessage('Dirección del destinatario debe ser un texto'),
 ];
 
 module.exports = {
@@ -56,5 +92,5 @@ module.exports = {
   updateValidation,
   cambiarEstadoValidation,
   agregarPaqueteValidation,
-  agregarDestinatarioValidation
+  agregarDestinatarioValidation,
 };
