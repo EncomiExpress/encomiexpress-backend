@@ -6,7 +6,7 @@ const createValidation = [
   body('idDestino').notEmpty().withMessage('Destino es requerido'),
   body('fechaSalida').optional().isDate().withMessage('Fecha de salida inválida'),
   body('fechaLlegada').optional().isDate().withMessage('Fecha de llegada inválida'),
-  body('estado').optional().isIn(['programada', 'en curso', 'finalizada', 'cancelada']).withMessage('Estado de ruta inválido')
+  body('estado').optional().isIn(['Programada', 'En Curso', 'Finalizada', 'Cancelada']).withMessage('Estado de ruta inválido')
 ];
 
 const updateValidation = [
@@ -15,7 +15,7 @@ const updateValidation = [
   body('idDestino').optional().isInt().withMessage('ID de destino debe ser un número entero'),
   body('fechaSalida').optional().isDate().withMessage('Fecha de salida inválida'),
   body('fechaLlegada').optional().isDate().withMessage('Fecha de llegada inválida'),
-  body('estado').optional().isIn(['programada', 'en curso', 'finalizada', 'cancelada']).withMessage('Estado de ruta inválido')
+  body('estado').optional().isIn(['Programada', 'En Curso', 'Finalizada', 'Cancelada']).withMessage('Estado de ruta inválido')
 ];
 
 module.exports = {

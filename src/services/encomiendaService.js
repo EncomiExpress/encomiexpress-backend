@@ -4,7 +4,16 @@ const AppError = require('../errors/appError');
 const crypto = require('crypto');
 const { sendTrackingEmail } = require('../config/email');
 
-const ESTADOS_VALIDOS = ['Pendiente de Recogida', 'En Recogida', 'Programada', 'En Tránsito', 'Entregado', 'Devuelto', 'Activo', 'Inactivo'];
+const ESTADOS_VALIDOS = [
+  'pendiente de recogida',
+  'en recogida',
+  'programada',
+  'en tránsito',
+  'entregado',
+  'devuelto',
+  'activo',
+  'inactivo',
+];
 const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia', 'Nequi'];
 const ESTADOS_PAGO_VALIDOS = ['Pendiente', 'Pagado'];
 
@@ -16,7 +25,11 @@ const generarNumeroGuia = async () => {
 };
 
 const generarTokenSeguimiento = (numeroGuia) => {
-  return crypto.createHash('sha256').update(numeroGuia + (process.env.JWT_SECRET || 'secret')).digest('hex').substring(0, 32);
+  return crypto
+    .createHash('sha256')
+    .update(numeroGuia + (process.env.JWT_SECRET || 'secret'))
+    .digest('hex')
+    .substring(0, 32);
 };
 
 const getAll = async ({ estado, idCliente, fechaInicio, fechaFin }) => {
@@ -25,7 +38,7 @@ const getAll = async ({ estado, idCliente, fechaInicio, fechaFin }) => {
   if (idCliente) where.idCliente = idCliente;
   if (fechaInicio && fechaFin) {
     where.fechaRegistro = {
-      [sequelize.Sequelize.Op.between]: [fechaInicio, fechaFin]
+      [sequelize.Sequelize.Op.between]: [fechaInicio, fechaFin],
     };
   }
 
@@ -36,15 +49,16 @@ const getAll = async ({ estado, idCliente, fechaInicio, fechaFin }) => {
       {
         model: Ruta,
         as: 'ruta',
+        required: false,
         include: [
-          { model: Vehiculo, as: 'vehiculo' },
-          { model: Destino, as: 'destino' }
-        ]
+          { model: Vehiculo, as: 'vehiculo', required: false },
+          { model: Destino, as: 'destino', required: false },
+        ],
       },
       { model: Destinatario, as: 'destinatarios' },
-      { model: Paquete, as: 'paquetes' }
+      { model: Paquete, as: 'paquetes' },
     ],
-    order: [['fechaRegistro', 'DESC']]
+    order: [['fechaRegistro', 'DESC']],
   });
 
   return encomiendas;
@@ -57,15 +71,21 @@ const getById = async (id) => {
       {
         model: Ruta,
         as: 'ruta',
+        required: false,
         include: [
-          { model: Vehiculo, as: 'vehiculo' },
-          { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
-          { model: Destino, as: 'destino' }
-        ]
+          { model: Vehiculo, as: 'vehiculo', required: false },
+          {
+            model: Conductor,
+            as: 'conductor',
+            required: false,
+            include: [{ model: Usuario, as: 'usuario', required: false }],
+          },
+          { model: Destino, as: 'destino', required: false },
+        ],
       },
       { model: Destinatario, as: 'destinatarios' },
-      { model: Paquete, as: 'paquetes' }
-    ]
+      { model: Paquete, as: 'paquetes' },
+    ],
   });
 
   if (!encomienda) {
@@ -83,14 +103,15 @@ const getByGuia = async (numeroGuia) => {
       {
         model: Ruta,
         as: 'ruta',
+        required: false,
         include: [
-          { model: Vehiculo, as: 'vehiculo' },
-          { model: Destino, as: 'destino' }
-        ]
+          { model: Vehiculo, as: 'vehiculo', required: false },
+          { model: Destino, as: 'destino', required: false },
+        ],
       },
       { model: Destinatario, as: 'destinatarios' },
-      { model: Paquete, as: 'paquetes' }
-    ]
+      { model: Paquete, as: 'paquetes' },
+    ],
   });
 
   if (!encomienda) {
@@ -98,6 +119,45 @@ const getByGuia = async (numeroGuia) => {
   }
 
   return encomienda;
+};
+
+// ⚠️ FIX: función movida ANTES de module.exports para que sea accesible al exportar
+const getPublicByToken = async (token) => {
+  const encomienda = await EncomiendaVenta.findOne({
+    where: { tokenSeguimiento: token, habilitado: true },
+    include: [
+      { model: Cliente, as: 'cliente', attributes: ['nombre', 'apellido'] },
+      {
+        model: Ruta,
+        as: 'ruta',
+        required: false,
+        attributes: ['idRuta'],
+        include: [
+          { model: Destino, as: 'destino', required: false, attributes: ['ciudad', 'departamento'] },
+        ],
+      },
+      { model: Destinatario, as: 'destinatarios', limit: 1 },
+      { model: Paquete, as: 'paquetes', limit: 1 },
+    ],
+  });
+
+  if (!encomienda) throw new AppError('Encomienda no encontrada', 404);
+
+  return {
+    numeroGuia: encomienda.numeroGuia,
+    estado: encomienda.estado,
+    fechaRegistro: encomienda.fechaRegistro,
+    fechaEstimadaEntrega: encomienda.fechaEstimadaEntrega,
+    remitente: `${encomienda.cliente?.nombre || ''} ${encomienda.cliente?.apellido || ''}`.trim(),
+    destinatario:
+      encomienda.destinatarios && encomienda.destinatarios[0]
+        ? encomienda.destinatarios[0].nombreDestinatario
+        : null,
+    destino:
+      encomienda.ruta && encomienda.ruta.destino
+        ? `${encomienda.ruta.destino.ciudad} - ${encomienda.ruta.destino.departamento}`
+        : null,
+  };
 };
 
 const create = async (data) => {
@@ -115,7 +175,7 @@ const create = async (data) => {
       metodoPago,
       estadoPago,
       destinatario,
-      paquetes
+      paquetes,
     } = data;
 
     const cliente = await Cliente.findByPk(idCliente);
@@ -132,12 +192,18 @@ const create = async (data) => {
       }
     }
 
-    if (metodoPago && !METODOS_PAGO_VALIDOS.some(v => v.toLowerCase() === metodoPago.toLowerCase())) {
+    if (
+      metodoPago &&
+      !METODOS_PAGO_VALIDOS.some((v) => v.toLowerCase() === metodoPago.toLowerCase())
+    ) {
       await transaction.rollback();
       throw new AppError(`Método de pago inválido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`, 400);
     }
 
-    if (estadoPago && !ESTADOS_PAGO_VALIDOS.some(v => v.toLowerCase() === estadoPago.toLowerCase())) {
+    if (
+      estadoPago &&
+      !ESTADOS_PAGO_VALIDOS.some((v) => v.toLowerCase() === estadoPago.toLowerCase())
+    ) {
       await transaction.rollback();
       throw new AppError(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
     }
@@ -151,45 +217,53 @@ const create = async (data) => {
 
     const valorImpuestos = impuestos || 0;
     const total = (valorServicio || 0) + valorImpuestos;
-
     const tokenSeguimiento = generarTokenSeguimiento(numeroGuia);
 
-    const encomienda = await EncomiendaVenta.create({
-      idCliente,
-      idRuta,
-      tokenSeguimiento,
-      numeroGuia,
-      numeroFactura: numeroFactura || null,
-      fechaEstimadaEntrega: fechaEstimadaEntrega || null,
-      observaciones: observaciones || null,
-      valorServicio: valorServicio || 0,
-      impuestos: valorImpuestos,
-      total,
-      metodoPago: metodoPago || null,
-      estadoPago: estadoPago || 'pendiente',
-      estado: 'pendiente de recogida'
-    }, { transaction });
+    const encomienda = await EncomiendaVenta.create(
+      {
+        idCliente,
+        idRuta: idRuta || null,
+        tokenSeguimiento,
+        numeroGuia,
+        numeroFactura: numeroFactura || null,
+        fechaEstimadaEntrega: fechaEstimadaEntrega || null,
+        observaciones: observaciones || null,
+        valorServicio: valorServicio || 0,
+        impuestos: valorImpuestos,
+        total,
+        metodoPago: metodoPago || null,
+        estadoPago: estadoPago || 'Pendiente',
+        estado: 'pendiente de recogida',
+      },
+      { transaction }
+    );
 
     if (destinatario) {
-      await Destinatario.create({
-        idEncomiendaVenta: encomienda.idEncomiendaVenta,
-        nombreDestinatario: destinatario.nombreDestinatario,
-        telefonoDestinatario: destinatario.telefonoDestinatario || null,
-        direccionDestinatario: destinatario.direccionDestinatario || null
-      }, { transaction });
+      await Destinatario.create(
+        {
+          idEncomiendaVenta: encomienda.idEncomiendaVenta,
+          nombreDestinatario: destinatario.nombreDestinatario,
+          telefonoDestinatario: destinatario.telefonoDestinatario || null,
+          direccionDestinatario: destinatario.direccionDestinatario || null,
+        },
+        { transaction }
+      );
     }
 
     if (paquetes && paquetes.length > 0) {
       for (const pkg of paquetes) {
-        await Paquete.create({
-          idEncomiendaVenta: encomienda.idEncomiendaVenta,
-          descripcionContenido: pkg.descripcionContenido || null,
-          peso: pkg.peso || null,
-          alto: pkg.alto || null,
-          ancho: pkg.ancho || null,
-          profundidad: pkg.profundidad || null,
-          valorDeclarado: pkg.valorDeclarado || null
-        }, { transaction });
+        await Paquete.create(
+          {
+            idEncomiendaVenta: encomienda.idEncomiendaVenta,
+            descripcionContenido: pkg.descripcionContenido || null,
+            peso: pkg.peso || null,
+            alto: pkg.alto || null,
+            ancho: pkg.ancho || null,
+            profundidad: pkg.profundidad || null,
+            valorDeclarado: pkg.valorDeclarado || null,
+          },
+          { transaction }
+        );
       }
     }
 
@@ -198,13 +272,12 @@ const create = async (data) => {
     const encomiendaCompleta = await EncomiendaVenta.findByPk(encomienda.idEncomiendaVenta, {
       include: [
         { model: Cliente, as: 'cliente' },
-        { model: Ruta, as: 'ruta' },
+        { model: Ruta, as: 'ruta', required: false },
         { model: Destinatario, as: 'destinatarios' },
-        { model: Paquete, as: 'paquetes' }
-      ]
+        { model: Paquete, as: 'paquetes' },
+      ],
     });
 
-    // Enviar correo de seguimiento si el cliente tiene email
     try {
       const clienteEmail = cliente.email || null;
       if (clienteEmail) {
@@ -236,7 +309,7 @@ const update = async (id, data) => {
       estadoPago,
       habilitado,
       destinatario,
-      paquetes
+      paquetes,
     } = data;
 
     const encomienda = await EncomiendaVenta.findByPk(id);
@@ -246,23 +319,31 @@ const update = async (id, data) => {
       throw new AppError('Encomienda no encontrada', 404);
     }
 
-    if (metodoPago && !METODOS_PAGO_VALIDOS.some(v => v.toLowerCase() === metodoPago.toLowerCase())) {
+    if (
+      metodoPago &&
+      !METODOS_PAGO_VALIDOS.some((v) => v.toLowerCase() === metodoPago.toLowerCase())
+    ) {
       throw new AppError(`Método de pago inválido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`, 400);
     }
 
-    if (estadoPago && !ESTADOS_PAGO_VALIDOS.some(v => v.toLowerCase() === estadoPago.toLowerCase())) {
+    if (
+      estadoPago &&
+      !ESTADOS_PAGO_VALIDOS.some((v) => v.toLowerCase() === estadoPago.toLowerCase())
+    ) {
       throw new AppError(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
     }
 
     const parseDecimal = (value) => {
       if (value === undefined || value === null || value === '') return 0;
-      return typeof value === 'number'
-        ? value
-        : parseFloat(String(value).replace(',', '.')) || 0;
+      return typeof value === 'number' ? value : parseFloat(String(value).replace(',', '.')) || 0;
     };
 
-    const nuevoImpuestos = impuestos !== undefined ? parseDecimal(impuestos) : parseDecimal(encomienda.impuestos);
-    const nuevoValorServicio = valorServicio !== undefined ? parseDecimal(valorServicio) : parseDecimal(encomienda.valorServicio);
+    const nuevoImpuestos =
+      impuestos !== undefined ? parseDecimal(impuestos) : parseDecimal(encomienda.impuestos);
+    const nuevoValorServicio =
+      valorServicio !== undefined
+        ? parseDecimal(valorServicio)
+        : parseDecimal(encomienda.valorServicio);
     const nuevoTotal = nuevoImpuestos + nuevoValorServicio;
 
     let nuevoIdRuta = encomienda.idRuta;
@@ -274,37 +355,50 @@ const update = async (id, data) => {
       }
     }
 
-    await encomienda.update({
-      idRuta: nuevoIdRuta,
-      numeroFactura: numeroFactura !== undefined ? numeroFactura : encomienda.numeroFactura,
-      fechaEstimadaEntrega: fechaEstimadaEntrega !== undefined ? fechaEstimadaEntrega : encomienda.fechaEstimadaEntrega,
-      observaciones: observaciones !== undefined ? observaciones : encomienda.observaciones,
-      valorServicio: nuevoValorServicio,
-      impuestos: nuevoImpuestos,
-      total: nuevoTotal,
-      metodoPago: metodoPago !== undefined ? metodoPago : encomienda.metodoPago,
-      estadoPago: estadoPago !== undefined ? estadoPago : encomienda.estadoPago,
-      habilitado: habilitado !== undefined ? habilitado : encomienda.habilitado
-    }, { transaction });
+    await encomienda.update(
+      {
+        idRuta: nuevoIdRuta,
+        numeroFactura: numeroFactura !== undefined ? numeroFactura : encomienda.numeroFactura,
+        fechaEstimadaEntrega:
+          fechaEstimadaEntrega !== undefined
+            ? fechaEstimadaEntrega
+            : encomienda.fechaEstimadaEntrega,
+        observaciones: observaciones !== undefined ? observaciones : encomienda.observaciones,
+        valorServicio: nuevoValorServicio,
+        impuestos: nuevoImpuestos,
+        total: nuevoTotal,
+        metodoPago: metodoPago !== undefined ? metodoPago : encomienda.metodoPago,
+        estadoPago: estadoPago !== undefined ? estadoPago : encomienda.estadoPago,
+        habilitado: habilitado !== undefined ? habilitado : encomienda.habilitado,
+      },
+      { transaction }
+    );
 
     if (destinatario) {
       const destinatarioExistente = await Destinatario.findOne({
-        where: { idEncomiendaVenta: id }
+        where: { idEncomiendaVenta: id },
       });
 
       if (destinatarioExistente) {
-        await destinatarioExistente.update({
-          nombreDestinatario: destinatario.nombreDestinatario || destinatarioExistente.nombreDestinatario,
-          telefonoDestinatario: destinatario.telefonoDestinatario || null,
-          direccionDestinatario: destinatario.direccionDestinatario || null
-        }, { transaction });
+        await destinatarioExistente.update(
+          {
+            nombreDestinatario:
+              destinatario.nombreDestinatario || destinatarioExistente.nombreDestinatario,
+            telefonoDestinatario: destinatario.telefonoDestinatario || null,
+            direccionDestinatario: destinatario.direccionDestinatario || null,
+          },
+          { transaction }
+        );
       } else {
-        await Destinatario.create({
-          idEncomiendaVenta: id,
-          nombreDestinatario: destinatario.nombreDestinatario,
-          telefonoDestinatario: destinatario.telefonoDestinatario || null,
-          direccionDestinatario: destinatario.direccionDestinatario || null
-        }, { transaction });
+        await Destinatario.create(
+          {
+            idEncomiendaVenta: id,
+            nombreDestinatario: destinatario.nombreDestinatario,
+            telefonoDestinatario: destinatario.telefonoDestinatario || null,
+            direccionDestinatario: destinatario.direccionDestinatario || null,
+          },
+          { transaction }
+        );
       }
     }
 
@@ -312,15 +406,18 @@ const update = async (id, data) => {
       await Paquete.destroy({ where: { idEncomiendaVenta: id }, transaction });
 
       for (const pkg of paquetes) {
-        await Paquete.create({
-          idEncomiendaVenta: id,
-          descripcionContenido: pkg.descripcionContenido || null,
-          peso: pkg.peso || null,
-          alto: pkg.alto || null,
-          ancho: pkg.ancho || null,
-          profundidad: pkg.profundidad || null,
-          valorDeclarado: pkg.valorDeclarado || null
-        }, { transaction });
+        await Paquete.create(
+          {
+            idEncomiendaVenta: id,
+            descripcionContenido: pkg.descripcionContenido || null,
+            peso: pkg.peso || null,
+            alto: pkg.alto || null,
+            ancho: pkg.ancho || null,
+            profundidad: pkg.profundidad || null,
+            valorDeclarado: pkg.valorDeclarado || null,
+          },
+          { transaction }
+        );
       }
     }
 
@@ -331,8 +428,8 @@ const update = async (id, data) => {
         { model: Cliente, as: 'cliente' },
         { model: Ruta, as: 'ruta', required: false },
         { model: Destinatario, as: 'destinatarios' },
-        { model: Paquete, as: 'paquetes' }
-      ]
+        { model: Paquete, as: 'paquetes' },
+      ],
     });
 
     return encomiendaActualizada;
@@ -349,11 +446,14 @@ const cambiarEstado = async (id, estado) => {
     throw new AppError('Encomienda no encontrada', 404);
   }
 
-  if (!ESTADOS_VALIDOS.some(v => v.toLowerCase() === estado.toLowerCase())) {
+  // Normalizar a minúsculas para comparación consistente
+  const estadoNormalizado = typeof estado === 'string' ? estado.toLowerCase() : estado;
+
+  if (!ESTADOS_VALIDOS.includes(estadoNormalizado)) {
     throw new AppError(`Estado inválido. Opciones: ${ESTADOS_VALIDOS.join(', ')}`, 400);
   }
 
-  await encomienda.update({ estado: estado.toLowerCase() });
+  await encomienda.update({ estado: estadoNormalizado });
 
   return encomienda;
 };
@@ -385,22 +485,15 @@ const toggleHabilitado = async (id) => {
       { model: Cliente, as: 'cliente' },
       { model: Destinatario, as: 'destinatarios' },
       { model: Paquete, as: 'paquetes' },
-      { model: Ruta, as: 'ruta', required: false }
-    ]
+      { model: Ruta, as: 'ruta', required: false },
+    ],
   });
 
   return encomiendaActualizada;
 };
 
 const agregarPaquete = async (idEncomiendaVenta, data) => {
-  const {
-    descripcionContenido,
-    peso,
-    alto,
-    ancho,
-    profundidad,
-    valorDeclarado
-  } = data;
+  const { descripcionContenido, peso, alto, ancho, profundidad, valorDeclarado } = data;
 
   const encomienda = await EncomiendaVenta.findByPk(idEncomiendaVenta);
 
@@ -415,18 +508,14 @@ const agregarPaquete = async (idEncomiendaVenta, data) => {
     alto: alto || null,
     ancho: ancho || null,
     profundidad: profundidad || null,
-    valorDeclarado: valorDeclarado || null
+    valorDeclarado: valorDeclarado || null,
   });
 
   return paquete;
 };
 
 const agregarDestinatario = async (idEncomiendaVenta, data) => {
-  const {
-    nombreDestinatario,
-    telefonoDestinatario,
-    direccionDestinatario
-  } = data;
+  const { nombreDestinatario, telefonoDestinatario, direccionDestinatario } = data;
 
   const encomienda = await EncomiendaVenta.findByPk(idEncomiendaVenta);
 
@@ -438,7 +527,7 @@ const agregarDestinatario = async (idEncomiendaVenta, data) => {
     idEncomiendaVenta,
     nombreDestinatario,
     telefonoDestinatario: telefonoDestinatario || null,
-    direccionDestinatario: direccionDestinatario || null
+    direccionDestinatario: direccionDestinatario || null,
   });
 
   return destinatario;
@@ -449,33 +538,12 @@ module.exports = {
   getAll,
   getById,
   getByGuia,
+  getPublicByToken, // ⚠️ FIX: ahora sí se exporta correctamente
   create,
   update,
   cambiarEstado,
   delete: deleteEncomienda,
   toggleHabilitado,
   agregarPaquete,
-  agregarDestinatario
-};
-
-const getPublicByToken = async (token) => {
-  const encomienda = await EncomiendaVenta.findOne({
-    where: { tokenSeguimiento: token, habilitado: true },
-    include: [
-      { model: Cliente, as: 'cliente', attributes: ['nombre', 'apellido'] },
-      { model: Ruta, as: 'ruta', attributes: ['idRuta'], include: [{ model: Destino, as: 'destino', attributes: ['ciudad', 'departamento'] }] },
-      { model: Destinatario, as: 'destinatarios', limit: 1 },
-      { model: Paquete, as: 'paquetes', limit: 1 }
-    ]
-  });
-  if (!encomienda) throw new AppError('Encomienda no encontrada', 404);
-  return {
-    numeroGuia: encomienda.numeroGuia,
-    estado: encomienda.estado,
-    fechaRegistro: encomienda.fechaRegistro,
-    fechaEstimadaEntrega: encomienda.fechaEstimadaEntrega,
-    remitente: `${encomienda.cliente?.nombre || ''} ${encomienda.cliente?.apellido || ''}`.trim(),
-    destinatario: encomienda.destinatarios && encomienda.destinatarios[0] ? encomienda.destinatarios[0].nombreDestinatario : null,
-    destino: encomienda.ruta && encomienda.ruta.destino ? `${encomienda.ruta.destino.ciudad} - ${encomienda.ruta.destino.departamento}` : null
-  };
+  agregarDestinatario,
 };

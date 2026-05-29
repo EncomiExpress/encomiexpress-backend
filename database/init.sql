@@ -109,8 +109,12 @@ CREATE TABLE "ruta" (
   "idVehiculo" INTEGER NOT NULL,
   "idConductor" INTEGER NOT NULL,
   "idDestino" INTEGER NOT NULL,
+  "nombreRuta" VARCHAR(150),
   "horaSalida" TIME,
   "horaLlegadaEstimada" TIME,
+  "fechaSalida" DATE,
+  "estado" VARCHAR(30) NOT NULL DEFAULT 'Programada',
+  "observaciones" TEXT,
   "habilitado" BOOLEAN NOT NULL DEFAULT true,
   "fechaCreacion" DATE NOT NULL DEFAULT CURRENT_DATE
 );
@@ -177,6 +181,7 @@ COMMENT ON COLUMN "permiso"."nombre" IS 'ej: clientes, encomiendas, vehiculos';
 COMMENT ON COLUMN "usuario"."password" IS 'hash bcrypt';
 COMMENT ON COLUMN "vehiculo"."placa" IS 'Colombia: 6 chars';
 COMMENT ON COLUMN "anticipoExcedente"."soporte" IS 'URL Cloudinary';
+COMMENT ON COLUMN "ruta"."estado" IS 'Programada | En Curso | Completada | Cancelada';
 COMMENT ON COLUMN "encomiendaVenta"."estado" IS 'pendiente de recogida | en recogida | programada | en tránsito | entregado | devuelto';
 COMMENT ON COLUMN "encomiendaVenta"."tokenSeguimiento" IS 'Token único para seguimiento público vía enlace';
 

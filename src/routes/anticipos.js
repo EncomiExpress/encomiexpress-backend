@@ -28,6 +28,9 @@ router.post('/:id/soporte', authenticate, authorize('admin', 'conductor'),
   anticipoController.updateSoporte
 );
 
+// Cambiar estado del anticipo
+router.patch('/:id/estado', authenticate, authorize('admin', 'conductor'), authorizePermission('actualizar_anticipo'), anticipoController.cambiarEstado);
+
 // Toggle habilitado
 router.patch('/:id/toggle-habilitado', authenticate, authorize('admin'), authorizePermission('actualizar_anticipo'), anticipoController.toggleHabilitado);
 

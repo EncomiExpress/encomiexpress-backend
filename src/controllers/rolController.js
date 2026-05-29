@@ -38,6 +38,20 @@ const update = async (req, res, next) => {
   }
 };
 
+const toggleHabilitado = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const rol = await rolService.toggleHabilitado(id);
+    res.json({
+      success: true,
+      message: `Rol ${rol.habilitado ? 'habilitado' : 'inhabilitado'} correctamente`,
+      data: rol
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 const deleteRol = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -62,6 +76,7 @@ module.exports = {
   getById,
   create,
   update,
+  toggleHabilitado,
   delete: deleteRol,
   getAllPermisos
 };

@@ -229,6 +229,6 @@ module.exports = {
   update,
   getRutas,
   cambiarEstado,
-  assignDriver
-  , toggleHabilitado
+  assignDriver,
+  toggleHabilitado
 };
