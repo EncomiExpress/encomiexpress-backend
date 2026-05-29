@@ -63,6 +63,13 @@ const create = async (data) => {
     idRutaFinal = ruta.idRuta;
   }
 
+  const cleanDate = (value) => {
+    if (value === null || value === '' || value === 'Invalid date') {
+      return null;
+    }
+    return value;
+  };
+
   const anticipo = await AnticipoExcedente.create({
     idConductor,
     idRuta: idRutaFinal,
@@ -71,7 +78,7 @@ const create = async (data) => {
     excedente: 0,
     estado: 'pendiente',
     soporte,
-    fechaEntrega
+    fechaEntrega: cleanDate(fechaEntrega)
   });
 
   return anticipo;
@@ -99,14 +106,28 @@ const update = async (id, data) => {
     newExcedente = anticipo.valorAnticipo - valorGastado;
   }
 
+  const cleanDate = (value) => {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (value === null || value === '' || value === 'Invalid date') {
+      return null;
+    }
+    return value;
+  };
+
+  const cleanedFechaEntrega = cleanDate(fechaEntrega);
+  const cleanedFechaLegalizacion = cleanDate(fechaLegalizacion);
+  const cleanedFechaEntregaExcedente = cleanDate(fechaEntregaExcedente);
+
   await anticipo.update({
     valorGastado: valorGastado !== undefined ? valorGastado : anticipo.valorGastado,
     excedente: newExcedente !== undefined ? newExcedente : anticipo.excedente,
     estado: estado || anticipo.estado,
     soporte: soporte !== undefined ? soporte : anticipo.soporte,
-    fechaEntrega: fechaEntrega !== undefined ? fechaEntrega : anticipo.fechaEntrega,
-    fechaLegalizacion: fechaLegalizacion !== undefined ? fechaLegalizacion : anticipo.fechaLegalizacion,
-    fechaEntregaExcedente: fechaEntregaExcedente !== undefined ? fechaEntregaExcedente : anticipo.fechaEntregaExcedente
+    fechaEntrega: cleanedFechaEntrega !== undefined ? cleanedFechaEntrega : anticipo.fechaEntrega,
+    fechaLegalizacion: cleanedFechaLegalizacion !== undefined ? cleanedFechaLegalizacion : anticipo.fechaLegalizacion,
+    fechaEntregaExcedente: cleanedFechaEntregaExcedente !== undefined ? cleanedFechaEntregaExcedente : anticipo.fechaEntregaExcedente
   });
 
   return anticipo;
@@ -181,6 +202,13 @@ const createMisAnticipo = async (idUsuario, rolNombre, data) => {
     idRutaFinal = ruta.idRuta;
   }
 
+  const cleanDate = (value) => {
+    if (value === null || value === '' || value === 'Invalid date') {
+      return null;
+    }
+    return value;
+  };
+
   const anticipo = await AnticipoExcedente.create({
     idConductor: conductor.idConductor,
     idRuta: idRutaFinal,
@@ -189,7 +217,7 @@ const createMisAnticipo = async (idUsuario, rolNombre, data) => {
     excedente: 0,
     estado: 'pendiente',
     soporte,
-    fechaEntrega
+    fechaEntrega: cleanDate(fechaEntrega)
   });
 
   return anticipo;
