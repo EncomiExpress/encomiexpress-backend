@@ -13,7 +13,6 @@ const authenticate = async (req, res, next) => {
     const token = authHeader.split(' ')[1];
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const { Op } = require('sequelize');
 
     const usuario = await Usuario.findByPk(decoded.idUsuario, {
       include: [
@@ -51,11 +50,6 @@ const authorize = (...roles) => {
       });
     }
 
-    // 👇 LOG TEMPORAL — quitar después de diagnosticar
-    console.log('🔐 Rol del usuario:', req.usuario.rol?.nombre);
-    console.log('🔐 Roles permitidos:', roles);
-    console.log('🔐 Tiene acceso:', roles.includes(req.usuario.rol?.nombre));
-
     if (!roles.includes(req.usuario.rol?.nombre)) {
       return res.status(403).json({
         success: false,
@@ -77,10 +71,6 @@ const authorizePermission = (permiso) => {
     }
 
     const permisos = req.usuario.rol?.permisos?.map(p => p.nombre);
-
-    // 👇 LOG TEMPORAL — quitar después de diagnosticar
-    console.log('🛡️ Permiso requerido:', permiso);
-    console.log('🛡️ Permisos del usuario:', permisos);
 
     if (!permisos?.includes(permiso)) {
       return res.status(403).json({
