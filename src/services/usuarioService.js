@@ -13,13 +13,34 @@ const buildOrder = (sortBy) => {
   return [[field, direction]];
 };
 
-const getAll = async ({ page = 1, limit = 10, sortBy } = {}) => {
+const getAll = async ({ habilitado, idRol, q, page = 1, limit = 10, sortBy } = {}) => {
+  const where = {};
+  if (habilitado !== undefined) where.habilitado = habilitado === 'true';
+  if (idRol !== undefined) where.idRol = idRol;
+  if (q) {
+    const query = `%${q.trim()}%`;
+    const numericId = Number(q);
+    const conditions = [
+      { nombre: { [Op.iLike]: query } },
+      { apellido: { [Op.iLike]: query } },
+      { email: { [Op.iLike]: query } },
+      { tipoIdentificacion: { [Op.iLike]: query } },
+      { numeroIdentificacion: { [Op.iLike]: query } },
+      { '$rol.nombre$': { [Op.iLike]: query } },
+    ];
+    if (!Number.isNaN(numericId)) {
+      conditions.unshift({ idUsuario: numericId });
+    }
+    where[Op.or] = conditions;
+  }
+
   const offset = (page - 1) * limit;
 
   const include = [{ model: Rol, as: 'rol' }];
   const order = buildOrder(sortBy);
 
   const { count, rows: data } = await Usuario.findAndCountAll({
+    where,
     include,
     attributes: { exclude: ['password'] },
     limit,

@@ -5,7 +5,8 @@ const listarClientes = async (req, res, next) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const sortBy = req.query.sortBy;
-    const result = await clienteService.getAll({ page, limit, sortBy });
+    const { habilitado, q } = req.query;
+    const result = await clienteService.getAll({ page, limit, sortBy, habilitado, q });
     res.json({ success: true, data: result.data, total: result.total });
   } catch (error) {
     next(error);

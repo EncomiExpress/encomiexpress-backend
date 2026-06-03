@@ -12,10 +12,27 @@ const buildOrder = (sortBy) => {
   return [[field, direction]];
 };
 
-const getAll = async ({ estado, habilitado, page = 1, limit = 10, sortBy } = {}) => {
+const getAll = async ({ estado, habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
   const where = {};
   if (estado) where.estado = estado;
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
+  if (q) {
+    const query = `%${q.trim()}%`;
+    const numericId = Number(q);
+    const conditions = [
+      { nombre: { [Op.iLike]: query } },
+      { apellido: { [Op.iLike]: query } },
+      { categoriaLicencia: { [Op.iLike]: query } },
+      { numeroLicencia: { [Op.iLike]: query } },
+      { '$usuario.email$': { [Op.iLike]: query } },
+      { '$usuario.tipoIdentificacion$': { [Op.iLike]: query } },
+      { '$usuario.numeroIdentificacion$': { [Op.iLike]: query } },
+    ];
+    if (!Number.isNaN(numericId)) {
+      conditions.unshift({ idConductor: numericId });
+    }
+    where[Op.or] = conditions;
+  }
 
   const offset = (page - 1) * limit;
   const order = buildOrder(sortBy);

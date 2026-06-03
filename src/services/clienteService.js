@@ -18,10 +18,30 @@ const buildOrder = (sortBy) => {
   return [[field, direction]];
 };
 
-const getAll = async ({ page = 1, limit = 10, sortBy } = {}) => {
+const getAll = async ({ habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
+  const where = {};
+  if (habilitado !== undefined) where.habilitado = habilitado === 'true';
+  if (q) {
+    const query = `%${q.trim()}%`;
+    const numericId = Number(q);
+    const conditions = [
+      { nombre: { [Op.iLike]: query } },
+      { apellido: { [Op.iLike]: query } },
+      { email: { [Op.iLike]: query } },
+      { direccion: { [Op.iLike]: query } },
+      { tipoIdentificacion: { [Op.iLike]: query } },
+      { numeroIdentificacion: { [Op.iLike]: query } },
+    ];
+    if (!Number.isNaN(numericId)) {
+      conditions.unshift({ idCliente: numericId });
+    }
+    where[Op.or] = conditions;
+  }
+
   const offset = (page - 1) * limit;
   const order = buildOrder(sortBy);
   const { count, rows: data } = await Cliente.findAndCountAll({
+    where,
     limit,
     offset,
     order: order.length > 0 ? order : [['nombre', 'ASC']],
