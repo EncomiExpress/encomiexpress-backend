@@ -3,17 +3,33 @@ const bcrypt = require('bcryptjs');
 const AppError = require('../errors/appError');
 const { tieneRutasActivas, tieneVehiculosActivos, tieneAnticiposPendientes } = require('../middlewares/validateDependencies');
 
-const getAll = async ({ estado, habilitado }) => {
+const buildOrder = (sortBy) => {
+  if (!sortBy) return [];
+  const allowed = ['nombre', 'apellido', 'estado', 'idConductor', 'habilitado'];
+  const parts = sortBy.split('.');
+  const field = allowed.includes(parts[0]) ? parts[0] : 'idConductor';
+  const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
+  return [[field, direction]];
+};
+
+const getAll = async ({ estado, habilitado, page = 1, limit = 10, sortBy } = {}) => {
   const where = {};
   if (estado) where.estado = estado;
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
 
-  const conductores = await Conductor.findAll({
+  const offset = (page - 1) * limit;
+  const order = buildOrder(sortBy);
+
+  const { count, rows: data } = await Conductor.findAndCountAll({
     where,
-    include: [{ model: Usuario, as: 'usuario' }]
+    include: [{ model: Usuario, as: 'usuario' }],
+    limit,
+    offset,
+    order: order.length > 0 ? order : [['idConductor', 'ASC']],
+    distinct: true,
   });
 
-  return conductores;
+  return { data, total: count };
 };
 
 const getById = async (id) => {

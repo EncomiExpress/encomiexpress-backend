@@ -1,17 +1,34 @@
-const bcrypt = require('bcryptjs');
 const { Usuario, Rol } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { Conductor, Cliente } = require('../models');
 const { tieneRutasActivas, tieneVehiculosActivos, tieneAnticiposPendientes, tieneEncomiendasActivasPorCliente } = require('../middlewares/validateDependencies');
 
-const getAll = async () => {
-  const usuarios = await Usuario.findAll({
-    include: [{ model: Rol, as: 'rol' }],
-    attributes: { exclude: ['password'] }
+const buildOrder = (sortBy) => {
+  if (!sortBy) return [];
+  const allowed = ['nombre', 'apellido', 'email', 'idUsuario', 'habilitado'];
+  const parts = sortBy.split('.');
+  const field = allowed.includes(parts[0]) ? parts[0] : 'idUsuario';
+  const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
+  return [[field, direction]];
+};
+
+const getAll = async ({ page = 1, limit = 10, sortBy } = {}) => {
+  const offset = (page - 1) * limit;
+
+  const include = [{ model: Rol, as: 'rol' }];
+  const order = buildOrder(sortBy);
+
+  const { count, rows: data } = await Usuario.findAndCountAll({
+    include,
+    attributes: { exclude: ['password'] },
+    limit,
+    offset,
+    order: order.length > 0 ? order : [['idUsuario', 'ASC']],
+    distinct: true,
   });
 
-  return usuarios;
+  return { data, total: count };
 };
 
 const getById = async (id) => {
@@ -69,7 +86,6 @@ const update = async (id, data) => {
     throw new AppError('Usuario no encontrado', 404);
   }
 
-  // Evitar inhabilitar al usuario administrador
   try {
     const rol = await Rol.findByPk(usuario.idRol);
     if (rol && String(rol.nombre).toLowerCase() === 'admin') {
@@ -111,7 +127,6 @@ const update = async (id, data) => {
   };
 };
 
-
 const changePassword = async (id, { currentPassword, newPassword }) => {
   const usuario = await Usuario.findByPk(id);
 
@@ -141,7 +156,6 @@ const toggleHabilitado = async (id, currentUserId) => {
   }
 
   if (usuario.habilitado === true) {
-    // Si el usuario está asociado a un conductor, validar dependencias activas
     const conductor = await Conductor.findOne({ where: { idUsuario: usuario.idUsuario } });
     if (conductor) {
       const rutasActivas = await tieneRutasActivas(conductor.idConductor);
@@ -153,7 +167,6 @@ const toggleHabilitado = async (id, currentUserId) => {
       const anticiposPendientes = await tieneAnticiposPendientes(conductor.idConductor);
       if (anticiposPendientes) throw new AppError('No se puede inhabilitar el usuario porque el conductor asociado tiene anticipos pendientes', 400);
     }
-    // Si el usuario corresponde a un cliente (mismo número de identificación), validar encomiendas activas
     try {
       const cliente = await Cliente.findOne({ where: { numeroIdentificacion: usuario.numeroIdentificacion } });
       if (cliente) {

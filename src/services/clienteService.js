@@ -3,11 +3,31 @@ const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { tieneEncomiendasActivasPorCliente } = require('../middlewares/validateDependencies');
 
-const getAll = async () => {
-  const clientes = await Cliente.findAll({
-    order: [['nombre', 'ASC']]
+const buildOrder = (sortBy) => {
+  if (!sortBy) return [];
+  const allowedFields = {
+    nombre: 'nombre',
+    apellido: 'apellido',
+    tipoIdentificacion: 'tipoIdentificacion',
+    numeroIdentificacion: 'numeroIdentificacion',
+    habilitado: 'habilitado',
+  };
+  const parts = sortBy.split('.');
+  const field = allowedFields[parts[0]] || 'nombre';
+  const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
+  return [[field, direction]];
+};
+
+const getAll = async ({ page = 1, limit = 10, sortBy } = {}) => {
+  const offset = (page - 1) * limit;
+  const order = buildOrder(sortBy);
+  const { count, rows: data } = await Cliente.findAndCountAll({
+    limit,
+    offset,
+    order: order.length > 0 ? order : [['nombre', 'ASC']],
+    distinct: true,
   });
-  return clientes;
+  return { data, total: count };
 };
 
 const getById = async (id) => {

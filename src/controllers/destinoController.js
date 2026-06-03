@@ -3,9 +3,18 @@ const destinoService = require('../services/destinoService');
 
 exports.getAll = async (req, res, next) => {
   try {
-    const filters = { habilitado: req.query.habilitado };
-    const destinos = await destinoService.getAll(filters);
-    res.json({ success: true, data: destinos });
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const sortBy = req.query.sortBy;
+    const filters = {
+      habilitado: req.query.habilitado,
+      q: req.query.q,
+      page,
+      limit,
+      sortBy,
+    };
+    const result = await destinoService.getAll(filters);
+    res.json({ success: true, data: result.data, total: result.total });
   } catch (error) {
     next(error);
   }

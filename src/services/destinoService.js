@@ -1,13 +1,40 @@
 const { Destino, Ruta } = require('../models');
 const AppError = require('../errors/appError');
 const { tieneRutasActivasPorDestino } = require('../middlewares/validateDependencies');
+const { Op } = require('sequelize');
 
-const getAll = async ({ habilitado }) => {
+const buildOrder = (sortBy) => {
+  if (!sortBy) return [];
+  const allowed = ['ciudad', 'departamento', 'idDestino', 'habilitado'];
+  const parts = sortBy.split('.');
+  const field = allowed.includes(parts[0]) ? parts[0] : 'idDestino';
+  const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
+  return [[field, direction]];
+};
+
+const getAll = async ({ habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
   const where = {};
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
+  if (q) {
+    const query = `%${q.trim()}%`;
+    where[Op.or] = [
+      { ciudad: { [Op.iLike]: query } },
+      { departamento: { [Op.iLike]: query } },
+    ];
+  }
 
-  const destinos = await Destino.findAll({ where });
-  return destinos;
+  const offset = (page - 1) * limit;
+  const order = buildOrder(sortBy);
+
+  const { count, rows: data } = await Destino.findAndCountAll({
+    where,
+    limit,
+    offset,
+    order: order.length > 0 ? order : [['idDestino', 'ASC']],
+    distinct: true,
+  });
+
+  return { data, total: count };
 };
 
 const getById = async (id) => {

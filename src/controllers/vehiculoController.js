@@ -2,9 +2,12 @@ const vehiculoService = require('../services/vehiculoService');
 
 exports.getAll = async (req, res, next) => {
   try {
-    const filters = { estado: req.query.estado, habilitado: req.query.habilitado };
-    const vehiculos = await vehiculoService.getAll(filters);
-    res.json({ success: true, data: vehiculos });
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const sortBy = req.query.sortBy;
+    const filters = { estado: req.query.estado, habilitado: req.query.habilitado, page, limit, sortBy };
+    const result = await vehiculoService.getAll(filters);
+    res.json({ success: true, data: result.data, total: result.total });
   } catch (error) {
     next(error);
   }

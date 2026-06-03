@@ -2,9 +2,25 @@ const encomiendaService = require('../services/encomiendaService');
 
 exports.getAll = async (req, res, next) => {
   try {
-    const filters = { estado: req.query.estado, idCliente: req.query.idCliente, fechaInicio: req.query.fechaInicio, fechaFin: req.query.fechaFin };
-    const encomiendas = await encomiendaService.getAll(filters);
-    res.json({ success: true, data: encomiendas });
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const sortBy = req.query.sortBy;
+    const q = req.query.q;
+    const filters = {
+      estado: req.query.estado,
+      idCliente: req.query.idCliente,
+      fechaInicio: req.query.fechaInicio,
+      fechaFin: req.query.fechaFin,
+      habilitado: req.query.habilitado,
+      estadoPago: req.query.estadoPago,
+      metodoPago: req.query.metodoPago,
+      page,
+      limit,
+      sortBy,
+      q,
+    };
+    const result = await encomiendaService.getAll(filters);
+    res.json({ success: true, data: result.data, total: result.total });
   } catch (error) {
     next(error);
   }

@@ -2,20 +2,37 @@ const { Vehiculo, Conductor, PropietarioVehiculo, Ruta, Usuario, Destino } = req
 const AppError = require('../errors/appError');
 const { tieneRutasActivasPorVehiculo } = require('../middlewares/validateDependencies');
 
-const getAll = async ({ estado, habilitado }) => {
+const buildOrder = (sortBy) => {
+  if (!sortBy) return [];
+  const allowed = ['placa', 'estado', 'idVehiculo', 'habilitado'];
+  const parts = sortBy.split('.');
+  const field = allowed.includes(parts[0]) ? parts[0] : 'idVehiculo';
+  const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
+  return [[field, direction]];
+};
+
+const getAll = async ({ estado, habilitado, page = 1, limit = 10, sortBy } = {}) => {
   const where = {};
   if (estado) where.estado = estado;
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
 
-  const vehiculos = await Vehiculo.findAll({
+  const offset = (page - 1) * limit;
+  const include = [
+    { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
+    { model: PropietarioVehiculo, as: 'propietario' }
+  ];
+  const order = buildOrder(sortBy);
+
+  const { count, rows: data } = await Vehiculo.findAndCountAll({
     where,
-    include: [
-      { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
-      { model: PropietarioVehiculo, as: 'propietario' }
-    ]
+    include,
+    limit,
+    offset,
+    order: order.length > 0 ? order : [['idVehiculo', 'ASC']],
+    distinct: true,
   });
 
-  return vehiculos;
+  return { data, total: count };
 };
 
 const getById = async (id) => {

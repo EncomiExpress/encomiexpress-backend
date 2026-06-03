@@ -2,12 +2,31 @@ const { PropietarioVehiculo, Vehiculo } = require('../models');
 const AppError = require('../errors/appError');
 const { tieneVehiculosActivosPorPropietario } = require('../middlewares/validateDependencies');
 
-const getAll = async ({ habilitado }) => {
+const buildOrder = (sortBy) => {
+  if (!sortBy) return [];
+  const allowed = ['nombre', 'apellido', 'idPropietario', 'habilitado'];
+  const parts = sortBy.split('.');
+  const field = allowed.includes(parts[0]) ? parts[0] : 'idPropietario';
+  const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
+  return [[field, direction]];
+};
+
+const getAll = async ({ habilitado, page = 1, limit = 10, sortBy } = {}) => {
   const where = {};
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
 
-  const propietarios = await PropietarioVehiculo.findAll({ where });
-  return propietarios;
+  const offset = (page - 1) * limit;
+  const order = buildOrder(sortBy);
+
+  const { count, rows: data } = await PropietarioVehiculo.findAndCountAll({
+    where,
+    limit,
+    offset,
+    order: order.length > 0 ? order : [['idPropietario', 'ASC']],
+    distinct: true,
+  });
+
+  return { data, total: count };
 };
 
 const getById = async (id) => {

@@ -1,4 +1,4 @@
-const { EncomiendaVenta, Destinatario, Paquete, Cliente, Ruta, Vehiculo, Conductor, Destino, sequelize } = require('../models');
+﻿const { EncomiendaVenta, Destinatario, Paquete, Cliente, Ruta, Vehiculo, Conductor, Destino, sequelize } = require('../models');
 const { Usuario } = require('../models');
 const AppError = require('../errors/appError');
 const crypto = require('crypto');
@@ -8,7 +8,7 @@ const ESTADOS_VALIDOS = [
   'pendiente de recogida',
   'en recogida',
   'programada',
-  'en tránsito',
+  'en tr├ínsito',
   'entregado',
   'devuelto',
   'activo',
@@ -32,17 +32,44 @@ const generarTokenSeguimiento = (numeroGuia) => {
     .substring(0, 32);
 };
 
-const getAll = async ({ estado, idCliente, fechaInicio, fechaFin }) => {
+const buildOrder = (sortBy) => {
+  if (!sortBy) return [];
+  const allowed = ['fechaRegistro', 'estado', 'estadoPago', 'numeroGuia', 'idEncomiendaVenta', 'habilitado'];
+  const parts = sortBy.split('.');
+  const field = allowed.includes(parts[0]) ? parts[0] : 'fechaRegistro';
+  const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
+  return [[field, direction]];
+};
+
+const getAll = async ({ estado, idCliente, fechaInicio, fechaFin, habilitado, estadoPago, metodoPago, q, page = 1, limit = 10, sortBy } = {}) => {
   const where = {};
   if (estado) where.estado = estado;
   if (idCliente) where.idCliente = idCliente;
+  if (habilitado !== undefined) where.habilitado = habilitado === 'true';
+  if (estadoPago) where.estadoPago = estadoPago;
+  if (metodoPago) where.metodoPago = metodoPago;
   if (fechaInicio && fechaFin) {
     where.fechaRegistro = {
       [sequelize.Sequelize.Op.between]: [fechaInicio, fechaFin],
     };
   }
 
-  const encomiendas = await EncomiendaVenta.findAll({
+  if (q) {
+    where[sequelize.Sequelize.Op.or] = [
+      { numeroGuia: { [sequelize.Sequelize.Op.iLike]: `%${q}%` } },
+      { numeroFactura: { [sequelize.Sequelize.Op.iLike]: `%${q}%` } },
+      { estado: { [sequelize.Sequelize.Op.iLike]: `%${q}%` } },
+      { estadoPago: { [sequelize.Sequelize.Op.iLike]: `%${q}%` } },
+      { '$cliente.nombre$': { [sequelize.Sequelize.Op.iLike]: `%${q}%` } },
+      { '$cliente.apellido$': { [sequelize.Sequelize.Op.iLike]: `%${q}%` } },
+      { '$ruta.nombreRuta$': { [sequelize.Sequelize.Op.iLike]: `%${q}%` } },
+    ];
+  }
+
+  const offset = (page - 1) * limit;
+  const order = buildOrder(sortBy);
+
+  const { count, rows: data } = await EncomiendaVenta.findAndCountAll({
     where,
     include: [
       { model: Cliente, as: 'cliente' },
@@ -58,10 +85,13 @@ const getAll = async ({ estado, idCliente, fechaInicio, fechaFin }) => {
       { model: Destinatario, as: 'destinatarios' },
       { model: Paquete, as: 'paquetes' },
     ],
-    order: [['fechaRegistro', 'DESC']],
+    limit,
+    offset,
+    order: order.length > 0 ? order : [['fechaRegistro', 'DESC']],
+    distinct: true,
   });
 
-  return encomiendas;
+  return { data, total: count };
 };
 
 const getById = async (id) => {
@@ -121,7 +151,7 @@ const getByGuia = async (numeroGuia) => {
   return encomienda;
 };
 
-// ⚠️ FIX: función movida ANTES de module.exports para que sea accesible al exportar
+// ΓÜá∩╕Å FIX: funci├│n movida ANTES de module.exports para que sea accesible al exportar
 const getPublicByToken = async (token) => {
   const encomienda = await EncomiendaVenta.findOne({
     where: { tokenSeguimiento: token, habilitado: true },
@@ -197,7 +227,7 @@ const create = async (data) => {
       !METODOS_PAGO_VALIDOS.some((v) => v.toLowerCase() === metodoPago.toLowerCase())
     ) {
       await transaction.rollback();
-      throw new AppError(`Método de pago inválido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`, 400);
+      throw new AppError(`M├⌐todo de pago inv├ílido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`, 400);
     }
 
     if (
@@ -205,7 +235,7 @@ const create = async (data) => {
       !ESTADOS_PAGO_VALIDOS.some((v) => v.toLowerCase() === estadoPago.toLowerCase())
     ) {
       await transaction.rollback();
-      throw new AppError(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
+      throw new AppError(`Estado de pago inv├ílido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
     }
 
     let numeroGuia = await generarNumeroGuia();
@@ -323,14 +353,14 @@ const update = async (id, data) => {
       metodoPago &&
       !METODOS_PAGO_VALIDOS.some((v) => v.toLowerCase() === metodoPago.toLowerCase())
     ) {
-      throw new AppError(`Método de pago inválido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`, 400);
+      throw new AppError(`M├⌐todo de pago inv├ílido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`, 400);
     }
 
     if (
       estadoPago &&
       !ESTADOS_PAGO_VALIDOS.some((v) => v.toLowerCase() === estadoPago.toLowerCase())
     ) {
-      throw new AppError(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
+      throw new AppError(`Estado de pago inv├ílido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
     }
 
     const parseDecimal = (value) => {
@@ -446,11 +476,11 @@ const cambiarEstado = async (id, estado) => {
     throw new AppError('Encomienda no encontrada', 404);
   }
 
-  // Normalizar a minúsculas para comparación consistente
+  // Normalizar a min├║sculas para comparaci├│n consistente
   const estadoNormalizado = typeof estado === 'string' ? estado.toLowerCase() : estado;
 
   if (!ESTADOS_VALIDOS.includes(estadoNormalizado)) {
-    throw new AppError(`Estado inválido. Opciones: ${ESTADOS_VALIDOS.join(', ')}`, 400);
+    throw new AppError(`Estado inv├ílido. Opciones: ${ESTADOS_VALIDOS.join(', ')}`, 400);
   }
 
   await encomienda.update({ estado: estadoNormalizado });
@@ -538,7 +568,7 @@ module.exports = {
   getAll,
   getById,
   getByGuia,
-  getPublicByToken, // ⚠️ FIX: ahora sí se exporta correctamente
+  getPublicByToken, // ΓÜá∩╕Å FIX: ahora s├¡ se exporta correctamente
   create,
   update,
   cambiarEstado,

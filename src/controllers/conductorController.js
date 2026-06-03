@@ -4,9 +4,12 @@ const { Op } = require('sequelize');
 
 exports.getAll = async (req, res, next) => {
   try {
-    const filters = { estado: req.query.estado, habilitado: req.query.habilitado };
-    const conductores = await conductorService.getAll(filters);
-    res.json({ success: true, data: conductores });
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const sortBy = req.query.sortBy;
+    const filters = { estado: req.query.estado, habilitado: req.query.habilitado, page, limit, sortBy };
+    const result = await conductorService.getAll(filters);
+    res.json({ success: true, data: result.data, total: result.total });
   } catch (error) {
     next(error);
   }

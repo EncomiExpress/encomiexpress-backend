@@ -1,22 +1,60 @@
 const { Ruta, Vehiculo, Conductor, Destino, EncomiendaVenta, Usuario, Cliente } = require('../models');
+const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { tieneEncomiendasActivasPorRuta } = require('../middlewares/validateDependencies');
 
-const getAll = async ({ habilitado }) => {
+const buildOrder = (sortBy) => {
+  if (!sortBy) return [];
+  const allowed = ['fechaSalida', 'estado', 'idRuta', 'habilitado'];
+  const parts = sortBy.split('.');
+  const field = allowed.includes(parts[0]) ? parts[0] : 'fechaSalida';
+  const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
+  return [[field, direction]];
+};
+
+const buildRutaWhere = ({ habilitado, estado, anio, mes, q }) => {
   const where = {};
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
+  if (estado) where.estado = estado;
+  if (anio || mes) {
+    where.fechaSalida = {};
+    if (anio) where.fechaSalida[Op.like] = `${anio}%`;
+    if (mes) where.fechaSalida[Op.like] = `${anio ? anio + '-' : ''}${mes.padStart ? mes.padStart(2, '0') : mes}%`;
+  }
+  if (q) {
+    where[Op.or] = [
+      { nombreRuta: { [Op.iLike]: `%${q}%` } },
+      { fechaSalida: { [Op.iLike]: `%${q}%` } },
+      { '$vehiculo.placa$': { [Op.iLike]: `%${q}%` } },
+      { '$conductor.usuario.nombre$': { [Op.iLike]: `%${q}%` } },
+      { '$conductor.usuario.apellido$': { [Op.iLike]: `%${q}%` } },
+    ];
+  }
+  return where;
+};
 
-  const rutas = await Ruta.findAll({
+const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sortBy, q } = {}) => {
+  const where = buildRutaWhere({ habilitado, estado, anio, mes, q });
+
+  const offset = (page - 1) * limit;
+  const order = buildOrder(sortBy);
+
+  const include = [
+    { model: Vehiculo, as: 'vehiculo' },
+    { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
+    { model: Destino, as: 'destino' },
+  ];
+
+  const { count, rows: data } = await Ruta.findAndCountAll({
     where,
-    include: [
-      { model: Vehiculo, as: 'vehiculo' },
-      { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
-      { model: Destino, as: 'destino' }
-    ],
-    order: [['fechaSalida', 'DESC'], ['horaSalida', 'DESC']]
+    include,
+    limit,
+    offset,
+    order: order.length > 0 ? order : [['fechaSalida', 'DESC'], ['horaSalida', 'DESC']],
+    distinct: true,
   });
 
-  return rutas;
+  return { data, total: count };
 };
 
 const getById = async (id) => {
