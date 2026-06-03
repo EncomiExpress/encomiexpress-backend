@@ -4,7 +4,6 @@ const morgan = require('morgan');
 
 const AppError = require('./errors/appError');
 const errorHandler = require('./middlewares/errorHandler');
-const { apiLimiter, writeLimiter } = require('./middlewares/rateLimiter');
 
 const app = express();
 
@@ -22,10 +21,6 @@ app.use(cors({
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// Rate limiting — se aplica a toda la API
-app.use('/api', apiLimiter);      // límite general en todas las rutas /api
-app.use('/api', writeLimiter);    // límite adicional para operaciones de escritura
 
 // Importar rutas
 const authRoutes = require('./routes/auth');

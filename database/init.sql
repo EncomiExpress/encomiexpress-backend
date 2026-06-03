@@ -226,6 +226,7 @@ INSERT INTO "permiso" ("nombre", "descripcion", "habilitado") VALUES
 ('registrar_rol', 'Registrar roles', true),
 ('consultar_rol', 'Consultar roles', true),
 ('actualizar_rol', 'Actualizar roles', true),
+('inhabilitar_rol', 'Inhabilitar roles', true),
 ('listar_cliente', 'Listar clientes', true),
 ('registrar_cliente', 'Registrar clientes', true),
 ('consultar_cliente', 'Consultar clientes', true),

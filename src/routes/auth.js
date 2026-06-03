@@ -4,11 +4,12 @@ const authController = require('../controllers/authController');
 const { authenticate } = require('../middlewares/auth');
 const { validate } = require('../middlewares/validation');
 const { loginValidation, registerValidation, recoverPasswordValidation } = require('../validators/authValidator');
+const { loginLimiter, authLimiter } = require('../middlewares/rateLimiter');
 
 // Rutas públicas
-router.post('/login', loginValidation, validate, authController.login);
-router.post('/register', registerValidation, validate, authController.register);
-router.post('/recover-password', recoverPasswordValidation, validate, authController.recoverPassword);
+router.post('/login', loginLimiter, loginValidation, validate, authController.login);
+router.post('/register', authLimiter, registerValidation, validate, authController.register);
+router.post('/recover-password', authLimiter, recoverPasswordValidation, validate, authController.recoverPassword);
 
 // Rutas protegidas
 router.get('/profile', authenticate, authController.getProfile);

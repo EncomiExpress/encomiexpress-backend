@@ -12,46 +12,46 @@ const mensajeLimiteAlcanzado = (req, res) => {
 };
 
 // ============================================================
-// 1. Límite ESTRICTO para autenticación (login / register / recover)
+// 1. Límite ESTRICTO para login
 //    → Protege contra ataques de fuerza bruta a credenciales
 // ============================================================
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // ventana de 15 minutos
-  max: 10,                   // máximo 10 intentos por IP por ventana
-  standardHeaders: true,     // envía headers RateLimit-* estándar (RFC 6585)
-  legacyHeaders: false,      // desactiva headers X-RateLimit-* deprecados
-  message: mensajeLimiteAlcanzado,
-  skipSuccessfulRequests: false // cuenta también los exitosos (evita enumerar usuarios)
-});
-
-// ============================================================
-// 2. Límite GENERAL para todos los endpoints de la API
-//    → Protege contra abuso masivo de peticiones
-// ============================================================
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // ventana de 15 minutos
-  max: 300,                  // máximo 300 solicitudes por IP por ventana
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
   standardHeaders: true,
   legacyHeaders: false,
-  message: mensajeLimiteAlcanzado
+  message: mensajeLimiteAlcanzado,
+  skipSuccessfulRequests: true
 });
 
 // ============================================================
-// 3. Límite para endpoints de ESCRITURA (POST / PUT / PATCH / DELETE)
-//    → Protege contra creación/modificación masiva de registros
+// 2. Límite LAXO para register / recover-password
+//    → Permite uso normal pero bloquea abuso masivo
+// ============================================================
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: mensajeLimiteAlcanzado,
+  skipSuccessfulRequests: true
+});
+
+// ============================================================
+// 3. Límite para endpoints de ESCRITURA del negocio (POST/PUT/PATCH/DELETE)
+//    → Sin límite para GET, límite generoso para escritura
 // ============================================================
 const writeLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // ventana de 15 minutos
-  max: 100,                  // máximo 100 operaciones de escritura por IP
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false,
   message: mensajeLimiteAlcanzado,
-  // Solo aplica a métodos de escritura
   skip: (req) => ['GET', 'HEAD', 'OPTIONS'].includes(req.method)
 });
 
 module.exports = {
+  loginLimiter,
   authLimiter,
-  apiLimiter,
   writeLimiter
 };
