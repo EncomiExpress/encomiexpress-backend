@@ -30,6 +30,7 @@ exports.create = async (req, res, next) => {
     const anticipo = await anticipoService.create({ idConductor, idRuta, valorAnticipo, soporte, fechaEntrega });
     res.status(201).json({ success: true, message: 'Anticipo creado exitosamente', data: anticipo });
   } catch (error) {
+    console.error('ERROR crear anticipo:', error.message);
     next(error);
   }
 };

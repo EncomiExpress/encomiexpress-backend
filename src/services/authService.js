@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const { Usuario, Rol, Permiso, Conductor } = require('../models');
-const { generateToken } = require('../middlewares/auth');
+const { generateToken, generateRefreshToken } = require('../middlewares/auth');
 const AppError = require('../errors/appError');
 
 const login = async (email, password) => {
@@ -39,6 +39,8 @@ const login = async (email, password) => {
     rol: usuario.rol?.nombre ?? null
   });
 
+  const refreshToken = generateRefreshToken({ idUsuario: usuario.idUsuario });
+
   let conductorData = null;
   if (usuario.rol?.nombre === 'conductor') {
     const conductor = await Conductor.findOne({
@@ -59,6 +61,7 @@ const login = async (email, password) => {
 
   return {
     token,
+    refreshToken,
     usuario: {
       nombre: usuario.nombre,
       apellido: usuario.apellido,
@@ -104,6 +107,8 @@ const register = async (data) => {
     rol: 'usuario'
   });
 
+  const refreshToken = generateRefreshToken({ idUsuario: usuario.idUsuario });
+
   const rol = await Rol.findByPk(usuario.idRol, {
     include: [{ model: Permiso, as: 'permisos' }]
   });
@@ -111,6 +116,7 @@ const register = async (data) => {
 
   return {
     token,
+    refreshToken,
     usuario: {
       nombre: usuario.nombre,
       apellido: usuario.apellido,
