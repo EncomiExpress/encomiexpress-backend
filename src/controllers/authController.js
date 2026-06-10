@@ -1,4 +1,6 @@
 const authService = require('../services/authService');
+const { generateToken, verifyRefreshToken } = require('../middlewares/auth');
+const { Usuario, Rol } = require('../models');
 
 const login = async (req, res, next) => {
   try {
@@ -50,10 +52,41 @@ const recoverPassword = async (req, res, next) => {
   }
 };
 
+const refreshToken = async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    
+    if (!refreshToken) {
+      return res.status(401).json({ success: false, message: 'Refresh token requerido' });
+    }
+
+    const decoded = verifyRefreshToken(refreshToken);
+    
+    const usuario = await Usuario.findByPk(decoded.idUsuario, {
+      include: [{ model: Rol, as: 'rol' }]
+    });
+
+    if (!usuario || !usuario.habilitado) {
+      return res.status(401).json({ success: false, message: 'Usuario no válido' });
+    }
+
+    const newToken = generateToken({ 
+      idUsuario: usuario.idUsuario, 
+      email: usuario.email, 
+      rol: usuario.rol?.nombre 
+    });
+
+    res.json({ success: true, data: { token: newToken } });
+  } catch (error) {
+    return res.status(401).json({ success: false, message: 'Refresh token inválido o expirado' });
+  }
+};
+
 module.exports = {
   login,
   register,
   getProfile,
   getConductorProfile,
+  refreshToken,
   recoverPassword
 };

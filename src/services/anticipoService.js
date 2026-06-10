@@ -17,49 +17,54 @@ const buildOrder = (sortBy) => {
 };
 
 const getAll = async ({ idConductor, estado, habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
-  const where = {};
-  if (idConductor) where.idConductor = idConductor;
-  if (estado) where.estado = estado;
-  if (habilitado !== undefined) where.habilitado = habilitado === 'true';
-  if (q) {
-    const query = `%${q.trim()}%`;
-    const numericId = Number(q);
-    const conditions = [
-      { estado: { [Op.iLike]: query } },
-      { soporte: { [Op.iLike]: query } },
-      { '$conductor.usuario.nombre$': { [Op.iLike]: query } },
-      { '$conductor.usuario.apellido$': { [Op.iLike]: query } },
-      { '$ruta.nombreRuta$': { [Op.iLike]: query } },
-    ];
-    if (!Number.isNaN(numericId)) {
-      conditions.unshift({ idAnticipoExcedente: numericId });
-    }
-    where[Op.or] = conditions;
-  }
-
-  const offset = (page - 1) * limit;
-  const order = buildOrder(sortBy);
-
-  const { count, rows: data } = await AnticipoExcedente.findAndCountAll({
-    where,
-    include: [
-      { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
-      {
-        model: Ruta,
-        as: 'ruta',
-        include: [
-          { model: Vehiculo, as: 'vehiculo' },
-          { model: Destino, as: 'destino' }
-        ]
+  try {
+    const where = {};
+    if (idConductor) where.idConductor = idConductor;
+    if (estado) where.estado = estado;
+    if (habilitado !== undefined) where.habilitado = habilitado === 'true';
+    if (q) {
+      const query = `%${q.trim()}%`;
+      const numericId = Number(q);
+      const conditions = [
+        { estado: { [Op.iLike]: query } },
+        { soporte: { [Op.iLike]: query } },
+        { '$conductor.usuario.nombre$': { [Op.iLike]: query } },
+        { '$conductor.usuario.apellido$': { [Op.iLike]: query } },
+        { '$ruta.nombreRuta$': { [Op.iLike]: query } },
+      ];
+      if (!Number.isNaN(numericId)) {
+        conditions.unshift({ idAnticipoExcedente: numericId });
       }
-    ],
-    limit,
-    offset,
-    order: order.length > 0 ? order : [['idAnticipoExcedente', 'DESC']],
-    distinct: true,
-  });
+      where[Op.or] = conditions;
+    }
 
-  return { data, total: count };
+    const offset = (page - 1) * limit;
+    const order = buildOrder(sortBy);
+
+    const { count, rows: data } = await AnticipoExcedente.findAndCountAll({
+      where,
+      include: [
+        { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
+        {
+          model: Ruta,
+          as: 'ruta',
+          include: [
+            { model: Vehiculo, as: 'vehiculo' },
+            { model: Destino, as: 'destino' }
+          ]
+        }
+      ],
+      limit,
+      offset,
+      order: order.length > 0 ? order : [['idAnticipoExcedente', 'DESC']],
+      distinct: true,
+    });
+
+    return { data, total: count };
+  } catch (error) {
+    console.error('ERROR anticipos:', error.message);
+    throw error;
+  }
 };
 
 const getById = async (id) => {

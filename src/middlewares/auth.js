@@ -89,9 +89,21 @@ const generateToken = (payload) => {
   });
 };
 
+const generateRefreshToken = (payload) => {
+  return jwt.sign(payload, process.env.JWT_REFRESH_SECRET, {
+    expiresIn: '7d'
+  });
+};
+
+const verifyRefreshToken = (token) => {
+  return jwt.verify(token, process.env.JWT_REFRESH_SECRET);
+};
+
 module.exports = {
   authenticate,
   authorize,
   authorizePermission,
-  generateToken
+  generateToken,
+  generateRefreshToken,
+  verifyRefreshToken
 };
