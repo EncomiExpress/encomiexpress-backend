@@ -202,7 +202,7 @@ const recoverPassword = async (email) => {
 
   await usuario.update({ password: hashedPassword });
 
-  return tempPassword;
+  return { tempPassword };
 };
 
 module.exports = {
