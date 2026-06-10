@@ -1,3 +1,4 @@
+const bcrypt = require('bcryptjs');
 const { Usuario, Rol } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');

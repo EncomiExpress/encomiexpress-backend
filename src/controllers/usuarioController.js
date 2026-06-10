@@ -1,4 +1,6 @@
+const bcrypt = require('bcryptjs');
 const usuarioService = require('../services/usuarioService');
+
 
 exports.getAll = async (req, res, next) => {
   try {
