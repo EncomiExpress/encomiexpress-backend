@@ -1,4 +1,5 @@
 require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
+console.log('JWT_SECRET:', process.env.JWT_SECRET);
 const http = require('http');
 const jwt = require('jsonwebtoken');
 const app = require('./app');
