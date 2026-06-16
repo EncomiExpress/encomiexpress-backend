@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const { Usuario, Rol, Permiso, Conductor } = require('../models');
-const { generateToken, generateRefreshToken } = require('../middlewares/auth');
+const { generateToken } = require('../middlewares/auth');
 const AppError = require('../errors/appError');
 
 const login = async (email, password) => {
@@ -18,7 +18,7 @@ const login = async (email, password) => {
   });
 
   if (!usuario) {
-    throw new AppError('Correo o contraseña incorrecta', 401);
+    throw new AppError('Credenciales inválidas', 401);
   }
 
   if (!usuario.habilitado) {
@@ -27,7 +27,7 @@ const login = async (email, password) => {
 
   const isPasswordValid = await bcrypt.compare(password, usuario.password);
   if (!isPasswordValid) {
-    throw new AppError('Correo o contraseña incorrecta', 401);
+    throw new AppError('Credenciales inválidas', 401);
   }
 
   const permisos = usuario.rol?.permisos?.map(p => p.nombre) ?? [];
@@ -38,8 +38,6 @@ const login = async (email, password) => {
     idRol: usuario.idRol,
     rol: usuario.rol?.nombre ?? null
   });
-
-  const refreshToken = generateRefreshToken({ idUsuario: usuario.idUsuario });
 
   let conductorData = null;
   if (usuario.rol?.nombre === 'conductor') {
@@ -61,7 +59,6 @@ const login = async (email, password) => {
 
   return {
     token,
-    refreshToken,
     usuario: {
       nombre: usuario.nombre,
       apellido: usuario.apellido,
@@ -107,8 +104,6 @@ const register = async (data) => {
     rol: 'usuario'
   });
 
-  const refreshToken = generateRefreshToken({ idUsuario: usuario.idUsuario });
-
   const rol = await Rol.findByPk(usuario.idRol, {
     include: [{ model: Permiso, as: 'permisos' }]
   });
@@ -116,7 +111,6 @@ const register = async (data) => {
 
   return {
     token,
-    refreshToken,
     usuario: {
       nombre: usuario.nombre,
       apellido: usuario.apellido,
@@ -186,9 +180,9 @@ const getConductorProfile = async (idUsuario, rolNombre) => {
   };
 };
 
-const recoverPassword = async (email) => {
-  if (!email) {
-    throw new AppError('Email es requerido', 400);
+const cambiarPassword = async (email, passwordActual, passwordNueva) => {
+  if (!email || !passwordActual || !passwordNueva) {
+    throw new AppError('Email, contraseña actual y contraseña nueva son requeridos', 400);
   }
 
   const usuario = await Usuario.findOne({ where: { email } });
@@ -197,12 +191,17 @@ const recoverPassword = async (email) => {
     throw new AppError('No existe usuario con ese email', 404);
   }
 
-  const tempPassword = Math.random().toString(36).slice(-8);
-  const hashedPassword = await bcrypt.hash(tempPassword, 10);
+  const isValid = await bcrypt.compare(passwordActual, usuario.password);
+  if (!isValid) {
+    throw new AppError('La contraseña actual es incorrecta', 401);
+  }
 
+  if (passwordActual === passwordNueva) {
+    throw new AppError('La nueva contraseña debe ser diferente a la actual', 400);
+  }
+
+  const hashedPassword = await bcrypt.hash(passwordNueva, 10);
   await usuario.update({ password: hashedPassword });
-
-  return { tempPassword };
 };
 
 module.exports = {
@@ -210,5 +209,5 @@ module.exports = {
   register,
   getProfile,
   getConductorProfile,
-  recoverPassword
+  cambiarPassword
 };
