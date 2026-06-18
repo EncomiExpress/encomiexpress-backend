@@ -181,8 +181,12 @@ const getConductorProfile = async (idUsuario, rolNombre) => {
 };
 
 const cambiarPassword = async (email, passwordActual, passwordNueva) => {
-  if (!email || !passwordActual || !passwordNueva) {
-    throw new AppError('Email, contraseña actual y contraseña nueva son requeridos', 400);
+  if (!passwordActual || !passwordNueva) {
+    throw new AppError('Contraseña actual y contraseña nueva son requeridas', 400);
+  }
+
+  if (!email) {
+    throw new AppError('No se pudo identificar el usuario', 401);
   }
 
   const usuario = await Usuario.findOne({ where: { email } });
@@ -192,9 +196,9 @@ const cambiarPassword = async (email, passwordActual, passwordNueva) => {
   }
 
   const isValid = await bcrypt.compare(passwordActual, usuario.password);
-  if (!isValid) {
-    throw new AppError('La contraseña actual es incorrecta', 401);
-  }
+if (!isValid) {
+  throw new AppError('La contraseña actual es incorrecta', 400); // ← cambia 401 por 400
+}
 
   if (passwordActual === passwordNueva) {
     throw new AppError('La nueva contraseña debe ser diferente a la actual', 400);

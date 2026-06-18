@@ -6,7 +6,7 @@ const login = async (req, res, next) => {
     const result = await authService.login(email, password);
     res.json({ success: true, message: 'Login exitoso', data: result });
   } catch (error) {
-    next(error);
+    next(error);  
   }
 };
 
@@ -40,7 +40,8 @@ const getConductorProfile = async (req, res, next) => {
 
 const cambiarPassword = async (req, res, next) => {
   try {
-    const { email, passwordActual, passwordNueva } = req.body;
+    const { passwordActual, passwordNueva } = req.body;
+    const email = req.usuario?.email;
     await authService.cambiarPassword(email, passwordActual, passwordNueva);
     res.json({ success: true, message: 'Contraseña actualizada correctamente' });
   } catch (error) {
