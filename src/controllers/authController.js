@@ -6,7 +6,7 @@ const login = async (req, res, next) => {
     const result = await authService.login(email, password);
     res.json({ success: true, message: 'Login exitoso', data: result });
   } catch (error) {
-    next(error);  
+    next(error);
   }
 };
 
@@ -38,6 +38,18 @@ const getConductorProfile = async (req, res, next) => {
   }
 };
 
+const recuperarPassword = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    const { tempPassword } = await authService.recuperarPassword(email);
+    const { sendPasswordRecoveryEmail } = require('../config/email');
+    await sendPasswordRecoveryEmail(email, tempPassword);
+    res.json({ success: true, message: 'Se ha enviado una contraseña temporal a tu email' });
+  } catch (error) {
+    next(error);
+  }
+};
+
 const cambiarPassword = async (req, res, next) => {
   try {
     const { passwordActual, passwordNueva } = req.body;
@@ -54,5 +66,6 @@ module.exports = {
   register,
   getProfile,
   getConductorProfile,
+  recuperarPassword,
   cambiarPassword
 };

@@ -180,6 +180,25 @@ const getConductorProfile = async (idUsuario, rolNombre) => {
   };
 };
 
+const recuperarPassword = async (email) => {
+  if (!email) {
+    throw new AppError('Email es requerido', 400);
+  }
+
+  const usuario = await Usuario.findOne({ where: { email } });
+
+  if (!usuario) {
+    throw new AppError('No existe usuario con ese email', 404);
+  }
+
+  const tempPassword = Math.random().toString(36).slice(-8);
+  const hashedPassword = await bcrypt.hash(tempPassword, 10);
+
+  await usuario.update({ password: hashedPassword });
+
+  return { tempPassword };
+};
+
 const cambiarPassword = async (email, passwordActual, passwordNueva) => {
   if (!passwordActual || !passwordNueva) {
     throw new AppError('Contraseña actual y contraseña nueva son requeridas', 400);
@@ -196,9 +215,9 @@ const cambiarPassword = async (email, passwordActual, passwordNueva) => {
   }
 
   const isValid = await bcrypt.compare(passwordActual, usuario.password);
-if (!isValid) {
-  throw new AppError('La contraseña actual es incorrecta', 400); // ← cambia 401 por 400
-}
+  if (!isValid) {
+    throw new AppError('La contraseña actual es incorrecta', 400);
+  }
 
   if (passwordActual === passwordNueva) {
     throw new AppError('La nueva contraseña debe ser diferente a la actual', 400);
@@ -213,5 +232,6 @@ module.exports = {
   register,
   getProfile,
   getConductorProfile,
+  recuperarPassword,
   cambiarPassword
 };

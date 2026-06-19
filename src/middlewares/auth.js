@@ -32,14 +32,15 @@ const authenticate = async (req, res, next) => {
     req.usuario = usuario;
     next();
   } catch (error) {
-    if (error.name === 'JsonWebTokenError') {
-      return next(new AppError('Token inválido', 401));
-    }
-    if (error.name === 'TokenExpiredError') {
-      return next(new AppError('Token expirado', 401));
-    }
-    next(error);
+  console.log('Error en authenticate:', error.name, error.message);
+  if (error.name === 'JsonWebTokenError') {
+    return next(new AppError('Token inválido', 401));
   }
+  if (error.name === 'TokenExpiredError') {
+    return next(new AppError('Token expirado', 401));
+  }
+  next(error);
+}
 };
 
 const authorize = (...roles) => {
