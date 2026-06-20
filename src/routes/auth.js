@@ -9,6 +9,7 @@ const { authLimiter } = require('../middlewares/rateLimiter');
 // Rutas públicas
 router.post('/login', authLimiter, loginValidation, validate, authController.login);
 router.post('/register', authLimiter, registerValidation, validate, authController.register);
+router.post('/refresh', authLimiter, authController.refresh);
 router.post('/recuperar-password', authLimiter, recoverPasswordValidation, validate, authController.recuperarPassword);
 
 // Rutas protegidas

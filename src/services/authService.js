@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const { Usuario, Rol, Permiso, Conductor } = require('../models');
-const { generateToken } = require('../middlewares/auth');
+const { generateToken, generateRefreshToken, verifyRefreshToken } = require('../middlewares/auth');
 const AppError = require('../errors/appError');
 
 const login = async (email, password) => {
@@ -18,16 +18,16 @@ const login = async (email, password) => {
   });
 
   if (!usuario) {
-    throw new AppError('Credenciales inválidas', 401);
+    throw new AppError('El correo electrónico no está registrado', 401);
   }
 
   if (!usuario.habilitado) {
-    throw new AppError('Usuario deshabilitado', 401);
+    throw new AppError('Tu cuenta está inhabilitada. Contacta al administrador.', 401);
   }
 
   const isPasswordValid = await bcrypt.compare(password, usuario.password);
   if (!isPasswordValid) {
-    throw new AppError('Credenciales inválidas', 401);
+    throw new AppError('La contraseña es incorrecta', 401);
   }
 
   const permisos = usuario.rol?.permisos?.map(p => p.nombre) ?? [];
@@ -37,6 +37,12 @@ const login = async (email, password) => {
     email: usuario.email,
     idRol: usuario.idRol,
     rol: usuario.rol?.nombre ?? null
+  });
+
+  const refreshToken = generateRefreshToken({
+    idUsuario: usuario.idUsuario,
+    email: usuario.email,
+    idRol: usuario.idRol
   });
 
   let conductorData = null;
@@ -59,6 +65,7 @@ const login = async (email, password) => {
 
   return {
     token,
+    refreshToken,
     usuario: {
       nombre: usuario.nombre,
       apellido: usuario.apellido,
@@ -70,6 +77,31 @@ const login = async (email, password) => {
     },
     conductor: conductorData
   };
+};
+
+const refresh = async (refreshToken) => {
+  let decoded;
+  try {
+    decoded = verifyRefreshToken(refreshToken);
+  } catch {
+    throw new AppError('Refresh token inválido o expirado. Inicia sesión nuevamente.', 401);
+  }
+
+  const usuario = await Usuario.findByPk(decoded.idUsuario, {
+    include: [{ model: Rol, as: 'rol' }]
+  });
+
+  if (!usuario) throw new AppError('Usuario no encontrado', 401);
+  if (!usuario.habilitado) throw new AppError('Tu cuenta está inhabilitada. Contacta al administrador.', 401);
+
+  const token = generateToken({
+    idUsuario: usuario.idUsuario,
+    email: usuario.email,
+    idRol: usuario.idRol,
+    rol: usuario.rol?.nombre ?? null
+  });
+
+  return { token };
 };
 
 const register = async (data) => {
@@ -230,6 +262,7 @@ const cambiarPassword = async (email, passwordActual, passwordNueva) => {
 module.exports = {
   login,
   register,
+  refresh,
   getProfile,
   getConductorProfile,
   recuperarPassword,

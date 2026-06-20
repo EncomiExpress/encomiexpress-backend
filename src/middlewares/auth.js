@@ -13,7 +13,6 @@ const authenticate = async (req, res, next) => {
     const token = authHeader.split(' ')[1];
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log('Token decodificado:', decoded);
 
     const usuario = await Usuario.findByPk(decoded.idUsuario, {
       include: [
@@ -32,7 +31,6 @@ const authenticate = async (req, res, next) => {
     req.usuario = usuario;
     next();
   } catch (error) {
-  console.log('Error en authenticate:', error.name, error.message);
   if (error.name === 'JsonWebTokenError') {
     return next(new AppError('Token inválido', 401));
   }
@@ -87,13 +85,13 @@ const authorizePermission = (permiso) => {
 
 const generateToken = (payload) => {
   return jwt.sign(payload, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || '24h'
+    expiresIn: process.env.JWT_EXPIRES_IN || '1h'
   });
 };
 
 const generateRefreshToken = (payload) => {
   return jwt.sign(payload, process.env.JWT_REFRESH_SECRET, {
-    expiresIn: '7d'
+    expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '24h'
   });
 };
 

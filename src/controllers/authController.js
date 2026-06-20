@@ -1,10 +1,22 @@
 const authService = require('../services/authService');
+const AppError = require('../errors/appError');
 
 const login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
     const result = await authService.login(email, password);
     res.json({ success: true, message: 'Login exitoso', data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const refresh = async (req, res, next) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) return next(new AppError('Refresh token requerido', 400));
+    const result = await authService.refresh(refreshToken);
+    res.json({ success: true, data: result });
   } catch (error) {
     next(error);
   }
@@ -64,6 +76,7 @@ const cambiarPassword = async (req, res, next) => {
 module.exports = {
   login,
   register,
+  refresh,
   getProfile,
   getConductorProfile,
   recuperarPassword,
