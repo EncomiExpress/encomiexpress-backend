@@ -1,21 +1,42 @@
 const { Rol, Permiso, RolPermiso } = require('../models');
+const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 
-const getAll = async () => {
-  const roles = await Rol.findAll({
-    where: { habilitado: true },
-    order: [['idRol', 'ASC']],
-    include: [{
-      model: Permiso,
-      as: 'permisos',
-      through: { attributes: [] }
-    }]
+const buildOrder = (sortBy) => {
+  if (!sortBy) return [];
+  const allowed = ['nombre', 'idRol', 'habilitado'];
+  const parts = sortBy.split('.');
+  const field = allowed.includes(parts[0]) ? parts[0] : 'idRol';
+  const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
+  return [[field, direction]];
+};
+
+const getAll = async ({ habilitado, q, page = 1, limit = 50, sortBy } = {}) => {
+  const where = {};
+  if (habilitado !== undefined) where.habilitado = habilitado === 'true';
+  if (q) {
+    const query = `%${q.trim()}%`;
+    where[Op.or] = [
+      { nombre: { [Op.iLike]: query } },
+      { descripcion: { [Op.iLike]: query } },
+    ];
+  }
+  const offset = (page - 1) * limit;
+  const order = buildOrder(sortBy);
+  const { count, rows } = await Rol.findAndCountAll({
+    where,
+    include: [{ model: Permiso, as: 'permisos', through: { attributes: [] } }],
+    limit: Number(limit),
+    offset,
+    order: order.length > 0 ? order : [['idRol', 'ASC']],
+    distinct: true,
   });
-  return roles.map(rol => ({
+  const data = rows.map(rol => ({
     ...rol.toJSON(),
     permisos: rol.permisos.map(p => p.nombre),
     permisosIds: rol.permisos.map(p => p.idPermiso)
   }));
+  return { data, total: count };
 };
 
 const getById = async (id) => {

@@ -192,7 +192,7 @@ const toggleHabilitado = async (id, currentUserId) => {
     try {
       const cliente = await Cliente.findOne({ where: { numeroIdentificacion: usuario.numeroIdentificacion } });
       if (cliente) {
-        const encomiendasActivas = await tieneEncomiendasActivasPorCliente(cliente.id);
+        const encomiendasActivas = await tieneEncomiendasActivasPorCliente(cliente.idCliente);
         if (encomiendasActivas) throw new AppError('No se puede inhabilitar el usuario porque el cliente asociado tiene encomiendas activas', 400);
       }
     } catch (e) {

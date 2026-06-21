@@ -2,8 +2,15 @@ const rolService = require('../services/rolService');
 
 const getAll = async (req, res, next) => {
   try {
-    const roles = await rolService.getAll();
-    res.json({ success: true, data: roles });
+    const { habilitado, q, page, limit, sortBy } = req.query;
+    const { data, total } = await rolService.getAll({
+      habilitado,
+      q,
+      page: Number(page) || 1,
+      limit: Number(limit) || 50,
+      sortBy,
+    });
+    res.json({ success: true, data, total });
   } catch (error) {
     next(error);
   }

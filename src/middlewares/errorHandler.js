@@ -21,7 +21,6 @@ const sendErrorProd = (err, res) => {
       ...(err.details && { details: err.details }),
     });
   } else {
-    console.error('ERROR 💥', err);
     console.error('ERROR 💥', { statusCode: err.statusCode, message: err.message, stack: err.stack });
     res.status(500).json({
       success: false,

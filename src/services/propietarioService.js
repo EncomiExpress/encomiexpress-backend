@@ -1,4 +1,5 @@
 const { PropietarioVehiculo, Vehiculo } = require('../models');
+const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { tieneVehiculosActivosPorPropietario } = require('../middlewares/validateDependencies');
 
@@ -11,9 +12,23 @@ const buildOrder = (sortBy) => {
   return [[field, direction]];
 };
 
-const getAll = async ({ habilitado, page = 1, limit = 10, sortBy } = {}) => {
+const getAll = async ({ habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
   const where = {};
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
+  if (q) {
+    const query = `%${q.trim()}%`;
+    const numericId = Number(q);
+    const conditions = [
+      { nombre: { [Op.iLike]: query } },
+      { apellido: { [Op.iLike]: query } },
+      { numeroIdentificacion: { [Op.iLike]: query } },
+      { email: { [Op.iLike]: query } },
+    ];
+    if (!Number.isNaN(numericId)) {
+      conditions.unshift({ idPropietario: numericId });
+    }
+    where[Op.or] = conditions;
+  }
 
   const offset = (page - 1) * limit;
   const order = buildOrder(sortBy);

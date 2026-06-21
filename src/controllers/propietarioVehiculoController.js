@@ -5,7 +5,7 @@ exports.getAll = async (req, res, next) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const sortBy = req.query.sortBy;
-    const filters = { habilitado: req.query.habilitado, page, limit, sortBy };
+    const filters = { habilitado: req.query.habilitado, q: req.query.q, page, limit, sortBy };
     const result = await propietarioService.getAll(filters);
     res.json({ success: true, data: result.data, total: result.total });
   } catch (error) {

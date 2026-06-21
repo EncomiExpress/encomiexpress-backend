@@ -1,4 +1,5 @@
 const { Conductor, Usuario, Vehiculo, AnticipoExcedente, Ruta } = require('../models');
+const { Op } = require('sequelize');
 const bcrypt = require('bcryptjs');
 const AppError = require('../errors/appError');
 const { tieneRutasActivas, tieneVehiculosActivos, tieneAnticiposPendientes } = require('../middlewares/validateDependencies');

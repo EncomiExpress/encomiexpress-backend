@@ -6,6 +6,7 @@ const { tieneEncomiendasActivasPorCliente } = require('../middlewares/validateDe
 const buildOrder = (sortBy) => {
   if (!sortBy) return [];
   const allowedFields = {
+    idCliente: 'idCliente',
     nombre: 'nombre',
     apellido: 'apellido',
     tipoIdentificacion: 'tipoIdentificacion',
@@ -99,7 +100,7 @@ const update = async (id, data) => {
 
   if (numeroIdentificacion && numeroIdentificacion !== cliente.numeroIdentificacion) {
     const existingCliente = await Cliente.findOne({
-      where: { numeroIdentificacion, id: { [Op.ne]: id } }
+      where: { numeroIdentificacion, idCliente: { [Op.ne]: id } }
     });
     if (existingCliente) {
       throw new AppError('El número de identificación ya está registrado', 400);
@@ -108,7 +109,7 @@ const update = async (id, data) => {
 
   if (email && email !== cliente.email) {
     const existingEmail = await Cliente.findOne({
-      where: { email, id: { [Op.ne]: id } }
+      where: { email, idCliente: { [Op.ne]: id } }
     });
     if (existingEmail) {
       throw new AppError('El email ya está registrado', 400);
