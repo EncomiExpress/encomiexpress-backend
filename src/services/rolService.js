@@ -172,17 +172,6 @@ const toggleHabilitado = async (id) => {
   };
 };
 
-const deleteRol = async (id) => {
-  const rol = await Rol.findByPk(id);
-  if (!rol) {
-    throw new AppError('Rol no encontrado', 404);
-  }
-
-  await rol.update({ habilitado: false });
-
-  return { message: 'Rol eliminado correctamente' };
-};
-
 const getAllPermisos = async () => {
   const permisos = await Permiso.findAll({
     order: [['idPermiso', 'ASC']]
@@ -196,6 +185,5 @@ module.exports = {
   create,
   update,
   toggleHabilitado,
-  delete: deleteRol,
   getAllPermisos
 };

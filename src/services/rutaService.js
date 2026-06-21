@@ -1,7 +1,7 @@
 const { Ruta, Vehiculo, Conductor, Destino, EncomiendaVenta, Usuario, Cliente } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
-const { tieneEncomiendasActivasPorRuta } = require('../middlewares/validateDependencies');
+const { verificarDependenciasRuta } = require('../middlewares/validateDependencies');
 
 const buildOrder = (sortBy) => {
   if (!sortBy) return [];
@@ -12,10 +12,13 @@ const buildOrder = (sortBy) => {
   return [[field, direction]];
 };
 
-const buildRutaWhere = ({ habilitado, estado, anio, mes, q }) => {
+const buildRutaWhere = ({ habilitado, estado, anio, mes, q, idConductor, idVehiculo, idDestino }) => {
   const where = {};
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
   if (estado) where.estado = estado;
+  if (idConductor) where.idConductor = parseInt(idConductor);
+  if (idVehiculo) where.idVehiculo = parseInt(idVehiculo);
+  if (idDestino) where.idDestino = parseInt(idDestino);
   if (anio || mes) {
     where.fechaSalida = {};
     if (anio) where.fechaSalida[Op.like] = `${anio}%`;
@@ -24,7 +27,6 @@ const buildRutaWhere = ({ habilitado, estado, anio, mes, q }) => {
   if (q) {
     where[Op.or] = [
       { nombreRuta: { [Op.iLike]: `%${q}%` } },
-      { fechaSalida: { [Op.iLike]: `%${q}%` } },
       { '$vehiculo.placa$': { [Op.iLike]: `%${q}%` } },
       { '$conductor.usuario.nombre$': { [Op.iLike]: `%${q}%` } },
       { '$conductor.usuario.apellido$': { [Op.iLike]: `%${q}%` } },
@@ -33,8 +35,8 @@ const buildRutaWhere = ({ habilitado, estado, anio, mes, q }) => {
   return where;
 };
 
-const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sortBy, q } = {}) => {
-  const where = buildRutaWhere({ habilitado, estado, anio, mes, q });
+const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sortBy, q, idConductor, idVehiculo, idDestino } = {}) => {
+  const where = buildRutaWhere({ habilitado, estado, anio, mes, q, idConductor, idVehiculo, idDestino });
 
   const offset = (page - 1) * limit;
   const order = buildOrder(sortBy);
@@ -52,6 +54,7 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
     offset,
     order: order.length > 0 ? order : [['fechaSalida', 'DESC'], ['horaSalida', 'DESC']],
     distinct: true,
+    subQuery: false,
   });
 
   return { data, total: count };
@@ -128,11 +131,62 @@ const updateEstado = async (id, estado) => {
     throw new AppError(`Estado inválido. Debe ser uno de: ${estadosValidos.join(', ')}`, 400);
   }
 
-  const ruta = await Ruta.findByPk(id);
+  const ruta = await Ruta.findByPk(id, {
+    include: [
+      { model: Vehiculo, as: 'vehiculo', attributes: ['idVehiculo', 'placa', 'marca', 'modelo'] },
+      { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario', attributes: ['nombre', 'apellido'] }] }
+    ]
+  });
   if (!ruta) throw new AppError('Ruta no encontrada', 404);
 
   if (ruta.estado === 'Completada') {
     throw new AppError('No se puede cambiar el estado de una ruta completada', 400);
+  }
+
+  if (estado === 'Programada' && ruta.estado === 'En Curso') {
+    throw new AppError('No se puede revertir el estado de una ruta en curso a Programada', 400);
+  }
+
+  if (estado === 'En Curso') {
+    const rutaEnCursoVehiculo = await Ruta.findOne({
+      where: { idVehiculo: ruta.idVehiculo, estado: 'En Curso', idRuta: { [Op.ne]: id }, habilitado: true }
+    });
+    if (rutaEnCursoVehiculo) {
+      const v = ruta.vehiculo;
+      throw new AppError(
+        `El vehículo ${v?.placa || ''} ya está en curso en otra ruta (Ruta #${rutaEnCursoVehiculo.idRuta})`,
+        409,
+        [{
+          tipo: 'Conflicto de vehículo',
+          id: rutaEnCursoVehiculo.idRuta,
+          descripcion: `${v?.placa || 'Vehículo'} ya está asignado a la Ruta #${rutaEnCursoVehiculo.idRuta} que se encuentra En Curso`
+        }],
+        'VEHICLE_IN_USE'
+      );
+    }
+
+    const rutaEnCursoConductor = await Ruta.findOne({
+      where: { idConductor: ruta.idConductor, estado: 'En Curso', idRuta: { [Op.ne]: id }, habilitado: true }
+    });
+    if (rutaEnCursoConductor) {
+      const u = ruta.conductor?.usuario;
+      throw new AppError(
+        `El conductor ${u ? `${u.nombre} ${u.apellido}` : ''} ya está en curso en otra ruta (Ruta #${rutaEnCursoConductor.idRuta})`,
+        409,
+        [{
+          tipo: 'Conflicto de conductor',
+          id: rutaEnCursoConductor.idRuta,
+          descripcion: `${u ? `${u.nombre} ${u.apellido}` : 'El conductor'} ya está asignado a la Ruta #${rutaEnCursoConductor.idRuta} que se encuentra En Curso`
+        }],
+        'CONDUCTOR_IN_USE'
+      );
+    }
+
+    await Vehiculo.update({ estado: 'ocupado' }, { where: { idVehiculo: ruta.idVehiculo } });
+  }
+
+  if ((estado === 'Completada' || estado === 'Cancelada') && ruta.estado === 'En Curso') {
+    await Vehiculo.update({ estado: 'disponible' }, { where: { idVehiculo: ruta.idVehiculo } });
   }
 
   ruta.estado = estado;
@@ -173,8 +227,15 @@ const toggleHabilitado = async (id) => {
   if (!ruta) throw new AppError('Ruta no encontrada', 404);
 
   if (ruta.habilitado === true) {
-    const encomiendasActivas = await tieneEncomiendasActivasPorRuta(id);
-    if (encomiendasActivas) throw new AppError('No se puede inhabilitar una ruta con encomiendas activas', 400);
+    const { bloqueado, dependencias } = await verificarDependenciasRuta(id);
+    if (bloqueado) {
+      throw new AppError(
+        'No se puede inhabilitar esta ruta porque tiene encomiendas activas',
+        409,
+        dependencias,
+        'DEPENDENCY_CONFLICT'
+      );
+    }
   }
 
   ruta.habilitado = !ruta.habilitado;

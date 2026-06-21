@@ -4,15 +4,15 @@ const morgan = require('morgan');
 
 const AppError = require('./errors/appError');
 const errorHandler = require('./middlewares/errorHandler');
+const { writeLimiter } = require('./middlewares/rateLimiter');
 
 const app = express();
 
 // Middlewares
 app.use(cors({
   origin: [
-    'http://localhost:3000',
     'http://localhost:5173',
-    // 'https://dominio.com'
+    // 'https://tu-app.vercel.app'  ← agregar cuando se despliegue en Vercel
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -35,6 +35,9 @@ const clienteRoutes = require('./routes/clientes');
 const encomiendaRoutes = require('./routes/encomiendas');
 const rolRoutes = require('./routes/roles');
 const permisosRoutes = require('./routes/permisos');
+
+// Rate limiting para escritura en todas las rutas de negocio (omite GET/HEAD/OPTIONS)
+app.use('/api', writeLimiter);
 
 // Rutas de la API
 app.use('/api/auth', authRoutes);
@@ -82,8 +85,11 @@ app.get('/api/health', async (req, res) => {
   });
 });
 
-// Endpoint para inicializar datos de la base de datos
+// Endpoint para inicializar datos de la base de datos (solo disponible en desarrollo)
 app.post('/api/seed', async (req, res, next) => {
+  if (process.env.NODE_ENV === 'production') {
+    return next(new AppError('Endpoint no disponible en producción', 403));
+  }
   try {
     const bcrypt = require('bcryptjs');
     const { Rol, Permiso, Usuario } = require('./models');

@@ -14,6 +14,5 @@ router.get('/:id', authorize('admin'), rolController.getById);
 router.post('/', authorize('admin'), createValidation, validate, rolController.create);
 router.put('/:id', authorize('admin'), updateValidation, validate, rolController.update);
 router.patch('/:id/toggle-habilitado', authorize('admin'), rolController.toggleHabilitado);
-router.delete('/:id', authorize('admin'), rolController.delete);
 
 module.exports = router;

@@ -1,6 +1,6 @@
 const { Destino, Ruta } = require('../models');
 const AppError = require('../errors/appError');
-const { tieneRutasActivasPorDestino } = require('../middlewares/validateDependencies');
+const { verificarDependenciasDestino } = require('../middlewares/validateDependencies');
 const { Op } = require('sequelize');
 
 const buildOrder = (sortBy) => {
@@ -96,8 +96,15 @@ const toggleHabilitado = async (id) => {
   const destino = await Destino.findByPk(id);
   if (!destino) throw new AppError('Destino no encontrado', 404);
   if (destino.habilitado === true) {
-    const rutasActivas = await tieneRutasActivasPorDestino(id);
-    if (rutasActivas) throw new AppError('No se puede inhabilitar un destino con rutas activas', 400);
+    const { bloqueado, dependencias } = await verificarDependenciasDestino(id);
+    if (bloqueado) {
+      throw new AppError(
+        'No se puede inhabilitar este destino porque tiene rutas activas o programadas',
+        409,
+        dependencias,
+        'DEPENDENCY_CONFLICT'
+      );
+    }
   }
   destino.habilitado = !destino.habilitado;
   await destino.save();

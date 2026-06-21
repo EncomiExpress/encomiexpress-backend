@@ -41,10 +41,11 @@ const buildOrder = (sortBy) => {
   return [[field, direction]];
 };
 
-const getAll = async ({ estado, idCliente, fechaInicio, fechaFin, habilitado, estadoPago, metodoPago, q, page = 1, limit = 10, sortBy } = {}) => {
+const getAll = async ({ estado, idCliente, idRuta, fechaInicio, fechaFin, habilitado, estadoPago, metodoPago, q, page = 1, limit = 10, sortBy } = {}) => {
   const where = {};
   if (estado) where.estado = estado;
   if (idCliente) where.idCliente = idCliente;
+  if (idRuta) where.idRuta = parseInt(idRuta);
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
   if (estadoPago) where.estadoPago = estadoPago;
   if (metodoPago) where.metodoPago = metodoPago;
@@ -82,13 +83,14 @@ const getAll = async ({ estado, idCliente, fechaInicio, fechaFin, habilitado, es
           { model: Destino, as: 'destino', required: false },
         ],
       },
-      { model: Destinatario, as: 'destinatarios' },
-      { model: Paquete, as: 'paquetes' },
+      { model: Destinatario, as: 'destinatarios', separate: true },
+      { model: Paquete, as: 'paquetes', separate: true },
     ],
     limit,
     offset,
     order: order.length > 0 ? order : [['fechaRegistro', 'DESC']],
     distinct: true,
+    subQuery: false,
   });
 
   return { data, total: count };
@@ -488,23 +490,23 @@ const cambiarEstado = async (id, estado) => {
   return encomienda;
 };
 
-const deleteEncomienda = async (id) => {
+const toggleHabilitado = async (id) => {
   const encomienda = await EncomiendaVenta.findByPk(id);
 
   if (!encomienda) {
     throw new AppError('Encomienda no encontrada', 404);
   }
 
-  await encomienda.update({ habilitado: false });
-
-  return { message: 'Encomienda deshabilitada exitosamente' };
-};
-
-const toggleHabilitado = async (id) => {
-  const encomienda = await EncomiendaVenta.findByPk(id);
-
-  if (!encomienda) {
-    throw new AppError('Encomienda no encontrada', 404);
+  if (encomienda.habilitado) {
+    const ESTADOS_FINALES = ['entregado', 'devuelto'];
+    if (!ESTADOS_FINALES.includes(encomienda.estado)) {
+      throw new AppError(
+        `No se puede inhabilitar la encomienda porque está en estado "${encomienda.estado}"`,
+        409,
+        [{ tipo: 'Estado activo', id: encomienda.idEncomiendaVenta, descripcion: `La encomienda ${encomienda.numeroGuia || '#' + encomienda.idEncomiendaVenta} está en estado "${encomienda.estado}"` }],
+        'DEPENDENCY_CONFLICT'
+      );
+    }
   }
 
   const nuevoEstado = !encomienda.habilitado;
@@ -572,7 +574,6 @@ module.exports = {
   create,
   update,
   cambiarEstado,
-  delete: deleteEncomienda,
   toggleHabilitado,
   agregarPaquete,
   agregarDestinatario,

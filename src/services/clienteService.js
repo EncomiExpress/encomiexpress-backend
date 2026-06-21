@@ -1,7 +1,7 @@
 const { Cliente } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
-const { tieneEncomiendasActivasPorCliente } = require('../middlewares/validateDependencies');
+const { verificarDependenciasCliente } = require('../middlewares/validateDependencies');
 
 const buildOrder = (sortBy) => {
   if (!sortBy) return [];
@@ -131,18 +131,22 @@ const update = async (id, data) => {
 
 const toggleHabilitado = async (id) => {
   const cliente = await Cliente.findByPk(id);
-  if (!cliente) {
-    throw new AppError('Cliente no encontrado', 404);
-  }
+  if (!cliente) throw new AppError('Cliente no encontrado', 404);
 
   if (cliente.habilitado === true) {
-    const encomiendasActivas = await tieneEncomiendasActivasPorCliente(id);
-    if (encomiendasActivas) throw new AppError('No se puede inhabilitar un cliente con encomiendas activas', 400);
+    const { bloqueado, dependencias } = await verificarDependenciasCliente(id);
+    if (bloqueado) {
+      throw new AppError(
+        'No se puede inhabilitar este cliente porque tiene encomiendas activas',
+        409,
+        dependencias,
+        'DEPENDENCY_CONFLICT'
+      );
+    }
   }
 
   cliente.habilitado = !cliente.habilitado;
   await cliente.save();
-
   return cliente;
 };
 

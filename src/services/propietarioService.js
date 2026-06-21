@@ -1,7 +1,7 @@
 const { PropietarioVehiculo, Vehiculo } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
-const { tieneVehiculosActivosPorPropietario } = require('../middlewares/validateDependencies');
+const { verificarDependenciasPropietario } = require('../middlewares/validateDependencies');
 
 const buildOrder = (sortBy) => {
   if (!sortBy) return [];
@@ -132,8 +132,15 @@ const toggleHabilitado = async (id) => {
   const propietario = await PropietarioVehiculo.findByPk(id);
   if (!propietario) throw new AppError('Propietario no encontrado', 404);
   if (propietario.habilitado === true) {
-    const vehiculosActivos = await tieneVehiculosActivosPorPropietario(id);
-    if (vehiculosActivos) throw new AppError('No se puede inhabilitar un propietario con vehículos activos', 400);
+    const { bloqueado, dependencias } = await verificarDependenciasPropietario(id);
+    if (bloqueado) {
+      throw new AppError(
+        'No se puede inhabilitar este propietario porque tiene vehículos activos asociados',
+        409,
+        dependencias,
+        'DEPENDENCY_CONFLICT'
+      );
+    }
   }
   propietario.habilitado = !propietario.habilitado;
   await propietario.save();

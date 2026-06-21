@@ -16,10 +16,11 @@ const buildOrder = (sortBy) => {
   return [[field, direction]];
 };
 
-const getAll = async ({ idConductor, estado, habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
+const getAll = async ({ idConductor, idRuta, estado, habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
   try {
     const where = {};
     if (idConductor) where.idConductor = idConductor;
+    if (idRuta) where.idRuta = parseInt(idRuta);
     if (estado) where.estado = estado;
     if (habilitado !== undefined) where.habilitado = habilitado === 'true';
     if (q) {
@@ -293,9 +294,17 @@ const toggleHabilitado = async (id) => {
   const anticipo = await AnticipoExcedente.findByPk(id);
   if (!anticipo) throw new AppError('Anticipo no encontrado', 404);
   if (anticipo.habilitado === true) {
-    // No permitir inhabilitar anticipos que estén pendientes
     if (anticipo.estado === 'pendiente') {
-      throw new AppError('No se puede inhabilitar un anticipo pendiente', 400);
+      throw new AppError(
+        'No se puede inhabilitar un anticipo que aún está pendiente de legalización',
+        409,
+        [{
+          tipo: 'Estado del anticipo',
+          id: anticipo.idAnticipoExcedente,
+          descripcion: `Anticipo #${anticipo.idAnticipoExcedente} con valor $${anticipo.valorAnticipo} no ha sido legalizado aún`
+        }],
+        'DEPENDENCY_CONFLICT'
+      );
     }
   }
   anticipo.habilitado = !anticipo.habilitado;

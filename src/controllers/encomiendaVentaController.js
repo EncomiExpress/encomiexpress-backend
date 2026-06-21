@@ -9,6 +9,7 @@ exports.getAll = async (req, res, next) => {
     const filters = {
       estado: req.query.estado,
       idCliente: req.query.idCliente,
+      idRuta: req.query.idRuta,
       fechaInicio: req.query.fechaInicio,
       fechaFin: req.query.fechaFin,
       habilitado: req.query.habilitado,
@@ -80,16 +81,6 @@ exports.cambiarEstado = async (req, res, next) => {
     const { id } = req.params;
     const encomienda = await encomiendaService.cambiarEstado(id, req.body.estado);
     res.json({ success: true, message: 'Estado de encomienda actualizado exitosamente', data: encomienda });
-  } catch (error) {
-    next(error);
-  }
-};
-
-exports.delete = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    await encomiendaService.delete(id);
-    res.json({ success: true, message: 'Encomienda deshabilitada exitosamente' });
   } catch (error) {
     next(error);
   }

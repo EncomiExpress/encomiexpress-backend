@@ -14,6 +14,15 @@ const {
 // Rutas públicas
 // ============================================
 
+// Ruta pública de seguimiento por token (sin autenticación — para clientes externos)
+router.get('/public/:token', encomiendaVentaController.getPublicByToken);
+
+// ============================================
+// Rutas protegidas
+// ============================================
+
+router.use(authenticate);
+
 // GET /api/encomiendas - Listar todas las encomiendas
 router.get('/', encomiendaVentaController.getAll);
 
@@ -22,15 +31,6 @@ router.get('/:id', encomiendaVentaController.getById);
 
 // GET /api/encomiendas/guia/:numeroGuia - Buscar por número de guía
 router.get('/guia/:numeroGuia', encomiendaVentaController.getByGuia);
-
-// Ruta pública de seguimiento por token
-router.get('/public/:token', encomiendaVentaController.getPublicByToken);
-
-// ============================================
-// Rutas protegidas
-// ============================================
-
-router.use(authenticate);
 
 // POST /api/encomiendas - Crear una nueva encomienda
 router.post('/', authenticate, createValidation, validate, encomiendaVentaController.create);
@@ -43,9 +43,6 @@ router.patch('/:id/estado', authenticate, cambiarEstadoValidation, validate, enc
 
 // PATCH /api/encomiendas/:id/toggle-habilitado - Habilitar/Inhabilitar
 router.patch('/:id/toggle-habilitado', encomiendaVentaController.toggleHabilitado);
-
-// DELETE /api/encomiendas/:id - Inhabilitar una encomienda (legacy)
-router.delete('/:id', authorize('admin'), encomiendaVentaController.delete);
 
 // POST /api/encomiendas/:idEncomiendaVenta/paquetes - Agregar paquete
 router.post('/:idEncomiendaVenta/paquetes', authenticate, agregarPaqueteValidation, validate, encomiendaVentaController.agregarPaquete);

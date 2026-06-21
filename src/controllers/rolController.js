@@ -59,16 +59,6 @@ const toggleHabilitado = async (req, res, next) => {
   }
 };
 
-const deleteRol = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    await rolService.delete(id);
-    res.json({ success: true, message: 'Rol eliminado correctamente' });
-  } catch (error) {
-    next(error);
-  }
-};
-
 const getAllPermisos = async (req, res, next) => {
   try {
     const permisos = await rolService.getAllPermisos();
@@ -84,6 +74,5 @@ module.exports = {
   create,
   update,
   toggleHabilitado,
-  delete: deleteRol,
   getAllPermisos
 };

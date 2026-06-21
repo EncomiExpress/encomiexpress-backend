@@ -2,15 +2,18 @@ const { Conductor, Usuario, Vehiculo, AnticipoExcedente, Ruta } = require('../mo
 const { Op } = require('sequelize');
 const bcrypt = require('bcryptjs');
 const AppError = require('../errors/appError');
-const { tieneRutasActivas, tieneVehiculosActivos, tieneAnticiposPendientes } = require('../middlewares/validateDependencies');
+const { verificarDependenciasConductor } = require('../middlewares/validateDependencies');
 
 const buildOrder = (sortBy) => {
   if (!sortBy) return [];
-  const allowed = ['nombre', 'apellido', 'estado', 'idConductor', 'habilitado'];
   const parts = sortBy.split('.');
-  const field = allowed.includes(parts[0]) ? parts[0] : 'idConductor';
+  const field = parts[0];
   const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
-  return [[field, direction]];
+  if (['nombre', 'apellido'].includes(field)) {
+    return [[{ model: Usuario, as: 'usuario' }, field, direction]];
+  }
+  const allowedDirect = ['estado', 'idConductor', 'habilitado', 'categoriaLicencia', 'numeroLicencia'];
+  return [[allowedDirect.includes(field) ? field : 'idConductor', direction]];
 };
 
 const getAll = async ({ estado, habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
@@ -21,13 +24,14 @@ const getAll = async ({ estado, habilitado, q, page = 1, limit = 10, sortBy } = 
     const query = `%${q.trim()}%`;
     const numericId = Number(q);
     const conditions = [
-      { nombre: { [Op.iLike]: query } },
-      { apellido: { [Op.iLike]: query } },
-      { categoriaLicencia: { [Op.iLike]: query } },
-      { numeroLicencia: { [Op.iLike]: query } },
+      { '$usuario.nombre$': { [Op.iLike]: query } },
+      { '$usuario.apellido$': { [Op.iLike]: query } },
+      { '$usuario.telefono$': { [Op.iLike]: query } },
       { '$usuario.email$': { [Op.iLike]: query } },
       { '$usuario.tipoIdentificacion$': { [Op.iLike]: query } },
       { '$usuario.numeroIdentificacion$': { [Op.iLike]: query } },
+      { categoriaLicencia: { [Op.iLike]: query } },
+      { numeroLicencia: { [Op.iLike]: query } },
     ];
     if (!Number.isNaN(numericId)) {
       conditions.unshift({ idConductor: numericId });
@@ -45,6 +49,7 @@ const getAll = async ({ estado, habilitado, q, page = 1, limit = 10, sortBy } = 
     offset,
     order: order.length > 0 ? order : [['idConductor', 'ASC']],
     distinct: true,
+    subQuery: false,
   });
 
   return { data, total: count };
@@ -63,9 +68,6 @@ const getById = async (id) => {
 };
 
 const create = async (data) => {
-  console.log('=== Creando conductor ===');
-  console.log(data);
-
   const {
     tipoIdentificacion,
     numeroIdentificacion,
@@ -99,7 +101,6 @@ const create = async (data) => {
   };
 
   const usuario = await Usuario.create(usuarioData);
-  console.log('Usuario creado con ID:', usuario.idUsuario);
 
   const conductor = await Conductor.create({
     idUsuario: usuario.idUsuario,
@@ -108,8 +109,6 @@ const create = async (data) => {
     vencimientoLicencia: vencimientoLicencia,
     estado: 'activo'
   });
-
-  console.log('Conductor creado con ID:', conductor.idConductor);
 
   return {
     idConductor: conductor.idConductor,
@@ -251,14 +250,15 @@ const toggleHabilitado = async (id) => {
   if (!conductor) throw new AppError('Conductor no encontrado', 404);
 
   if (conductor.habilitado === true) {
-    const rutasActivas = await tieneRutasActivas(id);
-    if (rutasActivas) throw new AppError('No se puede inhabilitar un conductor con rutas activas', 400);
-
-    const vehiculosActivos = await tieneVehiculosActivos(id);
-    if (vehiculosActivos) throw new AppError('No se puede inhabilitar un conductor con vehículos asignados activos', 400);
-
-    const anticiposPendientes = await tieneAnticiposPendientes(id);
-    if (anticiposPendientes) throw new AppError('No se puede inhabilitar un conductor con anticipos pendientes de legalización', 400);
+    const { bloqueado, dependencias } = await verificarDependenciasConductor(id);
+    if (bloqueado) {
+      throw new AppError(
+        'No se puede inhabilitar este conductor porque tiene rutas en curso o anticipos pendientes',
+        409,
+        dependencias,
+        'DEPENDENCY_CONFLICT'
+      );
+    }
   }
 
   conductor.habilitado = !conductor.habilitado;
