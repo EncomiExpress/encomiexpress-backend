@@ -68,20 +68,23 @@ const getAll = async ({ idConductor, idRuta, estado, habilitado, q, page = 1, li
   }
 };
 
-const getById = async (id) => {
-  const anticipo = await AnticipoExcedente.findByPk(id, {
+const ANTICIPO_INCLUDE = [
+  { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
+  {
+    model: Ruta,
+    as: 'ruta',
     include: [
-      { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
-      {
-        model: Ruta,
-        as: 'ruta',
-        include: [
-          { model: Vehiculo, as: 'vehiculo' },
-          { model: Destino, as: 'destino' }
-        ]
-      }
+      { model: Vehiculo, as: 'vehiculo' },
+      { model: Destino, as: 'destino' }
     ]
-  });
+  }
+];
+
+const getAnticipoCompleto = (id) =>
+  AnticipoExcedente.findByPk(id, { include: ANTICIPO_INCLUDE });
+
+const getById = async (id) => {
+  const anticipo = await getAnticipoCompleto(id);
 
   if (!anticipo) {
     throw new AppError('Anticipo no encontrado', 404);
@@ -125,7 +128,7 @@ const create = async (data) => {
     fechaEntrega: cleanDate(fechaEntrega)
   });
 
-  return anticipo;
+  return getAnticipoCompleto(anticipo.idAnticipoExcedente);
 };
 
 const update = async (id, data) => {
@@ -174,7 +177,7 @@ const update = async (id, data) => {
     fechaEntregaExcedente: cleanedFechaEntregaExcedente !== undefined ? cleanedFechaEntregaExcedente : anticipo.fechaEntregaExcedente
   });
 
-  return anticipo;
+  return getAnticipoCompleto(id);
 };
 
 const liquidar = async (id, { valorGastado, soporte }) => {
@@ -198,7 +201,7 @@ const liquidar = async (id, { valorGastado, soporte }) => {
     fechaLegalizacion: new Date()
   });
 
-  return anticipo;
+  return getAnticipoCompleto(id);
 };
 
 const entregarExcedente = async (id, { soporte }) => {
@@ -218,7 +221,7 @@ const entregarExcedente = async (id, { soporte }) => {
     fechaEntregaExcedente: new Date()
   });
 
-  return anticipo;
+  return getAnticipoCompleto(id);
 };
 
 
@@ -264,7 +267,7 @@ const createMisAnticipo = async (idUsuario, rolNombre, data) => {
     fechaEntrega: cleanDate(fechaEntrega)
   });
 
-  return anticipo;
+  return getAnticipoCompleto(anticipo.idAnticipoExcedente);
 };
 
 const cambiarEstado = async (id, estado) => {
@@ -276,7 +279,7 @@ const cambiarEstado = async (id, estado) => {
   if (!anticipo) throw new AppError('Anticipo no encontrado', 404);
   anticipo.estado = estado;
   await anticipo.save();
-  return anticipo;
+  return getAnticipoCompleto(id);
 };
 
 const updateSoporte = async (id, fileUrl) => {
@@ -318,7 +321,7 @@ const toggleHabilitado = async (id) => {
     // no bloquear por fallos al emitir eventos
   }
 
-  return anticipo;
+  return getAnticipoCompleto(id);
 };
 
 module.exports = {

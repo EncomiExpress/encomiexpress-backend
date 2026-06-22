@@ -1,4 +1,4 @@
-const { AppError } = require('../errors/appError');
+const AppError = require('../errors/appError');
 const anticipoService = require('../services/anticipoService');
 
 exports.getAll = async (req, res, next) => {

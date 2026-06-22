@@ -1,6 +1,4 @@
-const { AppError } = require('../errors/appError');
 const conductorService = require('../services/conductorService');
-const { Op } = require('sequelize');
 
 exports.getAll = async (req, res, next) => {
   try {
@@ -29,16 +27,7 @@ exports.getById = async (req, res, next) => {
 exports.create = async (req, res, next) => {
   try {
     const conductor = await conductorService.create(req.body);
-    res.status(201).json({
-      success: true,
-      message: 'Conductor creado exitosamente',
-      data: {
-        idConductor: conductor.idConductor,
-        idUsuario: conductor.idUsuario,
-        nombre: conductor.nombre,
-        email: conductor.email
-      }
-    });
+    res.status(201).json({ success: true, message: 'Conductor creado exitosamente', data: conductor });
   } catch (error) {
     next(error);
   }

@@ -110,12 +110,9 @@ const create = async (data) => {
     estado: 'activo'
   });
 
-  return {
-    idConductor: conductor.idConductor,
-    idUsuario: conductor.idUsuario,
-    nombre: `${nombre || 'Conductor'} ${apellido || 'Nuevo'}`,
-    email: finalEmail
-  };
+  return Conductor.findByPk(conductor.idConductor, {
+    include: [{ model: Usuario, as: 'usuario', attributes: { exclude: ['password'] } }]
+  });
 };
 
 const update = async (id, data) => {

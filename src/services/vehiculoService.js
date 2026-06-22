@@ -91,7 +91,7 @@ const create = async (data) => {
     throw new AppError('La placa ya está registrada', 400);
   }
 
-  const vehiculo = await Vehiculo.create({
+  const vehiculoCreado = await Vehiculo.create({
     idConductor,
     idPropietario,
     placa,
@@ -107,7 +107,12 @@ const create = async (data) => {
     vencimientoSeguroTerceros
   });
 
-  return vehiculo;
+  return Vehiculo.findByPk(vehiculoCreado.idVehiculo, {
+    include: [
+      { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
+      { model: PropietarioVehiculo, as: 'propietario' }
+    ]
+  });
 };
 
 const update = async (id, data) => {
@@ -156,7 +161,12 @@ const update = async (id, data) => {
     habilitado: habilitado !== undefined ? habilitado : vehiculo.habilitado
   });
 
-  return vehiculo;
+  return Vehiculo.findByPk(id, {
+    include: [
+      { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
+      { model: PropietarioVehiculo, as: 'propietario' }
+    ]
+  });
 };
 
 
