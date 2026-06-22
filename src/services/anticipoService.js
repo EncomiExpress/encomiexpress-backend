@@ -63,7 +63,6 @@ const getAll = async ({ idConductor, idRuta, estado, habilitado, q, page = 1, li
 
     return { data, total: count };
   } catch (error) {
-    console.error('ERROR anticipos:', error.message);
     throw error;
   }
 };

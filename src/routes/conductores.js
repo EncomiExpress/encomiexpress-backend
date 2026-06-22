@@ -12,12 +12,12 @@ const { createValidation, updateValidation, cambiarEstadoValidation } = require(
 router.use(authenticate);
 
 // Rutas protegidas - perfil del conductor logueado
-router.get('/perfil', async (req, res) => {
+router.get('/perfil', async (req, res, next) => {
   try {
     if (req.usuario.rol?.nombre !== 'conductor') {
       return res.status(403).json({
         success: false,
-        message: 'Solo los conductors pueden acceder a su perfil'
+        message: 'Solo los conductores pueden acceder a su perfil'
       });
     }
 
@@ -61,15 +61,15 @@ router.get('/perfil', async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Error al obtener perfil', error: error.message });
+    next(error);
   }
 });
 
 // Actualizar perfil del conductor logueado
-router.put('/perfil', async (req, res) => {
+router.put('/perfil', async (req, res, next) => {
   try {
     if (req.usuario.rol?.nombre !== 'conductor') {
-      return res.status(403).json({ success: false, message: 'Solo los conductors pueden actualizar su perfil' });
+      return res.status(403).json({ success: false, message: 'Solo los conductores pueden actualizar su perfil' });
     }
 
     const { Conductor, Usuario, Vehiculo } = require('../models');
@@ -109,15 +109,15 @@ router.put('/perfil', async (req, res) => {
       throw error;
     }
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Error al actualizar perfil', error: error.message });
+    next(error);
   }
 });
 
 // Rutas para anticipos del conductor logueado
-router.get('/mis-anticipos', async (req, res) => {
+router.get('/mis-anticipos', async (req, res, next) => {
   try {
     if (req.usuario.rol?.nombre !== 'conductor') {
-      return res.status(403).json({ success: false, message: 'Solo los conductors pueden acceder a esta información' });
+      return res.status(403).json({ success: false, message: 'Solo los conductores pueden acceder a esta información' });
     }
     const { Conductor } = require('../models');
     const conductor = await Conductor.findOne({ where: { idUsuario: req.usuario.idUsuario } });
@@ -127,14 +127,14 @@ router.get('/mis-anticipos', async (req, res) => {
     req.params.id = conductor.idConductor;
     return conductorController.getAnticipos(req, res);
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Error al obtener anticipos', error: error.message });
+    next(error);
   }
 });
 
-router.post('/mis-anticipos', async (req, res) => {
+router.post('/mis-anticipos', async (req, res, next) => {
   try {
     if (req.usuario.rol?.nombre !== 'conductor') {
-      return res.status(403).json({ success: false, message: 'Solo los conductors pueden crear anticipos' });
+      return res.status(403).json({ success: false, message: 'Solo los conductores pueden crear anticipos' });
     }
     const { Conductor } = require('../models');
     const conductor = await Conductor.findOne({ where: { idUsuario: req.usuario.idUsuario } });
@@ -144,7 +144,7 @@ router.post('/mis-anticipos', async (req, res) => {
     req.body.idConductor = conductor.idConductor;
     return anticipoController.create(req, res);
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Error al crear anticipo', error: error.message });
+    next(error);
   }
 });
 

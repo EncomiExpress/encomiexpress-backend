@@ -3,6 +3,13 @@ const http = require('http');
 const app = require('./app');
 const { sequelize } = require('./models');
 
+const REQUIRED_ENV_VARS = ['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'JWT_SECRET', 'JWT_REFRESH_SECRET'];
+const missingEnvVars = REQUIRED_ENV_VARS.filter(v => !process.env[v]);
+if (missingEnvVars.length > 0) {
+  console.error('❌ Variables de entorno requeridas faltantes:', missingEnvVars.join(', '));
+  process.exit(1);
+}
+
 const PORT = process.env.PORT || 3000;
 
 const startServer = async () => {

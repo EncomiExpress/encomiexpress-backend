@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const morgan = require('morgan');
 
 const AppError = require('./errors/appError');
@@ -9,6 +10,7 @@ const { writeLimiter } = require('./middlewares/rateLimiter');
 const app = express();
 
 // Middlewares
+app.use(helmet());
 app.use(cors({
   origin: [
     'http://localhost:5173',
