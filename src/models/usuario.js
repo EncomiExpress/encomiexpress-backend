@@ -10,7 +10,7 @@ const Usuario = sequelize.define('Usuario', {
   },
   idRol: {
     type: DataTypes.INTEGER,
-    allowNull: true
+    allowNull: false
   },
   tipoIdentificacion: {
     type: DataTypes.STRING(20),
