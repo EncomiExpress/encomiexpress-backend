@@ -48,7 +48,7 @@ const update = async (req, res, next) => {
 const toggleHabilitado = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const rol = await rolService.toggleHabilitado(id);
+    const rol = await rolService.toggleHabilitado(id, req.usuario.idRol, req.usuario.idUsuario);
     res.json({
       success: true,
       message: `Rol ${rol.habilitado ? 'habilitado' : 'inhabilitado'} correctamente`,

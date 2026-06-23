@@ -108,15 +108,6 @@ const update = async (id, data) => {
     throw new AppError('Usuario no encontrado', 404);
   }
 
-  try {
-    const rol = await Rol.findByPk(usuario.idRol);
-    if (rol && String(rol.nombre).toLowerCase() === 'admin') {
-      throw new AppError('No se puede inhabilitar el usuario administrador', 400);
-    }
-  } catch (e) {
-    // Si ocurre cualquier error al verificar rol, no bloquear explícitamente; dejar que otras validaciones manejen el caso.
-  }
-
   if (email && email !== usuario.email) {
     const existingEmail = await Usuario.findOne({ where: { email } });
     if (existingEmail) {
@@ -169,12 +160,23 @@ const changePassword = async (id, { currentPassword, newPassword }) => {
 
 const toggleHabilitado = async (id, currentUserId) => {
   if (parseInt(id) === currentUserId) {
-    throw new AppError('No puedes inhabilitar tu propio usuario', 400);
+    throw new AppError('No puedes inhabilitar tu propia cuenta', 400);
   }
-  const usuario = await Usuario.findByPk(id);
+
+  const usuario = await Usuario.findByPk(id, { include: [{ model: Rol, as: 'rol' }] });
 
   if (!usuario) {
     throw new AppError('Usuario no encontrado', 404);
+  }
+
+  if (usuario.habilitado === true && usuario.rol?.nombre === 'admin') {
+    const adminsHabilitados = await Usuario.count({
+      include: [{ model: Rol, as: 'rol', where: { nombre: 'admin' } }],
+      where: { habilitado: true },
+    });
+    if (adminsHabilitados <= 1) {
+      throw new AppError('No se puede inhabilitar este usuario: debe quedar al menos un administrador activo', 400);
+    }
   }
 
   if (usuario.habilitado === true) {

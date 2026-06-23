@@ -25,6 +25,10 @@ const login = async (email, password) => {
     throw new AppError('Tu cuenta está inhabilitada. Contacta al administrador.', 401);
   }
 
+  if (usuario.rol && !usuario.rol.habilitado) {
+    throw new AppError('El acceso para tu rol está inhabilitado. Contacta al administrador.', 401);
+  }
+
   const isPasswordValid = await bcrypt.compare(password, usuario.password);
   if (!isPasswordValid) {
     throw new AppError('La contraseña es incorrecta', 401);
@@ -67,6 +71,7 @@ const login = async (email, password) => {
     token,
     refreshToken,
     usuario: {
+      idUsuario: usuario.idUsuario,
       nombre: usuario.nombre,
       apellido: usuario.apellido,
       telefono: usuario.telefono,
@@ -93,6 +98,7 @@ const refresh = async (refreshToken) => {
 
   if (!usuario) throw new AppError('Usuario no encontrado', 401);
   if (!usuario.habilitado) throw new AppError('Tu cuenta está inhabilitada. Contacta al administrador.', 401);
+  if (usuario.rol && !usuario.rol.habilitado) throw new AppError('El acceso para tu rol está inhabilitado. Contacta al administrador.', 401);
 
   const token = generateToken({
     idUsuario: usuario.idUsuario,
@@ -172,6 +178,7 @@ const getProfile = async (idUsuario) => {
   const permisos = usuario.rol?.permisos?.map(p => p.nombre) ?? [];
 
   return {
+    idUsuario: usuario.idUsuario,
     nombre: usuario.nombre,
     apellido: usuario.apellido,
     telefono: usuario.telefono,

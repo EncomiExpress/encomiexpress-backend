@@ -1,4 +1,4 @@
-const { Rol, Permiso, RolPermiso } = require('../models');
+const { Rol, Permiso, RolPermiso, Usuario } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 
@@ -148,21 +148,35 @@ const update = async (id, data) => {
   };
 };
 
-const toggleHabilitado = async (id) => {
+const toggleHabilitado = async (id, idRolActual, idUsuarioActual) => {
+  if (parseInt(id) === idRolActual) {
+    throw new AppError('No puedes inhabilitar tu propio rol', 400);
+  }
+
   const rol = await Rol.findByPk(id, {
-    include: [
-      {
-        model: Permiso,
-        as: 'permisos',
-        through: { attributes: [] }
-      }
-    ]
+    include: [{ model: Permiso, as: 'permisos', through: { attributes: [] } }]
   });
   if (!rol) {
     throw new AppError('Rol no encontrado', 404);
   }
 
+  const inhabilitando = rol.habilitado === true;
+
   await rol.update({ habilitado: !rol.habilitado });
+
+  if (inhabilitando) {
+    await Usuario.update(
+      { habilitado: false },
+      { where: { idRol: id, idUsuario: { [Op.ne]: idUsuarioActual } } }
+    );
+  } else {
+    // Al habilitar el rol, re-habilitar todos los usuarios de ese rol
+    await Usuario.update(
+      { habilitado: true },
+      { where: { idRol: id } }
+    );
+  }
+
   await rol.reload();
 
   return {
