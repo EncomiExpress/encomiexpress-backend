@@ -210,9 +210,8 @@ ALTER TABLE "paquete" ADD FOREIGN KEY ("idEncomiendaVenta") REFERENCES "encomien
 -- ============================================
 
 -- Roles
-INSERT INTO "rol" ("nombre", "descripcion") VALUES 
+INSERT INTO "rol" ("nombre", "descripcion") VALUES
 ('admin', 'Administrador del sistema con acceso total'),
-('usuario', 'Usuario que puede registrar encomiendas'),
 ('conductor', 'Conductor de vehículo');
 
 -- Permisos
@@ -271,10 +270,16 @@ SELECT 1, "idPermiso" FROM "permiso" WHERE "habilitado" = true;
 INSERT INTO "usuario" ("idRol", "tipoIdentificacion", "numeroIdentificacion", "nombre", "apellido", "telefono", "email", "password") VALUES 
 (1, 'CC', '12345678', 'Administrador', 'Sistema', '3000000000', 'admin@encomiexpress.com', '$2a$10$T/qc0d/DChPQw8BSiuRljesqJLSk89uKCx9TMaoGJqho.LCkNpVJW');
 
--- Destinos de ejemplo
-INSERT INTO "destino" ("departamento", "ciudad", "tarifaBase") VALUES 
-('Antioquia', 'Medellín', 25000),
-('Cundinamarca', 'Bogotá', 20000),
-('Valle del Cauca', 'Cali', 30000),
-('Atlántico', 'Barranquilla', 35000),
-('Santander', 'Bucaramanga', 28000);
+-- Destinos del Bajo Cauca Antioqueño y conexiones
+INSERT INTO "destino" ("departamento", "ciudad", "tarifaBase") VALUES
+('Antioquia', 'Puerto Valdivia', 0),
+('Antioquia', 'Tarazá', 0),
+('Antioquia', 'Cáceres', 0),
+('Antioquia', 'Caucasia', 0),
+('Antioquia', 'Nechí', 0),
+('Antioquia', 'El Bagre', 0),
+('Antioquia', 'Zaragoza', 0),
+('Córdoba', 'Montelíbano', 0),
+('Córdoba', 'Puerto Libertador', 0),
+('Córdoba', 'Montería', 0),
+('Córdoba', 'Ayapel', 0);

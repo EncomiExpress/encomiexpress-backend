@@ -9,13 +9,11 @@ const createValidation = [
   r.nombre.required(),
   r.apellido.required(),
   r.telefono.optional(),
-  r.email.optional(),
-  r.password.optional(),
+  r.email.required(),
+  r.password.required(),
   body('categoriaLicencia').optional().notEmpty().withMessage('Categoría de licencia es requerida'),
   body('numeroLicencia').optional().notEmpty().withMessage('Número de licencia es requerido'),
   body('vencimientoLicencia').optional().isDate().withMessage('Fecha de vencimiento inválida'),
-  body('idConductor').optional().isInt().withMessage('ID de conductor debe ser un número entero'),
-  body('idRol').optional().isInt().withMessage('ID de rol debe ser un número entero'),
 ];
 
 const updateValidation = [

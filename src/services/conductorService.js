@@ -79,39 +79,42 @@ const create = async (data) => {
     categoriaLicencia,
     numeroLicencia,
     vencimientoLicencia,
-    idRol
   } = data;
 
-  const uniqueId = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
-  const finalNumId = numeroIdentificacion || uniqueId;
-  const finalEmail = email || `conductor${uniqueId}@test.com`;
+  const existingEmail = await Usuario.findOne({ where: { email } });
+  if (existingEmail) {
+    throw new AppError('El email ya está registrado', 400);
+  }
 
-  const hashedPassword = await bcrypt.hash(password || '123456', 10);
+  const existingDoc = await Usuario.findOne({ where: { numeroIdentificacion } });
+  if (existingDoc) {
+    throw new AppError('El número de identificación ya está registrado', 400);
+  }
 
-  const usuarioData = {
-    tipoIdentificacion: tipoIdentificacion || 'CC',
-    numeroIdentificacion: finalNumId,
-    nombre: nombre || 'Conductor',
-    apellido: apellido || 'Nuevo',
-    telefono: telefono || uniqueId,
-    email: finalEmail,
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  const usuario = await Usuario.create({
+    tipoIdentificacion,
+    numeroIdentificacion,
+    nombre,
+    apellido,
+    telefono,
+    email,
     password: hashedPassword,
-    idRol: idRol || 3,
-    habilitado: true
-  };
-
-  const usuario = await Usuario.create(usuarioData);
+    idRol: 2,
+    habilitado: true,
+  });
 
   const conductor = await Conductor.create({
     idUsuario: usuario.idUsuario,
-    categoriaLicencia: categoriaLicencia || 'B1',
-    numeroLicencia: numeroLicencia || uniqueId,
-    vencimientoLicencia: vencimientoLicencia,
-    estado: 'activo'
+    categoriaLicencia: categoriaLicencia || null,
+    numeroLicencia: numeroLicencia || null,
+    vencimientoLicencia: vencimientoLicencia || null,
+    estado: 'activo',
   });
 
   return Conductor.findByPk(conductor.idConductor, {
-    include: [{ model: Usuario, as: 'usuario', attributes: { exclude: ['password'] } }]
+    include: [{ model: Usuario, as: 'usuario', attributes: { exclude: ['password'] } }],
   });
 };
 
