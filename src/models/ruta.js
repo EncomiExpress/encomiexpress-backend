@@ -5,8 +5,7 @@ const Ruta = sequelize.define('Ruta', {
   idRuta: {
     type: DataTypes.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
-    field: 'idRuta'
+    autoIncrement: true
   },
   nombreRuta: {
     type: DataTypes.STRING(150),
@@ -55,7 +54,8 @@ const Ruta = sequelize.define('Ruta', {
   }
 }, {
   tableName: 'ruta',
-  timestamps: false
+  timestamps: false,
+  underscored: true
 });
 
 module.exports = Ruta;

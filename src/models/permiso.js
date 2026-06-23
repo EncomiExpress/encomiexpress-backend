@@ -5,8 +5,7 @@ const Permiso = sequelize.define('Permiso', {
   idPermiso: {
     type: DataTypes.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
-    field: 'idPermiso'
+    autoIncrement: true
   },
   nombre: {
     type: DataTypes.STRING(50),
@@ -22,7 +21,8 @@ const Permiso = sequelize.define('Permiso', {
   }
 }, {
   tableName: 'permiso',
-  timestamps: false
+  timestamps: false,
+  underscored: true
 });
 
 module.exports = Permiso;

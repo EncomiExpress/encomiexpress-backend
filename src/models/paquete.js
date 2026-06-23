@@ -5,8 +5,7 @@ const Paquete = sequelize.define('Paquete', {
   idPaquete: {
     type: DataTypes.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
-    field: 'idPaquete'
+    autoIncrement: true
   },
   idEncomiendaVenta: {
     type: DataTypes.INTEGER,
@@ -38,7 +37,8 @@ const Paquete = sequelize.define('Paquete', {
   }
 }, {
   tableName: 'paquete',
-  timestamps: false
+  timestamps: false,
+  underscored: true
 });
 
 module.exports = Paquete;

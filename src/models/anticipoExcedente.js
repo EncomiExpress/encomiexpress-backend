@@ -5,8 +5,7 @@ const AnticipoExcedente = sequelize.define('AnticipoExcedente', {
   idAnticipoExcedente: {
     type: DataTypes.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
-    field: 'idAnticipoExcedente'
+    autoIncrement: true
   },
   idConductor: {
     type: DataTypes.INTEGER,
@@ -53,8 +52,9 @@ const AnticipoExcedente = sequelize.define('AnticipoExcedente', {
     allowNull: true
   }
 }, {
-  tableName: 'anticipoExcedente',
-  timestamps: false
+  tableName: 'anticipo_excedente',
+  timestamps: false,
+  underscored: true
 });
 
 module.exports = AnticipoExcedente;

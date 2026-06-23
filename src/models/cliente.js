@@ -5,8 +5,7 @@ const Cliente = sequelize.define('Cliente', {
   idCliente: {
     type: DataTypes.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
-    field: 'id'
+    autoIncrement: true
   },
   tipoIdentificacion: {
     type: DataTypes.STRING(20),
@@ -43,7 +42,8 @@ const Cliente = sequelize.define('Cliente', {
   }
 }, {
   tableName: 'cliente',
-  timestamps: false
+  timestamps: false,
+  underscored: true
 });
 
 module.exports = Cliente;

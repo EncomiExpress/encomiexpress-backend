@@ -5,8 +5,7 @@ const Conductor = sequelize.define('Conductor', {
   idConductor: {
     type: DataTypes.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
-    field: 'idConductor'
+    autoIncrement: true
   },
   idUsuario: {
     type: DataTypes.INTEGER,
@@ -36,7 +35,8 @@ const Conductor = sequelize.define('Conductor', {
   }
 }, {
   tableName: 'conductor',
-  timestamps: false
+  timestamps: false,
+  underscored: true
 });
 
 module.exports = Conductor;

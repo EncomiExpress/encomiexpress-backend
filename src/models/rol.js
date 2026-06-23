@@ -5,8 +5,7 @@ const Rol = sequelize.define('Rol', {
   idRol: {
     type: DataTypes.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
-    field: 'idRol'
+    autoIncrement: true
   },
   nombre: {
     type: DataTypes.STRING(50),
@@ -22,7 +21,8 @@ const Rol = sequelize.define('Rol', {
   }
 }, {
   tableName: 'rol',
-  timestamps: false
+  timestamps: false,
+  underscored: true
 });
 
 module.exports = Rol;

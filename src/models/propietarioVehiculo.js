@@ -5,8 +5,7 @@ const PropietarioVehiculo = sequelize.define('PropietarioVehiculo', {
   idPropietario: {
     type: DataTypes.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
-    field: 'idPropietario'
+    autoIncrement: true
   },
   tipoIdentificacion: {
     type: DataTypes.STRING(20),
@@ -46,8 +45,9 @@ const PropietarioVehiculo = sequelize.define('PropietarioVehiculo', {
     defaultValue: true
   }
 }, {
-  tableName: 'propietarioVehiculo',
-  timestamps: false
+  tableName: 'propietario_vehiculo',
+  timestamps: false,
+  underscored: true
 });
 
 module.exports = PropietarioVehiculo;

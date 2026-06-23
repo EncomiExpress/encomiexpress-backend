@@ -5,8 +5,7 @@ const Usuario = sequelize.define('Usuario', {
   idUsuario: {
     type: DataTypes.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
-    field: 'idUsuario'
+    autoIncrement: true
   },
   idRol: {
     type: DataTypes.INTEGER,
@@ -48,7 +47,8 @@ const Usuario = sequelize.define('Usuario', {
   }
 }, {
   tableName: 'usuario',
-  timestamps: false
+  timestamps: false,
+  underscored: true
 });
 
 module.exports = Usuario;

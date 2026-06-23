@@ -103,31 +103,66 @@ app.post('/api/seed', async (req, res, next) => {
   }
   try {
     const bcrypt = require('bcryptjs');
-    const { Rol, Permiso, Usuario } = require('./models');
+    const { Rol, Permiso, RolPermiso, Usuario } = require('./models');
 
     const existingRoles = await Rol.count();
     if (existingRoles === 0) {
-      await Rol.bulkCreate([
-        { nombre: 'admin', descripcion: 'Administrador del sistema con acceso total', habilitado: true },
-        { nombre: 'usuario', descripcion: 'Usuario que puede registrar encomiendas', habilitado: true },
+      const roles = await Rol.bulkCreate([
+        { nombre: 'admin',    descripcion: 'Administrador del sistema con acceso total', habilitado: true },
         { nombre: 'conductor', descripcion: 'Conductor de vehículo', habilitado: true }
       ]);
 
-      await Permiso.bulkCreate([
-        { nombre: 'usuarios', descripcion: 'Gestión de usuarios' },
-        { nombre: 'roles', descripcion: 'Gestión de roles y permisos' },
-        { nombre: 'clientes', descripcion: 'Gestión de clientes' },
-        { nombre: 'conductores', descripcion: 'Gestión de conductores' },
-        { nombre: 'vehiculos', descripcion: 'Gestión de vehículos' },
-        { nombre: 'destinos', descripcion: 'Gestión de destinos' },
-        { nombre: 'rutas', descripcion: 'Gestión de rutas' },
-        { nombre: 'encomiendas', descripcion: 'Gestión de encomiendas' },
-        { nombre: 'anticipos', descripcion: 'Gestión de anticipos' }
+      const permisos = await Permiso.bulkCreate([
+        { nombre: 'listar_usuario',       descripcion: 'Listar usuarios' },
+        { nombre: 'registrar_usuario',    descripcion: 'Registrar usuarios' },
+        { nombre: 'consultar_usuario',    descripcion: 'Consultar usuarios' },
+        { nombre: 'actualizar_usuario',   descripcion: 'Actualizar usuarios' },
+        { nombre: 'inhabilitar_usuario',  descripcion: 'Inhabilitar usuarios' },
+        { nombre: 'listar_rol',           descripcion: 'Listar roles' },
+        { nombre: 'registrar_rol',        descripcion: 'Registrar roles' },
+        { nombre: 'consultar_rol',        descripcion: 'Consultar roles' },
+        { nombre: 'actualizar_rol',       descripcion: 'Actualizar roles' },
+        { nombre: 'inhabilitar_rol',      descripcion: 'Inhabilitar roles' },
+        { nombre: 'listar_cliente',       descripcion: 'Listar clientes' },
+        { nombre: 'registrar_cliente',    descripcion: 'Registrar clientes' },
+        { nombre: 'consultar_cliente',    descripcion: 'Consultar clientes' },
+        { nombre: 'actualizar_cliente',   descripcion: 'Actualizar clientes' },
+        { nombre: 'inhabilitar_cliente',  descripcion: 'Inhabilitar clientes' },
+        { nombre: 'listar_vehiculo',      descripcion: 'Listar vehículos' },
+        { nombre: 'registrar_vehiculo',   descripcion: 'Registrar vehículos' },
+        { nombre: 'consultar_vehiculo',   descripcion: 'Consultar vehículos' },
+        { nombre: 'actualizar_vehiculo',  descripcion: 'Actualizar vehículos' },
+        { nombre: 'listar_conductor',     descripcion: 'Listar conductores' },
+        { nombre: 'registrar_conductor',  descripcion: 'Registrar conductores' },
+        { nombre: 'consultar_conductor',  descripcion: 'Consultar conductores' },
+        { nombre: 'actualizar_conductor', descripcion: 'Actualizar conductores' },
+        { nombre: 'listar_destino',       descripcion: 'Listar destinos' },
+        { nombre: 'registrar_destino',    descripcion: 'Registrar destinos' },
+        { nombre: 'consultar_destino',    descripcion: 'Consultar destinos' },
+        { nombre: 'actualizar_destino',   descripcion: 'Actualizar destinos' },
+        { nombre: 'listar_ruta',          descripcion: 'Listar rutas' },
+        { nombre: 'registrar_ruta',       descripcion: 'Registrar rutas' },
+        { nombre: 'consultar_ruta',       descripcion: 'Consultar rutas' },
+        { nombre: 'actualizar_ruta',      descripcion: 'Actualizar rutas' },
+        { nombre: 'listar_anticipo',      descripcion: 'Listar anticipos' },
+        { nombre: 'registrar_anticipo',   descripcion: 'Registrar anticipos' },
+        { nombre: 'consultar_anticipo',   descripcion: 'Consultar anticipos' },
+        { nombre: 'actualizar_anticipo',  descripcion: 'Actualizar anticipos' },
+        { nombre: 'listar_encomienda',    descripcion: 'Listar encomiendas' },
+        { nombre: 'registrar_encomienda', descripcion: 'Registrar encomiendas' },
+        { nombre: 'consultar_encomienda', descripcion: 'Consultar encomiendas' },
+        { nombre: 'actualizar_encomienda',descripcion: 'Actualizar encomiendas' },
+        { nombre: 'gestion_transporte',   descripcion: 'Gestión de transporte' },
+        { nombre: 'ver_dashboard',        descripcion: 'Ver dashboard' },
       ]);
+
+      const adminRol = roles[0];
+      await RolPermiso.bulkCreate(
+        permisos.map(p => ({ idRol: adminRol.idRol, idPermiso: p.idPermiso }))
+      );
     }
 
     await Usuario.destroy({ where: { email: 'admin@encomiexpress.com' } });
-
     const hashedPassword = await bcrypt.hash('admin123', 10);
     await Usuario.create({
       idRol: 1,
@@ -143,11 +178,8 @@ app.post('/api/seed', async (req, res, next) => {
 
     res.json({
       success: true,
-      message: 'Usuario admin recreado correctamente. Login con: admin@encomiexpress.com / admin123',
-      data: {
-        email: 'admin@encomiexpress.com',
-        password: 'admin123'
-      }
+      message: 'Seed ejecutado correctamente. Login con: admin@encomiexpress.com / admin123',
+      data: { email: 'admin@encomiexpress.com', password: 'admin123' }
     });
   } catch (error) {
     next(error);

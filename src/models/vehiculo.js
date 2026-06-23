@@ -5,8 +5,7 @@ const Vehiculo = sequelize.define('Vehiculo', {
   idVehiculo: {
     type: DataTypes.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
-    field: 'idVehiculo'
+    autoIncrement: true
   },
   idConductor: {
     type: DataTypes.INTEGER,
@@ -55,7 +54,8 @@ const Vehiculo = sequelize.define('Vehiculo', {
   },
   vencimientoSOAT: {
     type: DataTypes.DATEONLY,
-    allowNull: true
+    allowNull: true,
+    field: 'vencimiento_soat'
   },
   vencimientoRevisionTecnica: {
     type: DataTypes.DATEONLY,
@@ -68,7 +68,8 @@ const Vehiculo = sequelize.define('Vehiculo', {
   
 }, {
   tableName: 'vehiculo',
-  timestamps: false
+  timestamps: false,
+  underscored: true
 });
 
 module.exports = Vehiculo;

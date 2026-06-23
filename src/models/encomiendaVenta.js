@@ -5,8 +5,7 @@ const EncomiendaVenta = sequelize.define('EncomiendaVenta', {
   idEncomiendaVenta: {
     type: DataTypes.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
-    field: 'idEncomiendaVenta'
+    autoIncrement: true
   },
   idCliente: {
     type: DataTypes.INTEGER,
@@ -75,8 +74,9 @@ const EncomiendaVenta = sequelize.define('EncomiendaVenta', {
     defaultValue: true
   }
 }, {
-  tableName: 'encomiendaVenta',
-  timestamps: false
+  tableName: 'encomienda_venta',
+  timestamps: false,
+  underscored: true
 });
 
 module.exports = EncomiendaVenta;
