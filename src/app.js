@@ -2,6 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpec = require('./config/swagger');
 
 const AppError = require('./errors/appError');
 const errorHandler = require('./middlewares/errorHandler');
@@ -37,6 +39,13 @@ const clienteRoutes = require('./routes/clientes');
 const encomiendaRoutes = require('./routes/encomiendas');
 const rolRoutes = require('./routes/roles');
 const permisosRoutes = require('./routes/permisos');
+
+// Documentación Swagger (solo en desarrollo)
+if (process.env.NODE_ENV !== 'production') {
+  app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+    customSiteTitle: 'EncomiExpress API Docs',
+  }));
+}
 
 // Rate limiting para escritura en todas las rutas de negocio (omite GET/HEAD/OPTIONS)
 app.use('/api', writeLimiter);

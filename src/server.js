@@ -26,6 +26,9 @@ const startServer = async () => {
 
     server.listen(PORT, () => {
       console.log(`🚀 Servidor corriendo en el puerto ${PORT}`);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`📄 Documentación API: http://localhost:${PORT}/api/docs`);
+      }
     });
   } catch (error) {
     console.error('❌ Error al iniciar el servidor:', error);
