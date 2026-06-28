@@ -42,7 +42,7 @@ const Vehiculo = sequelize.define('Vehiculo', {
   },
   estado: {
     type: DataTypes.STRING(30),
-    defaultValue: 'disponible'
+    defaultValue: 'Disponible'
   },
   habilitado: {
     type: DataTypes.BOOLEAN,

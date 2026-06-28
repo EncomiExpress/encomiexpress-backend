@@ -1,4 +1,4 @@
-const { Ruta, Vehiculo, Conductor, Destino, EncomiendaVenta, Usuario, Cliente } = require('../models');
+const { Ruta, Vehiculo, Conductor, Destino, EncomiendaVenta, Usuario, Cliente, AnticipoExcedente } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { verificarDependenciasRuta } = require('../middlewares/validateDependencies');
@@ -56,6 +56,16 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
     distinct: true,
     subQuery: false,
   });
+
+  const enCursoIds = data.filter(r => r.estado === 'En Curso').map(r => r.idRuta);
+  if (enCursoIds.length > 0) {
+    const pendientes = await AnticipoExcedente.findAll({
+      where: { idRuta: { [Op.in]: enCursoIds }, estado: 'En Legalización', habilitado: true },
+      attributes: ['idRuta'],
+    });
+    const pendientesSet = new Set(pendientes.map(a => a.idRuta));
+    data.forEach(r => { r.dataValues.pendienteLegalizacion = pendientesSet.has(r.idRuta); });
+  }
 
   return { data, total: count };
 };
@@ -182,11 +192,49 @@ const updateEstado = async (id, estado) => {
       );
     }
 
-    await Vehiculo.update({ estado: 'ocupado' }, { where: { idVehiculo: ruta.idVehiculo } });
+    await Vehiculo.update({ estado: 'En Ruta' }, { where: { idVehiculo: ruta.idVehiculo } });
+    await Conductor.update({ estado: 'En Ruta' }, { where: { idConductor: ruta.idConductor } });
+    await AnticipoExcedente.update(
+      { estado: 'En Legalización' },
+      { where: { idRuta: ruta.idRuta, habilitado: true, estado: 'Entregado' } }
+    );
+    await EncomiendaVenta.update(
+      { estado: 'En Tránsito' },
+      { where: { idRuta: ruta.idRuta, habilitado: true, estado: 'Programada' } }
+    );
+  }
+
+  if (estado === 'Completada') {
+    const anticipoPendiente = await AnticipoExcedente.findOne({
+      where: { idRuta: ruta.idRuta, habilitado: true, estado: 'En Legalización' },
+      attributes: ['idAnticipoExcedente'],
+    });
+    if (anticipoPendiente) {
+      throw new AppError('El conductor aún no ha registrado los gastos del anticipo. Ingresa esa información antes de completar la ruta.', 409);
+    }
   }
 
   if ((estado === 'Completada' || estado === 'Cancelada') && ruta.estado === 'En Curso') {
-    await Vehiculo.update({ estado: 'disponible' }, { where: { idVehiculo: ruta.idVehiculo } });
+    await Vehiculo.update({ estado: 'Disponible' }, { where: { idVehiculo: ruta.idVehiculo } });
+    await Conductor.update({ estado: 'Disponible' }, { where: { idConductor: ruta.idConductor } });
+  }
+
+  if (estado === 'Completada') {
+    await EncomiendaVenta.update(
+      { estado: 'Entregada' },
+      { where: { idRuta: ruta.idRuta, habilitado: true, estado: 'En Tránsito' } }
+    );
+  }
+
+  if (estado === 'Cancelada') {
+    await EncomiendaVenta.update(
+      { estado: 'Cancelada' },
+      { where: { idRuta: ruta.idRuta, habilitado: true, estado: { [Op.in]: ['Programada', 'En Tránsito'] } } }
+    );
+    await AnticipoExcedente.update(
+      { estado: 'Excedente pendiente' },
+      { where: { idRuta: ruta.idRuta, habilitado: true, estado: { [Op.in]: ['Entregado', 'En Legalización'] } } }
+    );
   }
 
   ruta.estado = estado;
@@ -243,6 +291,30 @@ const toggleHabilitado = async (id) => {
   return ruta;
 };
 
+const getPageOf = async (id, { limit = 10 } = {}) => {
+  const record = await Ruta.findByPk(id, { attributes: ['idRuta', 'fechaSalida', 'horaSalida'] });
+  if (!record) throw new AppError('Ruta no encontrada', 404);
+  const before = await Ruta.count({
+    where: {
+      [Op.or]: [
+        { fechaSalida: { [Op.gt]: record.fechaSalida } },
+        {
+          fechaSalida: record.fechaSalida,
+          horaSalida: { [Op.gt]: record.horaSalida },
+        },
+        {
+          fechaSalida: record.fechaSalida,
+          horaSalida: record.horaSalida,
+          idRuta: { [Op.gt]: parseInt(id) },
+        },
+      ],
+    },
+  });
+  const page = Math.floor(before / limit) + 1;
+  const row = (before % limit) + 1;
+  return { page, row };
+};
+
 module.exports = {
   getAll,
   getById,
@@ -251,5 +323,6 @@ module.exports = {
   updateEstado,
   getEncomiendas,
   getAvailable,
-  toggleHabilitado
+  toggleHabilitado,
+  getPageOf,
 };

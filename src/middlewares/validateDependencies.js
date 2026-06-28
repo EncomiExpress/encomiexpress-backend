@@ -21,7 +21,7 @@ const verificarDependenciasVehiculo = async (vehiculoId) => {
     where: {
       idVehiculo: vehiculoId,
       habilitado: true,
-      estado: { [Op.in]: ['Programada', 'En Curso'] }
+      estado: 'En Curso'
     },
     include: [{ model: Destino, as: 'destino', attributes: ['ciudad', 'departamento'] }],
     attributes: ['idRuta', 'nombreRuta', 'estado', 'fechaSalida']
@@ -49,7 +49,7 @@ const verificarDependenciasConductor = async (conductorId) => {
   }));
 
   const anticiposPendientes = await AnticipoExcedente.findAll({
-    where: { idConductor: conductorId, estado: 'pendiente', habilitado: true },
+    where: { idConductor: conductorId, estado: { [Op.in]: ['Entregado', 'En Legalización', 'Excedente pendiente'] }, habilitado: true },
     attributes: ['idAnticipoExcedente', 'valorAnticipo', 'fechaEntrega']
   });
   anticiposPendientes.forEach(a => dependencias.push({
@@ -82,7 +82,7 @@ const verificarDependenciasCliente = async (clienteId) => {
   const encomiendas = await EncomiendaVenta.findAll({
     where: {
       idCliente: clienteId,
-      estado: { [Op.notIn]: ['entregado', 'devuelto'] }
+      estado: { [Op.notIn]: ['Entregada', 'Cancelada'] }
     },
     attributes: ['idEncomiendaVenta', 'numeroGuia', 'estado']
   });
@@ -98,7 +98,7 @@ const verificarDependenciasRuta = async (rutaId) => {
   const encomiendas = await EncomiendaVenta.findAll({
     where: {
       idRuta: rutaId,
-      estado: { [Op.notIn]: ['entregado', 'devuelto'] }
+      estado: { [Op.notIn]: ['Entregada', 'Cancelada'] }
     },
     attributes: ['idEncomiendaVenta', 'numeroGuia', 'estado']
   });
@@ -114,7 +114,7 @@ const verificarDependenciasAnticipo = async (anticipoId) => {
   const anticipo = await AnticipoExcedente.findByPk(anticipoId, {
     attributes: ['idAnticipoExcedente', 'estado', 'valorAnticipo']
   });
-  if (!anticipo || anticipo.estado !== 'pendiente') return { bloqueado: false, dependencias: [] };
+  if (!anticipo || !['Entregado', 'En Legalización', 'Excedente pendiente'].includes(anticipo.estado)) return { bloqueado: false, dependencias: [] };
   return {
     bloqueado: true,
     dependencias: [{
@@ -138,7 +138,7 @@ const tieneVehiculosActivos = async (conductorId) => {
 };
 
 const tieneAnticiposPendientes = async (conductorId) => {
-  const count = await AnticipoExcedente.count({ where: { idConductor: conductorId, estado: 'pendiente', habilitado: true } });
+  const count = await AnticipoExcedente.count({ where: { idConductor: conductorId, estado: { [Op.in]: ['Entregado', 'En Legalización', 'Excedente pendiente'] }, habilitado: true } });
   return count > 0;
 };
 

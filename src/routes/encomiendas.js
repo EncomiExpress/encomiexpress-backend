@@ -44,6 +44,8 @@ router.get('/public/:token', encomiendaVentaController.getPublicByToken);
 
 router.use(authenticate);
 
+router.get('/:id/page-of', encomiendaVentaController.getPageOf);
+
 /**
  * @swagger
  * /encomiendas:

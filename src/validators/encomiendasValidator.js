@@ -3,18 +3,11 @@ const { body } = require('express-validator');
 const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia', 'Nequi'];
 const ESTADOS_PAGO_VALIDOS = ['Pendiente', 'Pagado'];
 
-// ⚠️ FIX: los estados deben estar en minúsculas porque el modelo los almacena
-// en minúsculas (ver encomiendaService.js → cambiarEstado → estado.toLowerCase())
-// y el frontend también los envía en minúsculas.
 const ESTADOS_ENCOMIENDA_VALIDOS = [
-  'pendiente de recogida',
-  'en recogida',
-  'programada',
-  'en tránsito',
-  'entregado',
-  'devuelto',
-  'activo',
-  'inactivo',
+  'Programada',
+  'En Tránsito',
+  'Entregada',
+  'Cancelada',
 ];
 
 const createValidation = [
@@ -59,9 +52,6 @@ const cambiarEstadoValidation = [
   body('estado')
     .notEmpty()
     .withMessage('Estado es requerido')
-    // ⚠️ FIX: normalizar a minúsculas antes de validar para aceptar
-    // tanto 'En Tránsito' como 'en tránsito'
-    .customSanitizer((value) => (typeof value === 'string' ? value.toLowerCase() : value))
     .isIn(ESTADOS_ENCOMIENDA_VALIDOS)
     .withMessage(`Estado inválido. Opciones: ${ESTADOS_ENCOMIENDA_VALIDOS.join(', ')}`),
 ];

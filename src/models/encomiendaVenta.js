@@ -38,7 +38,7 @@ const EncomiendaVenta = sequelize.define('EncomiendaVenta', {
   },
   estado: {
     type: DataTypes.STRING(30),
-    defaultValue: 'pendiente de recogida'
+    defaultValue: 'Programada'
   },
   observaciones: {
     type: DataTypes.TEXT,
@@ -67,7 +67,7 @@ const EncomiendaVenta = sequelize.define('EncomiendaVenta', {
   },
   estadoPago: {
     type: DataTypes.STRING(20),
-    defaultValue: 'pendiente'
+    defaultValue: 'Pendiente'
   },
   habilitado: {
     type: DataTypes.BOOLEAN,

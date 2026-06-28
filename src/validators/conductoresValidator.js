@@ -1,7 +1,7 @@
 const { body } = require('express-validator');
 const r = require('./commonRules');
 
-const ESTADOS_VALIDOS = ['activo', 'inactivo'];
+const ESTADOS_VALIDOS = ['Disponible', 'En Ruta'];
 
 const createValidation = [
   r.tipoIdentificacion.required(),

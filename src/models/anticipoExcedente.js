@@ -29,7 +29,7 @@ const AnticipoExcedente = sequelize.define('AnticipoExcedente', {
   },
   estado: {
     type: DataTypes.STRING(30),
-    defaultValue: 'pendiente'
+    defaultValue: 'Entregado'
   },
   soporte: {
     type: DataTypes.STRING(500),

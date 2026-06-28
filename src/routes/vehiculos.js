@@ -58,6 +58,7 @@ router.get('/', authorizePermission('listar_vehiculo'), vehiculoController.getAl
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
+router.get('/:id/page-of', authorizePermission('listar_vehiculo'), vehiculoController.getPageOf);
 router.get('/:id', authorizePermission('consultar_vehiculo'), vehiculoController.getById);
 
 /**
@@ -128,7 +129,7 @@ router.put('/:id', authorizePermission('actualizar_vehiculo'), vehiculoControlle
  *             properties:
  *               estado:
  *                 type: string
- *                 enum: [disponible, en_ruta, mantenimiento]
+ *                 enum: [Disponible, Mantenimiento]
  *     responses:
  *       200:
  *         description: Estado actualizado

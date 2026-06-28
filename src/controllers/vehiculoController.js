@@ -91,3 +91,14 @@ exports.toggleHabilitado = async (req, res, next) => {
     next(error);
   }
 };
+
+exports.getPageOf = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const result = await vehiculoService.getPageOf(id, { limit });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};

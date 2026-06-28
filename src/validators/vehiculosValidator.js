@@ -27,7 +27,7 @@ const updateValidation = [
 const cambiarEstadoValidation = [
   body('estado')
     .notEmpty().withMessage('El estado es requerido')
-    .isIn(['disponible', 'ocupado', 'en reparacion']).withMessage('Estado inválido. Use: disponible, ocupado, en reparacion')
+    .isIn(['Disponible', 'Mantenimiento']).withMessage('Estado inválido. Use: Disponible, Mantenimiento')
 ];
 
 module.exports = {

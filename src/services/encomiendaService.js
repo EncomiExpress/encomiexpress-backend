@@ -5,14 +5,10 @@ const crypto = require('crypto');
 const { sendTrackingEmail } = require('../config/email');
 
 const ESTADOS_VALIDOS = [
-  'pendiente de recogida',
-  'en recogida',
-  'programada',
-  'en tr├ínsito',
-  'entregado',
-  'devuelto',
-  'activo',
-  'inactivo',
+  'Programada',
+  'En Tránsito',
+  'Entregada',
+  'Cancelada',
 ];
 const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia', 'Nequi'];
 const ESTADOS_PAGO_VALIDOS = ['Pendiente', 'Pagado'];
@@ -234,7 +230,7 @@ const create = async (data) => {
 
     if (
       estadoPago &&
-      !ESTADOS_PAGO_VALIDOS.some((v) => v.toLowerCase() === estadoPago.toLowerCase())
+      !ESTADOS_PAGO_VALIDOS.includes(estadoPago)
     ) {
       await transaction.rollback();
       throw new AppError(`Estado de pago inv├ílido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
@@ -265,7 +261,7 @@ const create = async (data) => {
         total,
         metodoPago: metodoPago || null,
         estadoPago: estadoPago || 'Pendiente',
-        estado: 'pendiente de recogida',
+        estado: 'Programada',
       },
       { transaction }
     );
@@ -360,7 +356,7 @@ const update = async (id, data) => {
 
     if (
       estadoPago &&
-      !ESTADOS_PAGO_VALIDOS.some((v) => v.toLowerCase() === estadoPago.toLowerCase())
+      !ESTADOS_PAGO_VALIDOS.includes(estadoPago)
     ) {
       throw new AppError(`Estado de pago inv├ílido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
     }
@@ -478,14 +474,11 @@ const cambiarEstado = async (id, estado) => {
     throw new AppError('Encomienda no encontrada', 404);
   }
 
-  // Normalizar a min├║sculas para comparaci├│n consistente
-  const estadoNormalizado = typeof estado === 'string' ? estado.toLowerCase() : estado;
-
-  if (!ESTADOS_VALIDOS.includes(estadoNormalizado)) {
-    throw new AppError(`Estado inv├ílido. Opciones: ${ESTADOS_VALIDOS.join(', ')}`, 400);
+  if (!ESTADOS_VALIDOS.includes(estado)) {
+    throw new AppError(`Estado inválido. Opciones: ${ESTADOS_VALIDOS.join(', ')}`, 400);
   }
 
-  await encomienda.update({ estado: estadoNormalizado });
+  await encomienda.update({ estado });
 
   return encomienda;
 };
@@ -498,12 +491,12 @@ const toggleHabilitado = async (id) => {
   }
 
   if (encomienda.habilitado) {
-    const ESTADOS_FINALES = ['entregado', 'devuelto'];
+    const ESTADOS_FINALES = ['Entregada', 'Cancelada'];
     if (!ESTADOS_FINALES.includes(encomienda.estado)) {
       throw new AppError(
         `No se puede inhabilitar la encomienda porque está en estado "${encomienda.estado}"`,
         409,
-        [{ tipo: 'Estado activo', id: encomienda.idEncomiendaVenta, descripcion: `La encomienda ${encomienda.numeroGuia || '#' + encomienda.idEncomiendaVenta} está en estado "${encomienda.estado}"` }],
+        [{ tipo: 'Estado activo', id: encomienda.idEncomiendaVenta, descripcion: `La encomienda ${encomienda.numeroGuia || '#' + encomienda.idEncomiendaVenta} está en estado "${encomienda.estado}" y no ha finalizado` }],
         'DEPENDENCY_CONFLICT'
       );
     }
@@ -565,6 +558,21 @@ const agregarDestinatario = async (idEncomiendaVenta, data) => {
   return destinatario;
 };
 
+const getPageOf = async (id, { limit = 10 } = {}) => {
+  const Op = sequelize.Sequelize.Op;
+  const record = await EncomiendaVenta.findByPk(id, { attributes: ['idEncomiendaVenta', 'fechaRegistro'] });
+  if (!record) throw new AppError('Encomienda no encontrada', 404);
+  const before = await EncomiendaVenta.count({
+    where: {
+      [Op.or]: [
+        { fechaRegistro: { [Op.gt]: record.fechaRegistro } },
+        { fechaRegistro: record.fechaRegistro, idEncomiendaVenta: { [Op.lt]: parseInt(id) } },
+      ],
+    },
+  });
+  return { page: Math.floor(before / limit) + 1 };
+};
+
 module.exports = {
   generarNumeroGuia,
   getAll,
@@ -577,4 +585,5 @@ module.exports = {
   toggleHabilitado,
   agregarPaquete,
   agregarDestinatario,
+  getPageOf,
 };

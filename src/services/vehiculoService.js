@@ -100,7 +100,7 @@ const create = async (data) => {
     color,
     tipo,
     capacidad,
-    estado: 'disponible',
+    estado: 'Disponible',
     fechaRegistro: new Date(),
     vencimientoSOAT,
     vencimientoRevisionTecnica,
@@ -188,7 +188,7 @@ const getRutas = async (id) => {
 };
 
 const cambiarEstado = async (id, estado) => {
-  const ESTADOS_VALIDOS = ['disponible', 'ocupado', 'en reparacion'];
+  const ESTADOS_VALIDOS = ['Disponible', 'Mantenimiento'];
 
   if (!estado) {
     throw new AppError('El campo "estado" es requerido', 400);
@@ -255,6 +255,23 @@ const toggleHabilitado = async (id) => {
   return vehiculo;
 };
 
+const getPageOf = async (id, { limit = 10 } = {}) => {
+  const record = await Vehiculo.findByPk(id, { attributes: ['idVehiculo', 'placa'] });
+  if (!record) throw new AppError('Vehículo no encontrado', 404);
+  // La lista ordena por placa ASC; para igual placa tiebreaker idVehiculo ASC
+  const before = await Vehiculo.count({
+    where: {
+      [Op.or]: [
+        { placa: { [Op.lt]: record.placa } },
+        { placa: record.placa, idVehiculo: { [Op.lt]: parseInt(id) } },
+      ],
+    },
+  });
+  const page = Math.floor(before / limit) + 1;
+  const row = (before % limit) + 1;
+  return { page, row };
+};
+
 module.exports = {
   getAll,
   getById,
@@ -263,5 +280,6 @@ module.exports = {
   getRutas,
   cambiarEstado,
   assignDriver,
-  toggleHabilitado
+  toggleHabilitado,
+  getPageOf,
 };

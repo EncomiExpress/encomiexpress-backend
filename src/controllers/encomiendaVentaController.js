@@ -119,3 +119,13 @@ exports.agregarDestinatario = async (req, res, next) => {
     next(error);
   }
 };
+
+exports.getPageOf = async (req, res, next) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const data = await encomiendaService.getPageOf(req.params.id, { limit });
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};

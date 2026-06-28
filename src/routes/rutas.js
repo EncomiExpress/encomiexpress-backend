@@ -72,6 +72,7 @@ router.get('/available', authorizePermission('listar_ruta'), rutaController.getA
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
+router.get('/:id/page-of', authorizePermission('listar_ruta'), rutaController.getPageOf);
 router.get('/:id', authorizePermission('consultar_ruta'), rutaController.getById);
 
 /**

@@ -62,6 +62,7 @@ router.get('/', authenticate, authorizePermission('listar_anticipo'), anticipoCo
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
+router.get('/:id/page-of', authenticate, authorizePermission('listar_anticipo'), anticipoController.getPageOf);
 router.get('/:id', authenticate, authorizePermission('consultar_anticipo'), anticipoController.getById);
 
 /**

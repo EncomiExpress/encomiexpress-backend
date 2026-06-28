@@ -27,7 +27,7 @@ const Conductor = sequelize.define('Conductor', {
   },
   estado: {
     type: DataTypes.STRING(30),
-    defaultValue: 'activo'
+    defaultValue: 'Disponible'
   },
   habilitado: {
     type: DataTypes.BOOLEAN,

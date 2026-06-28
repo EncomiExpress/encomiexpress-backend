@@ -106,6 +106,12 @@ const create = async (data) => {
     if (!ruta) {
       throw new AppError('Ruta no encontrada', 404);
     }
+    const anticipoExistente = await AnticipoExcedente.findOne({
+      where: { idRuta: parseInt(idRuta), habilitado: true }
+    });
+    if (anticipoExistente) {
+      throw new AppError('Esta ruta ya tiene un anticipo asignado. Solo se permite un anticipo por ruta.', 409);
+    }
     idRutaFinal = ruta.idRuta;
   }
 
@@ -122,7 +128,7 @@ const create = async (data) => {
     valorAnticipo: valorAnticipo || 0,
     valorGastado: 0,
     excedente: 0,
-    estado: 'pendiente',
+    estado: 'Entregado',
     soporte,
     fechaEntrega: cleanDate(fechaEntrega)
   });
@@ -147,20 +153,22 @@ const update = async (id, data) => {
     throw new AppError('Anticipo no encontrado', 404);
   }
 
-  let newExcedente = excedente;
-  if (valorGastado !== undefined) {
-    newExcedente = anticipo.valorAnticipo - valorGastado;
-  }
-
   const cleanDate = (value) => {
-    if (value === undefined) {
-      return undefined;
-    }
-    if (value === null || value === '' || value === 'Invalid date') {
-      return null;
-    }
+    if (value === undefined) return undefined;
+    if (value === null || value === '' || value === 'Invalid date') return null;
     return value;
   };
+
+  // Si se provee valorGastado, el estado y excedente se calculan automáticamente
+  let autoEstado;
+  let autoFechaLegalizacion;
+  let newExcedente = excedente;
+
+  if (valorGastado !== undefined) {
+    newExcedente = parseFloat(anticipo.valorAnticipo) - parseFloat(valorGastado);
+    autoEstado = newExcedente > 0 ? 'Excedente pendiente' : 'Completado';
+    autoFechaLegalizacion = new Date();
+  }
 
   const cleanedFechaEntrega = cleanDate(fechaEntrega);
   const cleanedFechaLegalizacion = cleanDate(fechaLegalizacion);
@@ -169,35 +177,11 @@ const update = async (id, data) => {
   await anticipo.update({
     valorGastado: valorGastado !== undefined ? valorGastado : anticipo.valorGastado,
     excedente: newExcedente !== undefined ? newExcedente : anticipo.excedente,
-    estado: estado || anticipo.estado,
+    estado: autoEstado || estado || anticipo.estado,
     soporte: soporte !== undefined ? soporte : anticipo.soporte,
     fechaEntrega: cleanedFechaEntrega !== undefined ? cleanedFechaEntrega : anticipo.fechaEntrega,
-    fechaLegalizacion: cleanedFechaLegalizacion !== undefined ? cleanedFechaLegalizacion : anticipo.fechaLegalizacion,
+    fechaLegalizacion: autoFechaLegalizacion || (cleanedFechaLegalizacion !== undefined ? cleanedFechaLegalizacion : anticipo.fechaLegalizacion),
     fechaEntregaExcedente: cleanedFechaEntregaExcedente !== undefined ? cleanedFechaEntregaExcedente : anticipo.fechaEntregaExcedente
-  });
-
-  return getAnticipoCompleto(id);
-};
-
-const liquidar = async (id, { valorGastado, soporte }) => {
-  const anticipo = await AnticipoExcedente.findByPk(id);
-
-  if (!anticipo) {
-    throw new AppError('Anticipo no encontrado', 404);
-  }
-
-  if (anticipo.estado !== 'pendiente') {
-    throw new AppError('El anticipo ya fue liquidado', 400);
-  }
-
-  const excedente = anticipo.valorAnticipo - valorGastado;
-
-  await anticipo.update({
-    valorGastado,
-    excedente,
-    estado: excedente >= 0 ? 'liquidado' : 'con excedente',
-    soporte,
-    fechaLegalizacion: new Date()
   });
 
   return getAnticipoCompleto(id);
@@ -215,7 +199,7 @@ const entregarExcedente = async (id, { soporte }) => {
   }
 
   await anticipo.update({
-    estado: 'excedente entregado',
+    estado: 'Completado',
     soporte: soporte || anticipo.soporte,
     fechaEntregaExcedente: new Date()
   });
@@ -245,6 +229,12 @@ const createMisAnticipo = async (idUsuario, rolNombre, data) => {
     if (!ruta) {
       throw new AppError('Ruta no encontrada', 404);
     }
+    const anticipoExistente = await AnticipoExcedente.findOne({
+      where: { idRuta: parseInt(idRuta), habilitado: true }
+    });
+    if (anticipoExistente) {
+      throw new AppError('Esta ruta ya tiene un anticipo asignado. Solo se permite un anticipo por ruta.', 409);
+    }
     idRutaFinal = ruta.idRuta;
   }
 
@@ -261,7 +251,7 @@ const createMisAnticipo = async (idUsuario, rolNombre, data) => {
     valorAnticipo: valorAnticipo || 0,
     valorGastado: 0,
     excedente: 0,
-    estado: 'pendiente',
+    estado: 'Entregado',
     soporte,
     fechaEntrega: cleanDate(fechaEntrega)
   });
@@ -270,12 +260,21 @@ const createMisAnticipo = async (idUsuario, rolNombre, data) => {
 };
 
 const cambiarEstado = async (id, estado) => {
-  const estadosValidos = ['pendiente', 'entregado', 'en legalización', 'legalizado', 'excedente pendiente', 'cerrado'];
+  const estadosValidos = ['Entregado', 'En Legalización', 'Excedente pendiente', 'Completado'];
   if (!estadosValidos.includes(estado)) {
     throw new AppError(`Estado inválido. Debe ser uno de: ${estadosValidos.join(', ')}`, 400);
   }
   const anticipo = await AnticipoExcedente.findByPk(id);
   if (!anticipo) throw new AppError('Anticipo no encontrado', 404);
+
+  const noRevertibles = ['En Legalización', 'Excedente pendiente', 'Completado'];
+  if (noRevertibles.includes(anticipo.estado) && estado === 'Entregado') {
+    throw new AppError(
+      `No se puede revertir a "entregado" desde el estado "${anticipo.estado}". Este cambio es irreversible.`,
+      400
+    );
+  }
+
   anticipo.estado = estado;
   await anticipo.save();
   return getAnticipoCompleto(id);
@@ -296,14 +295,14 @@ const toggleHabilitado = async (id) => {
   const anticipo = await AnticipoExcedente.findByPk(id);
   if (!anticipo) throw new AppError('Anticipo no encontrado', 404);
   if (anticipo.habilitado === true) {
-    if (anticipo.estado === 'pendiente') {
+    if (anticipo.estado !== 'Completado') {
       throw new AppError(
-        'No se puede inhabilitar un anticipo que aún está pendiente de legalización',
+        'No se puede inhabilitar un anticipo que aún no ha sido cerrado',
         409,
         [{
           tipo: 'Estado del anticipo',
           id: anticipo.idAnticipoExcedente,
-          descripcion: `Anticipo #${anticipo.idAnticipoExcedente} con valor $${anticipo.valorAnticipo} no ha sido legalizado aún`
+          descripcion: `Anticipo #${anticipo.idAnticipoExcedente} con valor $${anticipo.valorAnticipo} está en estado "${anticipo.estado}" y no ha sido cerrado aún`
         }],
         'DEPENDENCY_CONFLICT'
       );
@@ -323,15 +322,32 @@ const toggleHabilitado = async (id) => {
   return getAnticipoCompleto(id);
 };
 
+const getPageOf = async (id, { limit = 10 } = {}) => {
+  const record = await AnticipoExcedente.findByPk(id, { attributes: ['idAnticipoExcedente', 'fechaEntrega'] });
+  if (!record) throw new AppError('Anticipo no encontrado', 404);
+  // La lista ordena por fechaEntrega DESC; para igual fecha Postgres usa orden de inserción (id ASC)
+  const before = await AnticipoExcedente.count({
+    where: {
+      [Op.or]: [
+        { fechaEntrega: { [Op.gt]: record.fechaEntrega } },
+        { fechaEntrega: record.fechaEntrega, idAnticipoExcedente: { [Op.lt]: parseInt(id) } },
+      ],
+    },
+  });
+  const page = Math.floor(before / limit) + 1;
+  const row = (before % limit) + 1;
+  return { page, row };
+};
+
 module.exports = {
   getAll,
   getById,
   create,
   update,
-  liquidar,
   entregarExcedente,
   createMisAnticipo,
   updateSoporte,
   cambiarEstado,
-  toggleHabilitado
+  toggleHabilitado,
+  getPageOf,
 };

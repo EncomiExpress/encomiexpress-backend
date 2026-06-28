@@ -248,6 +248,7 @@ router.post('/mis-anticipos', async (req, res, next) => {
  *         description: Lista de conductores con datos de usuario y licencia
  */
 router.get('/', conductorController.getAll);
+router.get('/:id/page-of', authorize('admin'), conductorController.getPageOf);
 
 /**
  * @swagger
@@ -374,7 +375,7 @@ router.put('/:id', authorize('admin'), updateValidation, validate, conductorCont
  *             properties:
  *               estado:
  *                 type: string
- *                 enum: [disponible, en_ruta, descanso, inactivo]
+ *                 enum: [Disponible, En Ruta]
  *     responses:
  *       200:
  *         description: Estado operativo actualizado

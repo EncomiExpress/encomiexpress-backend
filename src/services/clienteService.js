@@ -150,10 +150,28 @@ const toggleHabilitado = async (id) => {
   return cliente;
 };
 
+const getPageOf = async (id, { limit = 10 } = {}) => {
+  const record = await Cliente.findByPk(id, { attributes: ['idCliente', 'nombre', 'apellido'] });
+  if (!record) throw new AppError('Cliente no encontrado', 404);
+  const before = await Cliente.count({
+    where: {
+      [Op.or]: [
+        { nombre: { [Op.lt]: record.nombre } },
+        { nombre: record.nombre, apellido: { [Op.lt]: record.apellido } },
+        { nombre: record.nombre, apellido: record.apellido, idCliente: { [Op.lt]: parseInt(id) } },
+      ],
+    },
+  });
+  const page = Math.floor(before / limit) + 1;
+  const row = (before % limit) + 1;
+  return { page, row };
+};
+
 module.exports = {
   getAll,
   getById,
   create,
   update,
-  toggleHabilitado
+  toggleHabilitado,
+  getPageOf,
 };

@@ -1,6 +1,6 @@
 const { Router } = require('express');
 const { validate } = require('../middlewares/validation');
-const { listarClientes, obtenerCliente, registrarCliente, actualizarCliente, toggleHabilitadoCliente } = require('../controllers/clienteController');
+const { listarClientes, obtenerCliente, registrarCliente, actualizarCliente, toggleHabilitadoCliente, getPageOfCliente } = require('../controllers/clienteController');
 const { authenticate, authorizePermission } = require('../middlewares/auth');
 const { createValidation, updateValidation } = require('../validators/clientesValidator');
 const router = Router();
@@ -39,6 +39,7 @@ router.use(authenticate);
  *         description: Lista paginada de clientes
  */
 router.get('/', authorizePermission('listar_cliente'), listarClientes);
+router.get('/:id/page-of', authorizePermission('listar_cliente'), getPageOfCliente);
 
 /**
  * @swagger

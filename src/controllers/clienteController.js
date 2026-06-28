@@ -56,10 +56,22 @@ const toggleHabilitadoCliente = async (req, res, next) => {
   }
 };
 
+const getPageOfCliente = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const result = await clienteService.getPageOf(id, { limit });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   listarClientes,
   obtenerCliente,
   registrarCliente,
   actualizarCliente,
-  toggleHabilitadoCliente
+  toggleHabilitadoCliente,
+  getPageOfCliente,
 };

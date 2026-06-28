@@ -196,7 +196,7 @@ const getAnticipos = async (id) => {
 };
 
 const cambiarEstado = async (id, estado) => {
-  const ESTADOS_VALIDOS = ['activo', 'inactivo'];
+  const ESTADOS_VALIDOS = ['Disponible', 'En Ruta'];
 
   if (!estado) {
     throw new AppError('El campo "estado" es requerido', 400);
@@ -266,6 +266,15 @@ const toggleHabilitado = async (id) => {
   return conductor;
 };
 
+const getPageOf = async (id, { limit = 10 } = {}) => {
+  const record = await Conductor.findByPk(id, { attributes: ['idConductor'] });
+  if (!record) throw new AppError('Conductor no encontrado', 404);
+  const before = await Conductor.count({
+    where: { idConductor: { [Op.lt]: parseInt(id) } },
+  });
+  return { page: Math.floor(before / limit) + 1 };
+};
+
 module.exports = {
   getAll,
   getById,
@@ -275,5 +284,6 @@ module.exports = {
   getAnticipos,
   cambiarEstado,
   getMisAnticipos,
-  toggleHabilitado
+  toggleHabilitado,
+  getPageOf,
 };

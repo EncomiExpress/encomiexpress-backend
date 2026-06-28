@@ -11,6 +11,9 @@ exports.getAll = async (req, res, next) => {
       anio: req.query.anio,
       mes: req.query.mes,
       q: req.query.q,
+      idConductor: req.query.idConductor,
+      idVehiculo: req.query.idVehiculo,
+      idDestino: req.query.idDestino,
       page,
       limit,
       sortBy,
@@ -96,5 +99,15 @@ exports.toggleHabilitado = async (req, res) => {
     res.json({ success: true, message: `Ruta ${ruta.habilitado ? 'habilitada' : 'inhabilitada'} exitosamente`, data: ruta });
   } catch (error) {
     res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al cambiar estado de la ruta' });
+  }
+};
+exports.getPageOf = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const result = await rutaService.getPageOf(id, { limit });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
   }
 };
