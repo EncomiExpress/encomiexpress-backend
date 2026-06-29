@@ -252,12 +252,16 @@ INSERT INTO permiso (nombre, descripcion, habilitado) VALUES
 ('registrar_anticipo',  'Registrar anticipos',        true),
 ('consultar_anticipo',  'Consultar anticipos',        true),
 ('actualizar_anticipo', 'Actualizar anticipos',       true),
-('listar_encomienda',   'Listar encomiendas',         true),
-('registrar_encomienda','Registrar encomiendas',      true),
-('consultar_encomienda','Consultar encomiendas',      true),
-('actualizar_encomienda','Actualizar encomiendas',    true),
-('gestion_transporte',  'Gestión de transporte',      true),
-('ver_dashboard',       'Ver dashboard',              true);
+('listar_encomienda',      'Listar encomiendas',           true),
+('registrar_encomienda',   'Registrar encomiendas',        true),
+('consultar_encomienda',   'Consultar encomiendas',        true),
+('actualizar_encomienda',  'Actualizar encomiendas',       true),
+('listar_propietario',     'Listar propietarios',          true),
+('registrar_propietario',  'Registrar propietarios',       true),
+('consultar_propietario',  'Consultar propietarios',       true),
+('actualizar_propietario', 'Actualizar propietarios',      true),
+('inhabilitar_propietario','Inhabilitar propietarios',     true),
+('ver_dashboard',          'Ver dashboard',                true);
 
 -- Asignar todos los permisos al admin
 INSERT INTO rol_permiso (id_rol, id_permiso)

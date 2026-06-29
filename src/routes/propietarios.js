@@ -31,7 +31,7 @@ router.use(authenticate);
  *       200:
  *         description: Lista de propietarios
  */
-router.get('/', authorizePermission('gestion_transporte'), propietarioController.getAll);
+router.get('/', authorizePermission('listar_propietario'), propietarioController.getAll);
 
 /**
  * @swagger
@@ -54,7 +54,7 @@ router.get('/', authorizePermission('gestion_transporte'), propietarioController
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.get('/:id', authorizePermission('gestion_transporte'), propietarioController.getById);
+router.get('/:id', authorizePermission('consultar_propietario'), propietarioController.getById);
 
 /**
  * @swagger
@@ -78,7 +78,7 @@ router.get('/:id', authorizePermission('gestion_transporte'), propietarioControl
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.post('/', authorizePermission('gestion_transporte'), createValidation, validate, propietarioController.create);
+router.post('/', authorizePermission('registrar_propietario'), createValidation, validate, propietarioController.create);
 
 /**
  * @swagger
@@ -101,7 +101,7 @@ router.post('/', authorizePermission('gestion_transporte'), createValidation, va
  *       200:
  *         description: Propietario actualizado
  */
-router.put('/:id', authorizePermission('gestion_transporte'), propietarioController.update);
+router.put('/:id', authorizePermission('actualizar_propietario'), propietarioController.update);
 
 /**
  * @swagger
@@ -118,6 +118,6 @@ router.put('/:id', authorizePermission('gestion_transporte'), propietarioControl
  *       200:
  *         description: Estado cambiado correctamente
  */
-router.patch('/:id/toggle-habilitado', authorizePermission('gestion_transporte'), propietarioController.toggleHabilitado);
+router.patch('/:id/toggle-habilitado', authorizePermission('inhabilitar_propietario'), propietarioController.toggleHabilitado);
 
 module.exports = router;

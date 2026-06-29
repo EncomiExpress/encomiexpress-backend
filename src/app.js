@@ -152,8 +152,12 @@ app.post('/api/seed', async (req, res, next) => {
         { nombre: 'registrar_encomienda', descripcion: 'Registrar encomiendas' },
         { nombre: 'consultar_encomienda', descripcion: 'Consultar encomiendas' },
         { nombre: 'actualizar_encomienda',descripcion: 'Actualizar encomiendas' },
-        { nombre: 'gestion_transporte',   descripcion: 'Gestión de transporte' },
-        { nombre: 'ver_dashboard',        descripcion: 'Ver dashboard' },
+        { nombre: 'listar_propietario',      descripcion: 'Listar propietarios' },
+        { nombre: 'registrar_propietario',   descripcion: 'Registrar propietarios' },
+        { nombre: 'consultar_propietario',   descripcion: 'Consultar propietarios' },
+        { nombre: 'actualizar_propietario',  descripcion: 'Actualizar propietarios' },
+        { nombre: 'inhabilitar_propietario', descripcion: 'Inhabilitar propietarios' },
+        { nombre: 'ver_dashboard',           descripcion: 'Ver dashboard' },
       ]);
 
       const adminRol = roles[0];
