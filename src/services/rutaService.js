@@ -86,14 +86,36 @@ const getById = async (id) => {
   return ruta;
 };
 
+const validarDocumentosVehiculo = (vehiculo) => {
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const docs = [
+    { campo: vehiculo.vencimientoSOAT,              nombre: 'SOAT' },
+    { campo: vehiculo.vencimientoRevisionTecnica,   nombre: 'Revisión Técnico-Mecánica' },
+    { campo: vehiculo.vencimientoSeguroTerceros,    nombre: 'Seguro de Terceros' },
+  ];
+  for (const { campo, nombre } of docs) {
+    if (campo) {
+      const venc = new Date(campo); venc.setHours(0, 0, 0, 0);
+      if (venc < hoy) throw new AppError(`El vehículo tiene el ${nombre} vencido y no puede ser asignado a una ruta`, 400);
+    }
+  }
+};
+
 const create = async (data) => {
   const { idVehiculo, idConductor, idDestino, nombreRuta, fechaSalida, horaSalida, horaLlegadaEstimada, estado, observaciones } = data;
 
   const vehiculo = await Vehiculo.findByPk(idVehiculo);
   if (!vehiculo) throw new AppError('Vehículo no encontrado', 404);
+  validarDocumentosVehiculo(vehiculo);
 
   const conductor = await Conductor.findByPk(idConductor);
   if (!conductor) throw new AppError('Conductor no encontrado', 404);
+
+  if (conductor.vencimientoLicencia) {
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    const venc = new Date(conductor.vencimientoLicencia); venc.setHours(0, 0, 0, 0);
+    if (venc < hoy) throw new AppError('El conductor tiene la licencia de conducción vencida y no puede ser asignado a una ruta', 400);
+  }
 
   const destino = await Destino.findByPk(idDestino);
   if (!destino) throw new AppError('Destino no encontrado', 404);
@@ -118,6 +140,22 @@ const update = async (id, data) => {
 
   const ruta = await Ruta.findByPk(id);
   if (!ruta) throw new AppError('Ruta no encontrada', 404);
+
+  if (idVehiculo !== undefined) {
+    const vehiculoNuevo = await Vehiculo.findByPk(idVehiculo);
+    if (!vehiculoNuevo) throw new AppError('Vehículo no encontrado', 404);
+    validarDocumentosVehiculo(vehiculoNuevo);
+  }
+
+  if (idConductor !== undefined) {
+    const conductorNuevo = await Conductor.findByPk(idConductor);
+    if (!conductorNuevo) throw new AppError('Conductor no encontrado', 404);
+    if (conductorNuevo.vencimientoLicencia) {
+      const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+      const venc = new Date(conductorNuevo.vencimientoLicencia); venc.setHours(0, 0, 0, 0);
+      if (venc < hoy) throw new AppError('El conductor tiene la licencia de conducción vencida y no puede ser asignado a una ruta', 400);
+    }
+  }
 
   await ruta.update({
     nombreRuta:            nombreRuta            !== undefined ? nombreRuta            : ruta.nombreRuta,
@@ -190,6 +228,13 @@ const updateEstado = async (id, estado) => {
         }],
         'CONDUCTOR_IN_USE'
       );
+    }
+
+    const encomiendaCount = await EncomiendaVenta.count({
+      where: { idRuta: parseInt(id), habilitado: true }
+    });
+    if (encomiendaCount === 0) {
+      throw new AppError('No se puede iniciar la ruta sin encomiendas asignadas. Registra al menos una encomienda antes de poner la ruta En Curso.', 400);
     }
 
     await Vehiculo.update({ estado: 'En Ruta' }, { where: { idVehiculo: ruta.idVehiculo } });

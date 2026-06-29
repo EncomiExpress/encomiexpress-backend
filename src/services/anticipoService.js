@@ -100,6 +100,12 @@ const create = async (data) => {
     throw new AppError('Conductor no encontrado', 404);
   }
 
+  if (conductor.vencimientoLicencia) {
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    const venc = new Date(conductor.vencimientoLicencia); venc.setHours(0, 0, 0, 0);
+    if (venc < hoy) throw new AppError('El conductor tiene la licencia de conducción vencida y no puede recibir anticipos', 400);
+  }
+
   let idRutaFinal = idRuta;
   if (idRuta) {
     const ruta = await Ruta.findByPk(idRuta);
@@ -107,10 +113,10 @@ const create = async (data) => {
       throw new AppError('Ruta no encontrada', 404);
     }
     const anticipoExistente = await AnticipoExcedente.findOne({
-      where: { idRuta: parseInt(idRuta), habilitado: true }
+      where: { idRuta: parseInt(idRuta), habilitado: true, estado: { [Op.in]: ['Entregado', 'En Legalización'] } }
     });
     if (anticipoExistente) {
-      throw new AppError('Esta ruta ya tiene un anticipo asignado. Solo se permite un anticipo por ruta.', 409);
+      throw new AppError('Esta ruta ya tiene un anticipo activo. Solo puede existir un anticipo por ruta a la vez.', 409);
     }
     idRutaFinal = ruta.idRuta;
   }
@@ -230,10 +236,10 @@ const createMisAnticipo = async (idUsuario, rolNombre, data) => {
       throw new AppError('Ruta no encontrada', 404);
     }
     const anticipoExistente = await AnticipoExcedente.findOne({
-      where: { idRuta: parseInt(idRuta), habilitado: true }
+      where: { idRuta: parseInt(idRuta), habilitado: true, estado: { [Op.in]: ['Entregado', 'En Legalización'] } }
     });
     if (anticipoExistente) {
-      throw new AppError('Esta ruta ya tiene un anticipo asignado. Solo se permite un anticipo por ruta.', 409);
+      throw new AppError('Esta ruta ya tiene un anticipo activo. Solo puede existir un anticipo por ruta a la vez.', 409);
     }
     idRutaFinal = ruta.idRuta;
   }

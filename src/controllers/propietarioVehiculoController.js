@@ -5,7 +5,7 @@ exports.getAll = async (req, res, next) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const sortBy = req.query.sortBy;
-    const filters = { habilitado: req.query.habilitado, q: req.query.q, page, limit, sortBy };
+    const filters = { habilitado: req.query.habilitado, q: req.query.q, tipoFlota: req.query.tipoFlota, page, limit, sortBy };
     const result = await propietarioService.getAll(filters);
     res.json({ success: true, data: result.data, total: result.total });
   } catch (error) {
@@ -52,6 +52,16 @@ exports.getVehiculos = async (req, res, next) => {
     const { id } = req.params;
     const vehiculos = await propietarioService.getVehiculos(id);
     res.json({ success: true, data: vehiculos });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getPageOf = async (req, res, next) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const result = await propietarioService.getPageOf(req.params.id, { limit });
+    res.json({ success: true, data: result });
   } catch (error) {
     next(error);
   }

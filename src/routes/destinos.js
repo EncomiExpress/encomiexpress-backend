@@ -118,6 +118,7 @@ router.put('/:id', authorizePermission('actualizar_destino'), destinoController.
  *       200:
  *         description: Estado cambiado correctamente
  */
-router.patch('/:id/toggle-habilitado', authorizePermission('actualizar_destino'), destinoController.toggleHabilitado);
+router.get('/:id/page-of', authorizePermission('listar_destino'), destinoController.getPageOf);
+router.patch('/:id/toggle-habilitado', authorizePermission('inhabilitar_destino'), destinoController.toggleHabilitado);
 
 module.exports = router;

@@ -48,16 +48,6 @@ exports.delete = async (req, res, next) => {
   res.status(405).json({ success: false, message: 'Método obsoleto. Use PATCH /conductores/:id/toggle-habilitado para inhabilitar/restaurar.' });
 };
 
-exports.getVehiculos = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const vehiculos = await conductorService.getVehiculos(id);
-    res.json({ success: true, data: vehiculos });
-  } catch (error) {
-    next(error);
-  }
-};
-
 exports.getAnticipos = async (req, res, next) => {
   try {
     const { id } = req.params;

@@ -151,6 +151,6 @@ router.patch('/:id/estado', cambiarEstadoValidation, validate, vehiculoControlle
  *       200:
  *         description: Estado cambiado correctamente
  */
-router.patch('/:id/toggle-habilitado', authorizePermission('actualizar_vehiculo'), vehiculoController.toggleHabilitado);
+router.patch('/:id/toggle-habilitado', authorizePermission('inhabilitar_vehiculo'), vehiculoController.toggleHabilitado);
 
 module.exports = router;

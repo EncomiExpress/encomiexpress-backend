@@ -1,4 +1,4 @@
-const { Conductor, Usuario, Vehiculo, AnticipoExcedente, Ruta } = require('../models');
+const { Conductor, Usuario, AnticipoExcedente, Ruta } = require('../models');
 const { Op } = require('sequelize');
 const bcrypt = require('bcryptjs');
 const AppError = require('../errors/appError');
@@ -168,19 +168,6 @@ const update = async (id, data) => {
 };
 
 
-const getVehiculos = async (id) => {
-  const conductor = await Conductor.findByPk(id);
-  if (!conductor) {
-    throw new AppError('Conductor no encontrado', 404);
-  }
-
-  const vehiculos = await Vehiculo.findAll({
-    where: { idConductor: id }
-  });
-
-  return vehiculos;
-};
-
 const getAnticipos = async (id) => {
   const conductor = await Conductor.findByPk(id);
   if (!conductor) {
@@ -280,7 +267,6 @@ module.exports = {
   getById,
   create,
   update,
-  getVehiculos,
   getAnticipos,
   cambiarEstado,
   getMisAnticipos,

@@ -165,6 +165,6 @@ router.patch('/:id/estado', authorizePermission('actualizar_ruta'), rutaControll
  *       200:
  *         description: Estado cambiado correctamente
  */
-router.patch('/:id/toggle-habilitado', authorizePermission('actualizar_ruta'), rutaController.toggleHabilitado);
+router.patch('/:id/toggle-habilitado', authorizePermission('inhabilitar_ruta'), rutaController.toggleHabilitado);
 
 module.exports = router;

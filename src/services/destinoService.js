@@ -12,9 +12,10 @@ const buildOrder = (sortBy) => {
   return [[field, direction]];
 };
 
-const getAll = async ({ habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
+const getAll = async ({ habilitado, departamento, q, page = 1, limit = 10, sortBy } = {}) => {
   const where = {};
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
+  if (departamento) where.departamento = departamento;
   if (q) {
     const query = `%${q.trim()}%`;
     where[Op.or] = [
@@ -111,11 +112,28 @@ const toggleHabilitado = async (id) => {
   return destino;
 };
 
+const getPageOf = async (id, { limit = 10 } = {}) => {
+  const record = await Destino.findByPk(id, { attributes: ['idDestino', 'ciudad'] });
+  if (!record) throw new AppError('Destino no encontrado', 404);
+  const before = await Destino.count({
+    where: {
+      [Op.or]: [
+        { ciudad: { [Op.lt]: record.ciudad } },
+        { ciudad: record.ciudad, idDestino: { [Op.lt]: parseInt(id) } },
+      ],
+    },
+  });
+  const page = Math.floor(before / limit) + 1;
+  const row = (before % limit) + 1;
+  return { page, row };
+};
+
 module.exports = {
   getAll,
   getById,
   create,
   update,
-  getRutas
-  , toggleHabilitado
+  getRutas,
+  toggleHabilitado,
+  getPageOf,
 };

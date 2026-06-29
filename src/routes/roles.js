@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { validate } = require('../middlewares/validation');
 const rolController = require('../controllers/rolController');
-const { authenticate, authorize } = require('../middlewares/auth');
+const { authenticate, authorize, authorizePermission } = require('../middlewares/auth');
 const { createValidation, updateValidation } = require('../validators/rolesValidator');
 
 router.use(authenticate);
@@ -146,6 +146,6 @@ router.put('/:id', authorize('admin'), updateValidation, validate, rolController
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.patch('/:id/toggle-habilitado', authorize('admin'), rolController.toggleHabilitado);
+router.patch('/:id/toggle-habilitado', authorizePermission('inhabilitar_rol'), rolController.toggleHabilitado);
 
 module.exports = router;

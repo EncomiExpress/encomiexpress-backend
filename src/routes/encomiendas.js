@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { validate } = require('../middlewares/validation');
 const encomiendaVentaController = require('../controllers/encomiendaVentaController');
-const { authenticate } = require('../middlewares/auth');
+const { authenticate, authorizePermission } = require('../middlewares/auth');
 const {
   createValidation,
   cambiarEstadoValidation,
@@ -205,7 +205,7 @@ router.patch('/:id/estado', cambiarEstadoValidation, validate, encomiendaVentaCo
  *       200:
  *         description: Estado cambiado correctamente
  */
-router.patch('/:id/toggle-habilitado', encomiendaVentaController.toggleHabilitado);
+router.patch('/:id/toggle-habilitado', authorizePermission('inhabilitar_venta'), encomiendaVentaController.toggleHabilitado);
 
 /**
  * @swagger

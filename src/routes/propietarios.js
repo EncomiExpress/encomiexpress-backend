@@ -32,6 +32,7 @@ router.use(authenticate);
  *         description: Lista de propietarios
  */
 router.get('/', authorizePermission('listar_propietario'), propietarioController.getAll);
+router.get('/:id/page-of', authorizePermission('listar_propietario'), propietarioController.getPageOf);
 
 /**
  * @swagger

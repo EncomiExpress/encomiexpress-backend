@@ -7,10 +7,6 @@ const Vehiculo = sequelize.define('Vehiculo', {
     primaryKey: true,
     autoIncrement: true
   },
-  idConductor: {
-    type: DataTypes.INTEGER,
-    allowNull: false
-  },
   idPropietario: {
     type: DataTypes.INTEGER,
     allowNull: false
@@ -36,6 +32,11 @@ const Vehiculo = sequelize.define('Vehiculo', {
     type: DataTypes.STRING(50),
     allowNull: true
   },
+  origen: {
+    type: DataTypes.STRING(20),
+    allowNull: false,
+    defaultValue: 'Propio'
+  },
   capacidad: {
     type: DataTypes.DECIMAL(10, 2),
     allowNull: true
@@ -54,16 +55,16 @@ const Vehiculo = sequelize.define('Vehiculo', {
   },
   vencimientoSOAT: {
     type: DataTypes.DATEONLY,
-    allowNull: true,
+    allowNull: false,
     field: 'vencimiento_soat'
   },
   vencimientoRevisionTecnica: {
     type: DataTypes.DATEONLY,
-    allowNull: true
+    allowNull: false
   },
   vencimientoSeguroTerceros: {
     type: DataTypes.DATEONLY,
-    allowNull: true
+    allowNull: false
   }
   
 }, {

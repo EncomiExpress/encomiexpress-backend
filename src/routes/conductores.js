@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const conductorController = require('../controllers/conductorController');
 const anticipoController = require('../controllers/anticipoExcedenteController');
-const { authenticate, authorize } = require('../middlewares/auth');
+const { authenticate, authorize, authorizePermission } = require('../middlewares/auth');
 const { validate } = require('../middlewares/validation');
 const { createValidation, updateValidation, cambiarEstadoValidation } = require('../validators/conductoresValidator');
 
@@ -275,23 +275,6 @@ router.get('/:id', conductorController.getById);
 
 /**
  * @swagger
- * /conductores/{id}/vehiculos:
- *   get:
- *     summary: Listar vehículos asignados a un conductor
- *     tags: [Conductores]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema: { type: integer }
- *     responses:
- *       200:
- *         description: Lista de vehículos del conductor
- */
-router.get('/:id/vehiculos', conductorController.getVehiculos);
-
-/**
- * @swagger
  * /conductores/{id}/anticipos:
  *   get:
  *     summary: Listar anticipos de un conductor específico
@@ -406,6 +389,6 @@ router.patch('/:id/estado', authorize('admin'), cambiarEstadoValidation, validat
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.patch('/:id/toggle-habilitado', authorize('admin'), conductorController.toggleHabilitado);
+router.patch('/:id/toggle-habilitado', authorizePermission('inhabilitar_conductor'), conductorController.toggleHabilitado);
 
 module.exports = router;

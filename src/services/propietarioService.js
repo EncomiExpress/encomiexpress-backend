@@ -12,9 +12,10 @@ const buildOrder = (sortBy) => {
   return [[field, direction]];
 };
 
-const getAll = async ({ habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
+const getAll = async ({ habilitado, q, tipoFlota, page = 1, limit = 10, sortBy } = {}) => {
   const where = {};
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
+  if (tipoFlota) where.tipoFlota = tipoFlota;
   if (q) {
     const query = `%${q.trim()}%`;
     const numericId = Number(q);
@@ -128,6 +129,17 @@ const getVehiculos = async (id) => {
   return vehiculos;
 };
 
+const getPageOf = async (id, { limit = 10 } = {}) => {
+  const record = await PropietarioVehiculo.findByPk(id, { attributes: ['idPropietario'] });
+  if (!record) throw new AppError('Propietario no encontrado', 404);
+  const before = await PropietarioVehiculo.count({
+    where: { idPropietario: { [Op.lt]: parseInt(id) } },
+  });
+  const page = Math.floor(before / limit) + 1;
+  const row = (before % limit) + 1;
+  return { page, row };
+};
+
 const toggleHabilitado = async (id) => {
   const propietario = await PropietarioVehiculo.findByPk(id);
   if (!propietario) throw new AppError('Propietario no encontrado', 404);
@@ -153,5 +165,6 @@ module.exports = {
   create,
   update,
   getVehiculos,
-  toggleHabilitado
+  toggleHabilitado,
+  getPageOf,
 };

@@ -5,8 +5,8 @@ exports.getAll = async (req, res, next) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const sortBy = req.query.sortBy;
-    const { estado, habilitado, q, idConductor, idPropietario } = req.query;
-    const filters = { estado, habilitado, q, idConductor, idPropietario, page, limit, sortBy };
+    const { estado, tipo, habilitado, q, idConductor, idPropietario } = req.query;
+    const filters = { estado, tipo, habilitado, q, idConductor, idPropietario, page, limit, sortBy };
     const result = await vehiculoService.getAll(filters);
     res.json({ success: true, data: result.data, total: result.total });
   } catch (error) {
