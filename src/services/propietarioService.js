@@ -17,16 +17,25 @@ const getAll = async ({ habilitado, q, tipoFlota, page = 1, limit = 10, sortBy }
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
   if (tipoFlota) where.tipoFlota = tipoFlota;
   if (q) {
-    const query = `%${q.trim()}%`;
+    const trimmed = q.trim();
+    const query = `%${trimmed}%`;
     const numericId = Number(q);
     const conditions = [
       { nombre: { [Op.iLike]: query } },
       { apellido: { [Op.iLike]: query } },
       { numeroIdentificacion: { [Op.iLike]: query } },
       { email: { [Op.iLike]: query } },
+      { telefono: { [Op.iLike]: query } },
     ];
     if (!Number.isNaN(numericId)) {
       conditions.unshift({ idPropietario: numericId });
+    }
+    const partes = trimmed.split(/\s+/).filter(Boolean);
+    if (partes.length > 1) {
+      const primero = `%${partes[0]}%`;
+      const resto = `%${partes.slice(1).join(' ')}%`;
+      conditions.push({ [Op.and]: [{ nombre: { [Op.iLike]: primero } }, { apellido: { [Op.iLike]: resto } }] });
+      conditions.push({ [Op.and]: [{ apellido: { [Op.iLike]: primero } }, { nombre: { [Op.iLike]: resto } }] });
     }
     where[Op.or] = conditions;
   }
@@ -67,6 +76,25 @@ const create = async (data) => {
     tipoFlota
   } = data;
 
+  const existingDoc = await PropietarioVehiculo.findOne({ where: { numeroIdentificacion } });
+  if (existingDoc) {
+    throw new AppError('El número de identificación ya está registrado', 400);
+  }
+
+  if (email) {
+    const existingEmail = await PropietarioVehiculo.findOne({ where: { email } });
+    if (existingEmail) {
+      throw new AppError('El email ya está registrado', 400);
+    }
+  }
+
+  if (tarjetaPropiedad) {
+    const existingTarjeta = await PropietarioVehiculo.findOne({ where: { tarjetaPropiedad } });
+    if (existingTarjeta) {
+      throw new AppError('La tarjeta de propiedad ya está registrada', 400);
+    }
+  }
+
   const propietario = await PropietarioVehiculo.create({
     tipoIdentificacion,
     numeroIdentificacion,
@@ -98,6 +126,33 @@ const update = async (id, data) => {
 
   if (!propietario) {
     throw new AppError('Propietario no encontrado', 404);
+  }
+
+  if (numeroIdentificacion && numeroIdentificacion !== propietario.numeroIdentificacion) {
+    const existingDoc = await PropietarioVehiculo.findOne({
+      where: { numeroIdentificacion, idPropietario: { [Op.ne]: id } },
+    });
+    if (existingDoc) {
+      throw new AppError('El número de identificación ya está registrado', 400);
+    }
+  }
+
+  if (email && email !== propietario.email) {
+    const existingEmail = await PropietarioVehiculo.findOne({
+      where: { email, idPropietario: { [Op.ne]: id } },
+    });
+    if (existingEmail) {
+      throw new AppError('El email ya está registrado', 400);
+    }
+  }
+
+  if (tarjetaPropiedad && tarjetaPropiedad !== propietario.tarjetaPropiedad) {
+    const existingTarjeta = await PropietarioVehiculo.findOne({
+      where: { tarjetaPropiedad, idPropietario: { [Op.ne]: id } },
+    });
+    if (existingTarjeta) {
+      throw new AppError('La tarjeta de propiedad ya está registrada', 400);
+    }
   }
 
   await propietario.update({

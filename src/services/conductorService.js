@@ -91,6 +91,13 @@ const create = async (data) => {
     throw new AppError('El número de identificación ya está registrado', 400);
   }
 
+  if (numeroLicencia) {
+    const existingLicencia = await Conductor.findOne({ where: { numeroLicencia } });
+    if (existingLicencia) {
+      throw new AppError('El número de licencia ya está registrado', 400);
+    }
+  }
+
   const hashedPassword = await bcrypt.hash(password, 10);
 
   const usuario = await Usuario.create({
@@ -139,6 +146,34 @@ const update = async (id, data) => {
 
   if (!conductor) {
     throw new AppError('Conductor no encontrado', 404);
+  }
+
+  if (numeroLicencia && numeroLicencia !== conductor.numeroLicencia) {
+    const existingLicencia = await Conductor.findOne({
+      where: { numeroLicencia, idConductor: { [Op.ne]: id } },
+    });
+    if (existingLicencia) {
+      throw new AppError('El número de licencia ya está registrado', 400);
+    }
+  }
+
+  if (conductor.usuario) {
+    if (numeroIdentificacion && numeroIdentificacion !== conductor.usuario.numeroIdentificacion) {
+      const existingDoc = await Usuario.findOne({
+        where: { numeroIdentificacion, idUsuario: { [Op.ne]: conductor.usuario.idUsuario } },
+      });
+      if (existingDoc) {
+        throw new AppError('El número de identificación ya está registrado', 400);
+      }
+    }
+    if (email && email !== conductor.usuario.email) {
+      const existingEmail = await Usuario.findOne({
+        where: { email, idUsuario: { [Op.ne]: conductor.usuario.idUsuario } },
+      });
+      if (existingEmail) {
+        throw new AppError('El email ya está registrado', 400);
+      }
+    }
   }
 
   await conductor.update({

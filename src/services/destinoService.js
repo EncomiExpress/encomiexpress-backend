@@ -51,6 +51,16 @@ const getById = async (id) => {
 const create = async (data) => {
   const { departamento, ciudad, tarifaBase } = data;
 
+  const existente = await Destino.findOne({
+    where: {
+      departamento: { [Op.iLike]: departamento },
+      ciudad: { [Op.iLike]: ciudad },
+    },
+  });
+  if (existente) {
+    throw new AppError('Ya existe un destino registrado con ese departamento y ciudad', 400);
+  }
+
   const destino = await Destino.create({
     departamento,
     ciudad,
@@ -67,6 +77,21 @@ const update = async (id, data) => {
 
   if (!destino) {
     throw new AppError('Destino no encontrado', 404);
+  }
+
+  const nuevoDepartamento = departamento || destino.departamento;
+  const nuevaCiudad = ciudad || destino.ciudad;
+  if (nuevoDepartamento !== destino.departamento || nuevaCiudad !== destino.ciudad) {
+    const existente = await Destino.findOne({
+      where: {
+        departamento: { [Op.iLike]: nuevoDepartamento },
+        ciudad: { [Op.iLike]: nuevaCiudad },
+        idDestino: { [Op.ne]: id },
+      },
+    });
+    if (existente) {
+      throw new AppError('Ya existe un destino registrado con ese departamento y ciudad', 400);
+    }
   }
 
   await destino.update({
