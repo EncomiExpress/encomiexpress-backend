@@ -5,6 +5,7 @@ const encomiendaVentaController = require('../controllers/encomiendaVentaControl
 const { authenticate, authorizePermission } = require('../middlewares/auth');
 const {
   createValidation,
+  updateValidation,
   cambiarEstadoValidation,
   agregarPaqueteValidation,
   agregarDestinatarioValidation
@@ -160,7 +161,7 @@ router.post('/', createValidation, validate, encomiendaVentaController.create);
  *       200:
  *         description: Encomienda actualizada
  */
-router.put('/:id', encomiendaVentaController.update);
+router.put('/:id', updateValidation, validate, encomiendaVentaController.update);
 
 /**
  * @swagger

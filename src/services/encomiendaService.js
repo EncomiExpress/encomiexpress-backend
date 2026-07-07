@@ -259,8 +259,8 @@ const create = async (data) => {
         valorServicio: valorServicio || 0,
         impuestos: valorImpuestos,
         total,
-        metodoPago: metodoPago || null,
-        estadoPago: estadoPago || 'Pendiente',
+        metodoPago: metodoPago ? (METODOS_PAGO_VALIDOS.find(v => v.toLowerCase() === metodoPago.toLowerCase()) || null) : null,
+        estadoPago: ESTADOS_PAGO_VALIDOS.find(v => v.toLowerCase() === (estadoPago || 'Pendiente').toLowerCase()) || 'Pendiente',
         estado: 'Programada',
       },
       { transaction }
@@ -395,8 +395,8 @@ const update = async (id, data) => {
         valorServicio: nuevoValorServicio,
         impuestos: nuevoImpuestos,
         total: nuevoTotal,
-        metodoPago: metodoPago !== undefined ? metodoPago : encomienda.metodoPago,
-        estadoPago: estadoPago !== undefined ? estadoPago : encomienda.estadoPago,
+        metodoPago: metodoPago !== undefined ? (metodoPago ? METODOS_PAGO_VALIDOS.find(v => v.toLowerCase() === metodoPago.toLowerCase()) || encomienda.metodoPago : null) : encomienda.metodoPago,
+        estadoPago: estadoPago !== undefined ? (ESTADOS_PAGO_VALIDOS.find(v => v.toLowerCase() === estadoPago.toLowerCase()) || encomienda.estadoPago) : encomienda.estadoPago,
         habilitado: habilitado !== undefined ? habilitado : encomienda.habilitado,
       },
       { transaction }
