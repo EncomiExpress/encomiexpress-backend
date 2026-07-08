@@ -14,7 +14,12 @@ module.exports = {
     optional: () => body('nombre').optional(),
   },
   apellido: {
-    required: () => body('apellido').notEmpty().withMessage('Apellido es requerido'),
+    // Las personas jurídicas (NIT) no tienen apellido: solo razón social en "nombre"
+    required: () => body('apellido').custom((value, { req }) => {
+      if (req.body.tipoIdentificacion === 'NIT') return true;
+      if (!value || !String(value).trim()) throw new Error('Apellido es requerido');
+      return true;
+    }),
     optional: () => body('apellido').optional(),
   },
   telefono: {

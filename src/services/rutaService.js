@@ -272,8 +272,10 @@ const updateEstado = async (id, estado) => {
   }
 
   if (estado === 'Cancelada') {
+    // Las ventas quedan pendientes de reasignación a otra ruta (no se cancelan):
+    // pueden seguir su curso una vez se les asigne una ruta activa.
     await EncomiendaVenta.update(
-      { estado: 'Cancelada' },
+      { estado: 'Programada' },
       { where: { idRuta: ruta.idRuta, habilitado: true, estado: { [Op.in]: ['Programada', 'En Tránsito'] } } }
     );
     await AnticipoExcedente.update(

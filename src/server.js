@@ -2,6 +2,7 @@ require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') }
 const http = require('http');
 const app = require('./app');
 const { sequelize } = require('./models');
+const { iniciarAutoInicioRutas } = require('./jobs/autoIniciarRutas');
 
 const REQUIRED_ENV_VARS = ['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'JWT_SECRET', 'JWT_REFRESH_SECRET'];
 const missingEnvVars = REQUIRED_ENV_VARS.filter(v => !process.env[v]);
@@ -30,6 +31,8 @@ const startServer = async () => {
         console.log(`📄 Documentación API: http://localhost:${PORT}/api/docs`);
       }
     });
+
+    iniciarAutoInicioRutas();
   } catch (error) {
     console.error('❌ Error al iniciar el servidor:', error);
     process.exit(1);
