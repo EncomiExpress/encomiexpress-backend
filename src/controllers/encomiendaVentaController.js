@@ -1,620 +1,131 @@
-const { EncomiendaVenta, Destinatario, Paquete, Cliente, Ruta, sequelize } = require('../models');
+const encomiendaService = require('../services/encomiendaService');
 
-// Generar número de guía único
-const generarNumeroGuia = async () => {
-  const prefix = 'EE';
-  const timestamp = Date.now().toString().slice(-8);
-  const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-  return `${prefix}-${timestamp}-${random}`;
-};
-
-// Validar estados de encomienda
-const ESTADOS_VALIDOS = ['Pendiente de Recogida', 'En Recogida', 'Programada', 'En Tránsito', 'Entregado', 'Devuelto', 'Activo', 'Inactivo'];
-const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia', 'Nequi'];
-const ESTADOS_PAGO_VALIDOS = ['Pendiente', 'Pagado'];
-
-// Listar todas las encomiendas
-exports.getAll = async (req, res) => {
+exports.getAll = async (req, res, next) => {
   try {
-    const { estado, idCliente, fechaInicio, fechaFin } = req.query;
-    
-    const where = {};
-    if (estado) where.estado = estado;
-    if (idCliente) where.idCliente = idCliente;
-    if (fechaInicio && fechaFin) {
-      where.fechaRegistro = {
-        [sequelize.Sequelize.Op.between]: [fechaInicio, fechaFin]
-      };
-    }
-
-    const encomiendas = await EncomiendaVenta.findAll({
-      where,
-      include: [
-        { model: Cliente, as: 'cliente' },
-        { model: Ruta, as: 'ruta', include: [
-          { model: require('../models').Vehiculo, as: 'vehiculo' },
-          { model: require('../models').Destino, as: 'destino' }
-        ]},
-        { model: Destinatario, as: 'destinatarios' },
-        { model: Paquete, as: 'paquetes' }
-      ],
-      order: [['fechaRegistro', 'DESC']]
-    });
-
-    res.json({
-      success: true,
-      data: encomiendas
-    });
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const sortBy = req.query.sortBy;
+    const q = req.query.q;
+    const filters = {
+      estado: req.query.estado,
+      idCliente: req.query.idCliente,
+      idRuta: req.query.idRuta,
+      fechaInicio: req.query.fechaInicio,
+      fechaFin: req.query.fechaFin,
+      habilitado: req.query.habilitado,
+      estadoPago: req.query.estadoPago,
+      metodoPago: req.query.metodoPago,
+      page,
+      limit,
+      sortBy,
+      q,
+    };
+    const result = await encomiendaService.getAll(filters);
+    res.json({ success: true, data: result.data, total: result.total });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error al obtener encomiendas',
-      error: error.message
-    });
+    next(error);
   }
 };
 
-// Obtener una encomienda por ID
-exports.getById = async (req, res) => {
+exports.getById = async (req, res, next) => {
   try {
     const { id } = req.params;
-    
-    const encomienda = await EncomiendaVenta.findByPk(id, {
-      include: [
-        { model: Cliente, as: 'cliente' },
-        { model: Ruta, as: 'ruta', include: [
-          { model: require('../models').Vehiculo, as: 'vehiculo' },
-          { model: require('../models').Conductor, as: 'conductor', include: [
-            { model: require('../models').Usuario, as: 'usuario' }
-          ]},
-          { model: require('../models').Destino, as: 'destino' }
-        ]},
-        { model: Destinatario, as: 'destinatarios' },
-        { model: Paquete, as: 'paquetes' }
-      ]
-    });
-
-    if (!encomienda) {
-      return res.status(404).json({
-        success: false,
-        message: 'Encomienda no encontrada'
-      });
-    }
-
-    res.json({
-      success: true,
-      data: encomienda
-    });
+    const encomienda = await encomiendaService.getById(id);
+    res.json({ success: true, data: encomienda });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error al obtener encomienda',
-      error: error.message
-    });
+    next(error);
   }
 };
 
-// Obtener una encomienda por número de guía
-exports.getByGuia = async (req, res) => {
+exports.getByGuia = async (req, res, next) => {
   try {
     const { numeroGuia } = req.params;
-    
-    const encomienda = await EncomiendaVenta.findOne({
-      where: { numeroGuia },
-      include: [
-        { model: Cliente, as: 'cliente' },
-        { model: Ruta, as: 'ruta', include: [
-          { model: require('../models').Vehiculo, as: 'vehiculo' },
-          { model: require('../models').Destino, as: 'destino' }
-        ]},
-        { model: Destinatario, as: 'destinatarios' },
-        { model: Paquete, as: 'paquetes' }
-      ]
-    });
+    const encomienda = await encomiendaService.getByGuia(numeroGuia);
+    res.json({ success: true, data: encomienda });
+  } catch (error) {
+    next(error);
+  }
+};
 
-    if (!encomienda) {
-      return res.status(404).json({
-        success: false,
-        message: 'Encomienda no encontrada'
-      });
-    }
+exports.getPublicByToken = async (req, res, next) => {
+  try {
+    const { token } = req.params;
+    const encomienda = await encomiendaService.getPublicByToken(token);
+    res.json({ success: true, data: encomienda });
+  } catch (error) {
+    next(error);
+  }
+};
 
+exports.create = async (req, res, next) => {
+  try {
+    const encomienda = await encomiendaService.create(req.body, req.file?.path);
+    res.status(201).json({ success: true, message: 'Encomienda creada exitosamente', data: encomienda });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.update = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const encomienda = await encomiendaService.update(id, req.body);
+    res.json({ success: true, message: 'Encomienda actualizada exitosamente', data: encomienda });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.cambiarEstado = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const encomienda = await encomiendaService.cambiarEstado(id, req.body.estado);
+    res.json({ success: true, message: 'Estado de encomienda actualizado exitosamente', data: encomienda });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.agregarPaquete = async (req, res, next) => {
+  try {
+    const { idEncomiendaVenta } = req.params;
+    const paquete = await encomiendaService.agregarPaquete(idEncomiendaVenta, req.body);
+    res.status(201).json({ success: true, message: 'Paquete agregado exitosamente', data: paquete });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.toggleHabilitado = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const encomienda = await encomiendaService.toggleHabilitado(id);
     res.json({
       success: true,
+      message: `Encomienda ${encomienda.habilitado ? 'habilitada' : 'inhabilitada'} exitosamente`,
       data: encomienda
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error al buscar encomienda',
-      error: error.message
-    });
+    next(error);
   }
 };
 
-// Crear una nueva encomienda con destinatario y paquetes
-exports.create = async (req, res) => {
-  const transaction = await sequelize.transaction();
-  
-  try {
-    const {
-      idCliente,
-      idRuta,
-      numeroFactura,
-      fechaEstimadaEntrega,
-      observaciones,
-      valorServicio,
-      impuestos,
-      metodoPago,
-      estadoPago,
-      // Datos del destinatario
-      destinatario,
-      // Array de paquetes
-      paquetes
-    } = req.body;
-
-    // Validar cliente existe
-    const cliente = await Cliente.findByPk(idCliente);
-    if (!cliente) {
-      await transaction.rollback();
-      return res.status(400).json({
-        success: false,
-        message: 'Cliente no encontrado'
-      });
-    }
-
-    // Validar ruta existe (opcional por ahora — módulo de rutas pendiente)
-    if (idRuta) {
-      const ruta = await Ruta.findByPk(idRuta);
-      if (!ruta) {
-        await transaction.rollback();
-        return res.status(400).json({
-          success: false,
-          message: 'Ruta no encontrada'
-        });
-      }
-    }
-
-    // Validar método de pago
-    if (metodoPago && !METODOS_PAGO_VALIDOS.some(v => v.toLowerCase() === metodoPago.toLowerCase())) {
-      await transaction.rollback();
-      return res.status(400).json({
-        success: false,
-        message: `Método de pago inválido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`
-      });
-    }
-
-    // Validar estado de pago
-    if (estadoPago && !ESTADOS_PAGO_VALIDOS.some(v => v.toLowerCase() === estadoPago.toLowerCase())) {
-      await transaction.rollback();
-      return res.status(400).json({
-        success: false,
-        message: `Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`
-      });
-    }
-
-    // Generar número de guía único
-    let numeroGuia = await generarNumeroGuia();
-    let guiaExistente = await EncomiendaVenta.findOne({ where: { numeroGuia } });
-    while (guiaExistente) {
-      numeroGuia = await generarNumeroGuia();
-      guiaExistente = await EncomiendaVenta.findOne({ where: { numeroGuia } });
-    }
-
-    // Calcular total
-    const valorImpuestos = impuestos || 0;
-    const total = (valorServicio || 0) + valorImpuestos;
-
-    // Crear la encomienda
-    const encomienda = await EncomiendaVenta.create({
-      idCliente,
-      idRuta,
-      numeroGuia,
-      numeroFactura: numeroFactura || null,
-      fechaEstimadaEntrega: fechaEstimadaEntrega || null,
-      observaciones: observaciones || null,
-      valorServicio: valorServicio || 0,
-      impuestos: valorImpuestos,
-      total,
-      metodoPago: metodoPago || null,
-      estadoPago: estadoPago || 'pendiente',
-      estado: 'pendiente de recogida'
-    }, { transaction });
-
-    // Crear destinatario si existe
-    if (destinatario) {
-      await Destinatario.create({
-        idEncomiendaVenta: encomienda.idEncomiendaVenta,
-        nombreDestinatario: destinatario.nombreDestinatario,
-        telefonoDestinatario: destinatario.telefonoDestinatario || null,
-        direccionDestinatario: destinatario.direccionDestinatario || null
-      }, { transaction });
-    }
-
-    // Crear paquetes si existen
-    if (paquetes && paquetes.length > 0) {
-      for (const pkg of paquetes) {
-        await Paquete.create({
-          idEncomiendaVenta: encomienda.idEncomiendaVenta,
-          descripcionContenido: pkg.descripcionContenido || null,
-          peso: pkg.peso || null,
-          alto: pkg.alto || null,
-          ancho: pkg.ancho || null,
-          profundidad: pkg.profundidad || null,
-          valorDeclarado: pkg.valorDeclarado || null
-        }, { transaction });
-      }
-    }
-
-    await transaction.commit();
-
-    // Obtener la encomienda completa con relaciones
-    const encomiendaCompleta = await EncomiendaVenta.findByPk(encomienda.idEncomiendaVenta, {
-      include: [
-        { model: Cliente, as: 'cliente' },
-        { model: Ruta, as: 'ruta' },
-        { model: Destinatario, as: 'destinatarios' },
-        { model: Paquete, as: 'paquetes' }
-      ]
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'Encomienda creada exitosamente',
-      data: encomiendaCompleta
-    });
-  } catch (error) {
-    await transaction.rollback();
-    res.status(500).json({
-      success: false,
-      message: 'Error al crear encomienda',
-      error: error.message
-    });
-  }
-};
-
-// Actualizar una encomienda
-exports.update = async (req, res) => {
-  const transaction = await sequelize.transaction();
-  
-  try {
-    const { id } = req.params;
-    const {
-      idRuta,
-      numeroFactura,
-      fechaEstimadaEntrega,
-      observaciones,
-      valorServicio,
-      impuestos,
-      metodoPago,
-      estadoPago,
-      habilitado,
-      // Datos del destinatario
-      destinatario,
-      // Array de paquetes
-      paquetes
-    } = req.body;
-
-    const encomienda = await EncomiendaVenta.findByPk(id);
-
-    if (!encomienda) {
-      await transaction.rollback();
-      return res.status(404).json({
-        success: false,
-        message: 'Encomienda no encontrada'
-      });
-    }
-
-    // Validar método de pago
-    if (metodoPago && !METODOS_PAGO_VALIDOS.some(v => v.toLowerCase() === metodoPago.toLowerCase())) {
-      return res.status(400).json({
-        success: false,
-        message: `Método de pago inválido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`
-      });
-    }
-
-    // Validar estado de pago
-    if (estadoPago && !ESTADOS_PAGO_VALIDOS.some(v => v.toLowerCase() === estadoPago.toLowerCase())) {
-      return res.status(400).json({
-        success: false,
-        message: `Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`
-      });
-    }
-
-    // Calcular total si se actualiza valor
-    const parseDecimal = (value) => {
-      if (value === undefined || value === null || value === '') return 0;
-      return typeof value === 'number'
-        ? value
-        : parseFloat(String(value).replace(',', '.')) || 0;
-    };
-
-    const nuevoImpuestos = impuestos !== undefined ? parseDecimal(impuestos) : parseDecimal(encomienda.impuestos);
-    const nuevoValorServicio = valorServicio !== undefined ? parseDecimal(valorServicio) : parseDecimal(encomienda.valorServicio);
-    const nuevoTotal = nuevoImpuestos + nuevoValorServicio;
-
-    // Para idRuta: si viene un número válido, usarlo; si no, mantener el valor actual
-    let nuevoIdRuta = encomienda.idRuta;
-    if (idRuta !== undefined) {
-        if (idRuta && !isNaN(parseInt(idRuta)) && parseInt(idRuta) > 0) {
-            nuevoIdRuta = parseInt(idRuta);
-        } else {
-            nuevoIdRuta = null;
-        }
-    }
-
-    await encomienda.update({
-      idRuta: nuevoIdRuta,
-      numeroFactura: numeroFactura !== undefined ? numeroFactura : encomienda.numeroFactura,
-      fechaEstimadaEntrega: fechaEstimadaEntrega !== undefined ? fechaEstimadaEntrega : encomienda.fechaEstimadaEntrega,
-      observaciones: observaciones !== undefined ? observaciones : encomienda.observaciones,
-      valorServicio: nuevoValorServicio,
-      impuestos: nuevoImpuestos,
-      total: nuevoTotal,
-      metodoPago: metodoPago !== undefined ? metodoPago : encomienda.metodoPago,
-      estadoPago: estadoPago !== undefined ? estadoPago : encomienda.estadoPago,
-      habilitado: habilitado !== undefined ? habilitado : encomienda.habilitado
-    }, { transaction });
-
-    // Actualizar destinatario si existe
-    if (destinatario) {
-      const destinatarioExistente = await Destinatario.findOne({ 
-        where: { idEncomiendaVenta: id } 
-      });
-      
-      if (destinatarioExistente) {
-        await destinatarioExistente.update({
-          nombreDestinatario: destinatario.nombreDestinatario || destinatarioExistente.nombreDestinatario,
-          telefonoDestinatario: destinatario.telefonoDestinatario || null,
-          direccionDestinatario: destinatario.direccionDestinatario || null
-        }, { transaction });
-      } else {
-        await Destinatario.create({
-          idEncomiendaVenta: id,
-          nombreDestinatario: destinatario.nombreDestinatario,
-          telefonoDestinatario: destinatario.telefonoDestinatario || null,
-          direccionDestinatario: destinatario.direccionDestinatario || null
-        }, { transaction });
-      }
-    }
-
-    // Actualizar paquetes si existen
-    if (paquetes && paquetes.length > 0) {
-      // Eliminar paquetes existentes y crear nuevos
-      await Paquete.destroy({ where: { idEncomiendaVenta: id }, transaction });
-      
-      for (const pkg of paquetes) {
-        await Paquete.create({
-          idEncomiendaVenta: id,
-          descripcionContenido: pkg.descripcionContenido || null,
-          peso: pkg.peso || null,
-          alto: pkg.alto || null,
-          ancho: pkg.ancho || null,
-          profundidad: pkg.profundidad || null,
-          valorDeclarado: pkg.valorDeclarado || null
-        }, { transaction });
-      }
-    }
-
-    await transaction.commit();
-
-    // Obtener la encomienda actualizada
-    const encomiendaActualizada = await EncomiendaVenta.findByPk(id, {
-      include: [
-        { model: Cliente, as: 'cliente' },
-        { model: Ruta, as: 'ruta', required: false },
-        { model: Destinatario, as: 'destinatarios' },
-        { model: Paquete, as: 'paquetes' }
-      ]
-    });
-
-    res.json({
-      success: true,
-      message: 'Encomienda actualizada exitosamente',
-      data: encomiendaActualizada
-    });
-  } catch (error) {
-    await transaction.rollback();
-    res.status(500).json({
-      success: false,
-      message: 'Error al actualizar encomienda',
-      error: error.message
-    });
-  }
-};
-
-// Cambiar estado de la encomienda
-exports.cambiarEstado = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { estado } = req.body;
-
-    const encomienda = await EncomiendaVenta.findByPk(id);
-
-    if (!encomienda) {
-      return res.status(404).json({
-        success: false,
-        message: 'Encomienda no encontrada'
-      });
-    }
-
-    // Validar estado
-    if (!ESTADOS_VALIDOS.some(v => v.toLowerCase() === estado.toLowerCase())) {
-      return res.status(400).json({
-        success: false,
-        message: `Estado inválido. Opciones: ${ESTADOS_VALIDOS.join(', ')}`
-      });
-    }
-
-    await encomienda.update({ estado: estado.toLowerCase() });
-
-    res.json({
-      success: true,
-      message: 'Estado de encomienda actualizado exitosamente',
-      data: encomienda
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error al cambiar estado',
-      error: error.message
-    });
-  }
-};
-
-// Eliminar (inhabilitar) una encomienda
-exports.delete = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const encomienda = await EncomiendaVenta.findByPk(id);
-
-    if (!encomienda) {
-      return res.status(404).json({
-        success: false,
-        message: 'Encomienda no encontrada'
-      });
-    }
-
-    await encomienda.update({ habilitado: false });
-
-    res.json({
-      success: true,
-      message: 'Encomienda deshabilitada exitosamente'
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error al eliminar encomienda',
-      error: error.message
-    });
-  }
-};
-
-// Agregar paquete a una encomienda existente
-exports.agregarPaquete = async (req, res) => {
+exports.agregarDestinatario = async (req, res, next) => {
   try {
     const { idEncomiendaVenta } = req.params;
-    const {
-      descripcionContenido,
-      peso,
-      alto,
-      ancho,
-      profundidad,
-      valorDeclarado
-    } = req.body;
-
-    const encomienda = await EncomiendaVenta.findByPk(idEncomiendaVenta);
-
-    if (!encomienda) {
-      return res.status(404).json({
-        success: false,
-        message: 'Encomienda no encontrada'
-      });
-    }
-
-    const paquete = await Paquete.create({
-      idEncomiendaVenta,
-      descripcionContenido: descripcionContenido || null,
-      peso: peso || null,
-      alto: alto || null,
-      ancho: ancho || null,
-      profundidad: profundidad || null,
-      valorDeclarado: valorDeclarado || null
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'Paquete agregado exitosamente',
-      data: paquete
-    });
+    const destinatario = await encomiendaService.agregarDestinatario(idEncomiendaVenta, req.body);
+    res.status(201).json({ success: true, message: 'Destinatario agregado exitosamente', data: destinatario });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error al agregar paquete',
-      error: error.message
-    });
+    next(error);
   }
 };
 
-// Habilitar/Inhabilitar una encomienda (toggle)
-exports.toggleHabilitado = async (req, res) => {
+exports.getPageOf = async (req, res, next) => {
   try {
-    const { id } = req.params;
-
-    const encomienda = await EncomiendaVenta.findByPk(id);
-
-    if (!encomienda) {
-      return res.status(404).json({
-        success: false,
-        message: 'Encomienda no encontrada'
-      });
-    }
-
-    // Actualizar y obtener el valor nuevo
-    const nuevoEstado = !encomienda.habilitado
-    await encomienda.update({ habilitado: nuevoEstado });
-    
-    // Recargar con las relaciones incluye cliente, destinatarios y paquetes
-    const encomiendaActualizada = await EncomiendaVenta.findByPk(id, {
-      include: [
-        { model: Cliente, as: 'cliente' },
-        { model: Destinatario, as: 'destinatarios' },
-        { model: Paquete, as: 'paquetes' },
-        { model: Ruta, as: 'ruta', required: false }
-      ]
-    });
-
-    res.json({
-      success: true,
-      message: `Encomienda ${nuevoEstado ? 'habilitada' : 'inhabilitada'} exitosamente`,
-      data: encomiendaActualizada
-    });
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const data = await encomiendaService.getPageOf(req.params.id, { limit });
+    res.json({ success: true, data });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error al cambiar estado de habilitado',
-      error: error.message
-    });
-  }
-};
-
-// Agregar destinatario a una encomienda existente
-exports.agregarDestinatario = async (req, res) => {
-  try {
-    const { idEncomiendaVenta } = req.params;
-    const {
-      nombreDestinatario,
-      telefonoDestinatario,
-      direccionDestinatario
-    } = req.body;
-
-    const encomienda = await EncomiendaVenta.findByPk(idEncomiendaVenta);
-
-    if (!encomienda) {
-      return res.status(404).json({
-        success: false,
-        message: 'Encomienda no encontrada'
-      });
-    }
-
-    const destinatario = await Destinatario.create({
-      idEncomiendaVenta,
-      nombreDestinatario,
-      telefonoDestinatario: telefonoDestinatario || null,
-      direccionDestinatario: direccionDestinatario || null
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'Destinatario agregado exitosamente',
-      data: destinatario
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error al agregar destinatario',
-      error: error.message
-    });
+    next(error);
   }
 };

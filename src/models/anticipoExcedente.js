@@ -5,8 +5,7 @@ const AnticipoExcedente = sequelize.define('AnticipoExcedente', {
   idAnticipoExcedente: {
     type: DataTypes.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
-    field: 'idAnticipoExcedente'
+    autoIncrement: true
   },
   idConductor: {
     type: DataTypes.INTEGER,
@@ -14,7 +13,7 @@ const AnticipoExcedente = sequelize.define('AnticipoExcedente', {
   },
   idRuta: {
     type: DataTypes.INTEGER,
-    allowNull: true
+    allowNull: false
   },
   valorAnticipo: {
     type: DataTypes.DECIMAL(12, 2),
@@ -30,11 +29,15 @@ const AnticipoExcedente = sequelize.define('AnticipoExcedente', {
   },
   estado: {
     type: DataTypes.STRING(30),
-    defaultValue: 'pendiente'
+    defaultValue: 'Entregado'
   },
   soporte: {
     type: DataTypes.STRING(500),
     allowNull: true
+  },
+  habilitado: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true
   },
   fechaEntrega: {
     type: DataTypes.DATEONLY,
@@ -44,17 +47,14 @@ const AnticipoExcedente = sequelize.define('AnticipoExcedente', {
     type: DataTypes.DATEONLY,
     allowNull: true
   },
-  fechaMaxima: {
-    type: DataTypes.DATEONLY,
-    allowNull: true
-  },
   fechaEntregaExcedente: {
     type: DataTypes.DATEONLY,
     allowNull: true
   }
 }, {
-  tableName: 'anticipoExcedente',
-  timestamps: false
+  tableName: 'anticipo_excedente',
+  timestamps: false,
+  underscored: true
 });
 
 module.exports = AnticipoExcedente;

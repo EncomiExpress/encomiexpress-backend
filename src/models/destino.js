@@ -5,8 +5,7 @@ const Destino = sequelize.define('Destino', {
   idDestino: {
     type: DataTypes.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
-    field: 'idDestino'
+    autoIncrement: true
   },
   departamento: {
     type: DataTypes.STRING(60),
@@ -26,7 +25,8 @@ const Destino = sequelize.define('Destino', {
   }
 }, {
   tableName: 'destino',
-  timestamps: false
+  timestamps: false,
+  underscored: true
 });
 
 module.exports = Destino;

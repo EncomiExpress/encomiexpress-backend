@@ -10,7 +10,7 @@ API REST para la gestión operativa de EncomiExpress en OsvaldoC Mensajería y L
 |------|----------------|
 | **Administrador** | - Gestión de usuarios, roles y permisos <br> - Gestión de clientes y conductores <br> - Gestión de vehículos y propietarios <br> - Gestión de destinos y rutas <br> - Control de encomiendas y ventas <br> - Control de anticipos y excedentes |
 | **Conductor** *(vía app móvil)* | - Consulta de anticipos asignados <br> - Cargue de soportes y legalización |
-| **General** | - Autenticación JWT <br> - Manejo de errores centralizado <br> - Validación de datos por middleware |
+| **General** | - Autenticación JWT con access token (1h) y refresh token (24h) <br> - Manejo de errores centralizado <br> - Validación de datos por middleware <br> - Documentación interactiva Swagger |
 
 ---
 
@@ -20,11 +20,12 @@ API REST para la gestión operativa de EncomiExpress en OsvaldoC Mensajería y L
 - Express.js — Framework web
 - PostgreSQL — Base de datos
 - Sequelize — ORM
-- JWT — Autenticación
-- Bcryptjs — Encriptación de contraseñas
+- JWT — Autenticación (access token 1h + refresh token 24h)
+- Bcryptjs — Encriptación de contraseñas (salt 10)
 - Cloudinary — Almacenamiento de imágenes y soportes
 - Nodemailer — Envío de correos electrónicos
 - Multer — Manejo de archivos
+- Swagger (swagger-jsdoc + swagger-ui-express) — Documentación interactiva de la API
 
 ---
 
@@ -32,23 +33,29 @@ API REST para la gestión operativa de EncomiExpress en OsvaldoC Mensajería y L
 
 El proyecto está estructurado siguiendo principios de arquitectura limpia y separación de responsabilidades:
 
-```bash
+```
 src/
 │
-├── config/           # Configuración de base de datos, Cloudinary y correo
-├── controllers/      # Lógica de peticiones y respuestas por recurso
-├── middleware/       # Autenticación, autorización y manejo de errores
-├── models/           # Modelos Sequelize y relaciones entre entidades
-├── routes/           # Rutas de la API organizadas por recurso
-└── utils/            # AppError — clase centralizada de errores
+├── config/                    # Configuraciones globales (BD, Cloudinary, email, Swagger)
+├── controllers/               # Capa delgada: recibe req, llama al servicio, envía res
+├── services/                  # Lógica de negocio (reglas, validaciones, consultas)
+├── models/                    # Modelos Sequelize y relaciones entre entidades
+├── routes/                    # Definición de endpoints organizados por recurso
+├── middlewares/               # Autenticación, autorización y manejo de errores
+├── validators/                # Reglas de validación de datos por entidad
+├── errors/                    # Clases de error personalizadas (AppError)
+├── utils/                     # Funciones helpers puras (sin dependencias)
+├── app.js                     # Configuración de Express (middlewares, rutas)
+└── server.js                  # Punto de entrada (conecta DB, inicia servidor)
 ```
 
-### Principios de Arquitectura Implementados
+### Principios
 
-- **Separación de responsabilidades**: Cada capa tiene un propósito bien definido (rutas, controladores, modelos).
-- **Middleware reutilizable**: Autenticación, autorización por rol y autorización por permiso como middlewares independientes
-- **Manejo de errores centralizado**: Clase `AppError` con respuestas diferenciadas por entorno (`development` / `production`)
-- **RBAC**: Control de acceso basado en roles y permisos granulares por módulo
+- **Separación de responsabilidades**: Cada capa tiene un propósito bien definido (rutas, controladores, servicios, modelos).
+- **Middlewares reutilizables**: Autenticación, autorización por rol y por permiso como middlewares independientes.
+- **Manejo de errores centralizado**: `appError` con respuestas diferenciadas por entorno (`development` / `production`).
+- **RBAC**: Control de acceso basado en roles y permisos granulares por módulo.
+- **Validaciones desacopladas**: Reglas de validación por entidad en `validators/`, ejecutadas por middleware antes de llegar al controlador.
 
 ---
 
@@ -77,12 +84,16 @@ src/
 
 | Mecanismo | Detalle |
 |---|---|
-| **JWT** | Token con expiración de 24h — el servidor rechaza tokens inválidos o expirados con error 401 |
+| **JWT** | Access token con expiración de 1h + refresh token de 24h. El servidor rechaza tokens inválidos o expirados con error 401 |
 | **Bcrypt** | Contraseñas hasheadas con salt de 10 rondas |
 | **RBAC** | Middleware `authorize(...roles)` y `authorizePermission(permiso)` por ruta |
 | **CORS** | Habilitado vía `cors()` en Express |
 | **Validación** | Middleware de validación aplicado por recurso antes de llegar al controlador |
-| **Errores operacionales** | `AppError.isOperational` diferencia errores esperados de fallos internos — en producción no se expone el stack |
+| **Errores operacionales** | `appError.isOperational` diferencia errores esperados de fallos internos — en producción no se expone el stack |
+| **Guardia de cuenta propia** | Un usuario no puede inhabilitar su propia cuenta |
+| **Guardia de último admin** | No se puede inhabilitar al último administrador activo del sistema |
+| **Inhabilitación en cascada** | Al inhabilitar un rol se inhabilitan todos los usuarios con ese rol (excepto la sesión activa). Al rehabilitarlo se rehabilitan todos |
+| **Bloqueo por rol inhabilitado** | Si el rol de un usuario está inhabilitado, el login y el refresh token son rechazados |
 
 ---
 
@@ -94,33 +105,20 @@ src/
 | **AppError centralizado** | Permite respuestas consistentes en todos los endpoints y diferencia entre errores operacionales y de sistema |
 | **Seed vía endpoint `/api/seed`** | Facilita la inicialización del admin en entornos de despliegue sin acceso directo a la base de datos |
 | **Autorización por rol y por permiso** | Permite control de acceso flexible: por rol para rutas generales, por permiso para acciones granulares |
+| **Access token 1h + refresh token 24h** | El access token de corta duración limita el riesgo si se compromete. El refresh permite renovación silenciosa sin re-login |
+| **Swagger JSDoc en rutas** | Los comentarios `@swagger` viven junto al código de cada ruta, evitando que la documentación quede desincronizada |
 
 ---
 
 ## Variables de Entorno
 
-Creá un archivo `.env` en la raíz del proyecto:
+Copia el archivo `.env.example` y renómbralo a `.env`:
 
-```dotenv
-PORT=3000
-NODE_ENV=development
-
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=encomiexpress
-DB_USER=postgres
-DB_PASSWORD=postgres
-
-JWT_SECRET=tu_secret_key
-JWT_EXPIRES_IN=24h
-
-CLOUDINARY_CLOUD_NAME=
-CLOUDINARY_API_KEY=
-CLOUDINARY_API_SECRET=
-
-EMAIL_USER=
-EMAIL_PASS=
+```bash
+cp .env.example .env
 ```
+
+Luego completa los valores según tu entorno. Ver `.env.example` para la lista completa de variables requeridas.
 
 ---
 
@@ -136,6 +134,7 @@ npm install
 
 # 3. Configurar variables de entorno
 cp .env.example .env
+# Editar .env con tus credenciales
 
 # 4. Iniciar el servidor
 npm run dev    # Desarrollo
@@ -144,35 +143,30 @@ npm start      # Producción
 
 ---
 
+## Documentación de la API
+
+La documentación interactiva está disponible en:
+
+```
+http://localhost:3000/api/docs
+```
+
+Disponible únicamente en entorno de desarrollo (`NODE_ENV !== 'production'`). Incluye los 55 endpoints documentados con parámetros, cuerpos de solicitud, respuestas y autenticación JWT integrada.
+
+---
+
 ## Credenciales de Prueba
 
 El usuario administrador se inicializa automáticamente llamando al endpoint:
+
+```
 POST http://localhost:3000/api/seed
+```
 
 | Rol | Email | Contraseña |
 |------|-------|------------|
 | Administrador | `admin@encomiexpress.com` | `admin123` |
 | Conductor | `conductor@encomiexpress.com` | `conductor123` |
-
----
-
-## Rutas de la API
-
-- Base URL: `http://localhost:3000/api`
-- Autenticación: `POST /auth/login`
-- Usuarios: `GET/POST/PUT/DELETE /usuarios`
-- Roles: `GET/POST/PUT/DELETE /roles`
-- Permisos: `GET /permisos`
-- Clientes: `GET/POST/PUT /clientes`
-- Conductores: `GET/POST /conductores`, `GET /conductores/:id/vehiculos`
-- Propietarios: `GET/POST/PUT /propietarios`
-- Vehículos: `GET/POST/PUT /vehiculos`
-- Destinos: `GET/POST/PUT /destinos`
-- Rutas: `GET/POST /rutas`, `GET /rutas/disponibles`, `GET /rutas/:id/encomiendas`
-- Encomiendas: `GET/POST /encomiendas`, `GET /encomiendas/track/:numeroGuia`, `PUT /encomiendas/:id/estado`, `POST /encomiendas/:id/pagar`
-- Anticipos: `GET/POST /anticipos`, `POST /anticipos/liquidar/:id`
-- Health check: `GET /health`
-- Seed: `POST /seed`
 
 ---
 

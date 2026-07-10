@@ -1,64 +1,267 @@
 const express = require('express');
 const router = express.Router();
-const { body } = require('express-validator');
 const { validate } = require('../middlewares/validation');
 const encomiendaVentaController = require('../controllers/encomiendaVentaController');
-const { authenticate, authorize } = require('../middlewares/auth');
+const { authenticate, authorizePermission } = require('../middlewares/auth');
+const {
+  createValidation,
+  updateValidation,
+  cambiarEstadoValidation,
+  agregarPaqueteValidation,
+  agregarDestinatarioValidation
+} = require('../validators/encomiendasValidator');
 
-// ============================================
-// Rutas públicas
-// ============================================
+/**
+ * @swagger
+ * tags:
+ *   name: Encomiendas
+ *   description: Gestión de encomiendas y ventas de servicio
+ */
 
-// GET /api/encomiendas - Listar todas las encomiendas
-router.get('/', encomiendaVentaController.getAll);
-
-// GET /api/encomiendas/:id - Obtener una encomienda por ID
-router.get('/:id', encomiendaVentaController.getById);
-
-// GET /api/encomiendas/guia/:numeroGuia - Buscar por número de guía
-router.get('/guia/:numeroGuia', encomiendaVentaController.getByGuia);
-
-// ============================================
-// Rutas protegidas
-// ============================================
+/**
+ * @swagger
+ * /encomiendas/public/{token}:
+ *   get:
+ *     summary: Seguimiento público de encomienda por token (sin autenticación)
+ *     tags: [Encomiendas]
+ *     security: []
+ *     parameters:
+ *       - in: path
+ *         name: token
+ *         required: true
+ *         description: Token de seguimiento entregado al cliente
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Estado y datos básicos de la encomienda
+ *       404:
+ *         description: Encomienda no encontrada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.get('/public/:token', encomiendaVentaController.getPublicByToken);
 
 router.use(authenticate);
 
-// POST /api/encomiendas - Crear una nueva encomienda
-router.post('/',
-  body('idCliente').notEmpty().withMessage('Cliente es requerido'),
-  validate,
-  encomiendaVentaController.create
-);
+router.get('/:id/page-of', encomiendaVentaController.getPageOf);
 
-// PUT /api/encomiendas/:id - Actualizar una encomienda
-router.put('/:id', encomiendaVentaController.update);
+/**
+ * @swagger
+ * /encomiendas:
+ *   get:
+ *     summary: Listar encomiendas
+ *     tags: [Encomiendas]
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 10 }
+ *       - in: query
+ *         name: estado
+ *         schema: { type: string, enum: [pendiente, en_ruta, entregado, devuelto, cancelado] }
+ *       - in: query
+ *         name: estadoPago
+ *         schema: { type: string, enum: [pendiente, pagado] }
+ *       - in: query
+ *         name: q
+ *         description: Búsqueda por número de guía o nombre de cliente
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Lista paginada de encomiendas
+ */
+router.get('/', encomiendaVentaController.getAll);
 
-// PATCH /api/encomiendas/:id/estado - Cambiar estado
-router.patch('/:id/estado', 
-  body('estado').notEmpty().withMessage('Estado es requerido'),
-  validate,
-  encomiendaVentaController.cambiarEstado
-);
+/**
+ * @swagger
+ * /encomiendas/guia/{numeroGuia}:
+ *   get:
+ *     summary: Buscar encomienda por número de guía
+ *     tags: [Encomiendas]
+ *     parameters:
+ *       - in: path
+ *         name: numeroGuia
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Encomienda encontrada
+ *       404:
+ *         description: Guía no encontrada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.get('/guia/:numeroGuia', encomiendaVentaController.getByGuia);
 
-// PATCH /api/encomiendas/:id/toggle-habilitado - Habilitar/Inhabilitar
-router.patch('/:id/toggle-habilitado', encomiendaVentaController.toggleHabilitado);
+/**
+ * @swagger
+ * /encomiendas/{id}:
+ *   get:
+ *     summary: Obtener encomienda por ID
+ *     tags: [Encomiendas]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Datos completos de la encomienda con paquetes y destinatario
+ *       404:
+ *         description: Encomienda no encontrada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.get('/:id', encomiendaVentaController.getById);
 
-// DELETE /api/encomiendas/:id - Inhabilitar una encomienda (legacy)
-router.delete('/:id', authorize('admin'), encomiendaVentaController.delete);
+/**
+ * @swagger
+ * /encomiendas:
+ *   post:
+ *     summary: Registrar nueva encomienda/venta
+ *     tags: [Encomiendas]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/EncomiendaCreate'
+ *     responses:
+ *       201:
+ *         description: Encomienda registrada con número de guía generado
+ */
+router.post('/', createValidation, validate, encomiendaVentaController.create);
 
-// POST /api/encomiendas/:idEncomiendaVenta/paquetes - Agregar paquete
-router.post('/:idEncomiendaVenta/paquetes', 
-  body('descripcionContenido').notEmpty().withMessage('Descripción del contenido es requerida'),
-  validate,
-  encomiendaVentaController.agregarPaquete
-);
+/**
+ * @swagger
+ * /encomiendas/{id}:
+ *   put:
+ *     summary: Actualizar encomienda
+ *     tags: [Encomiendas]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/EncomiendaCreate'
+ *     responses:
+ *       200:
+ *         description: Encomienda actualizada
+ */
+router.put('/:id', updateValidation, validate, encomiendaVentaController.update);
 
-// POST /api/encomiendas/:idEncomiendaVenta/destinatario - Agregar destinatario
-router.post('/:idEncomiendaVenta/destinatario',
-  body('nombreDestinatario').notEmpty().withMessage('Nombre del destinatario es requerido'),
-  validate,
-  encomiendaVentaController.agregarDestinatario
-);
+/**
+ * @swagger
+ * /encomiendas/{id}/estado:
+ *   patch:
+ *     summary: Cambiar estado de la encomienda
+ *     tags: [Encomiendas]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [estado]
+ *             properties:
+ *               estado:
+ *                 type: string
+ *                 enum: [pendiente, en_ruta, entregado, devuelto, cancelado]
+ *     responses:
+ *       200:
+ *         description: Estado actualizado
+ */
+router.patch('/:id/estado', cambiarEstadoValidation, validate, encomiendaVentaController.cambiarEstado);
+
+/**
+ * @swagger
+ * /encomiendas/{id}/toggle-habilitado:
+ *   patch:
+ *     summary: Habilitar o inhabilitar encomienda
+ *     tags: [Encomiendas]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Estado cambiado correctamente
+ */
+router.patch('/:id/toggle-habilitado', authorizePermission('inhabilitar_venta'), encomiendaVentaController.toggleHabilitado);
+
+/**
+ * @swagger
+ * /encomiendas/{idEncomiendaVenta}/paquetes:
+ *   post:
+ *     summary: Agregar paquete a una encomienda existente
+ *     tags: [Encomiendas]
+ *     parameters:
+ *       - in: path
+ *         name: idEncomiendaVenta
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [descripcion, peso]
+ *             properties:
+ *               descripcion: { type: string }
+ *               peso:        { type: number, example: 2.5 }
+ *               valorDeclarado: { type: number }
+ *     responses:
+ *       201:
+ *         description: Paquete agregado
+ */
+router.post('/:idEncomiendaVenta/paquetes', agregarPaqueteValidation, validate, encomiendaVentaController.agregarPaquete);
+
+/**
+ * @swagger
+ * /encomiendas/{idEncomiendaVenta}/destinatario:
+ *   post:
+ *     summary: Agregar destinatario a una encomienda
+ *     tags: [Encomiendas]
+ *     parameters:
+ *       - in: path
+ *         name: idEncomiendaVenta
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [nombre, telefono]
+ *             properties:
+ *               nombre:    { type: string }
+ *               telefono:  { type: string }
+ *               direccion: { type: string }
+ *     responses:
+ *       201:
+ *         description: Destinatario registrado
+ */
+router.post('/:idEncomiendaVenta/destinatario', agregarDestinatarioValidation, validate, encomiendaVentaController.agregarDestinatario);
 
 module.exports = router;

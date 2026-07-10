@@ -1,202 +1,69 @@
-const { Cliente } = require('../models');
+const clienteService = require('../services/clienteService');
 
-// ============================================
-// Listar todos los clientes (habilitados e inhabilitados)
-// ============================================
-const listarClientes = async (req, res) => {
+const listarClientes = async (req, res, next) => {
   try {
-    const clientes = await Cliente.findAll({
-      order: [['nombre', 'ASC']]
-    });
-
-    res.json({
-      success: true,
-      data: clientes
-    });
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const sortBy = req.query.sortBy;
+    const { habilitado, q } = req.query;
+    const result = await clienteService.getAll({ page, limit, sortBy, habilitado, q });
+    res.json({ success: true, data: result.data, total: result.total });
   } catch (error) {
-    console.error('Error al listar clientes:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al listar clientes',
-      error: error.message
-    });
+    next(error);
   }
 };
 
-// ============================================
-// Obtener un cliente por ID
-// ============================================
-const obtenerCliente = async (req, res) => {
+const obtenerCliente = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const cliente = await Cliente.findByPk(id);
-
-    if (!cliente) {
-      return res.status(404).json({
-        success: false,
-        message: 'Cliente no encontrado'
-      });
-    }
-
-    res.json({
-      success: true,
-      data: cliente
-    });
+    const cliente = await clienteService.getById(id);
+    res.json({ success: true, data: cliente });
   } catch (error) {
-    console.error('Error al obtener cliente:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al obtener cliente',
-      error: error.message
-    });
+    next(error);
   }
 };
 
-// ============================================
-// Registrar un nuevo cliente
-// ============================================
-const registrarCliente = async (req, res) => {
+const registrarCliente = async (req, res, next) => {
   try {
-    const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, direccion } = req.body;
-
-    const existingCliente = await Cliente.findOne({ where: { numeroIdentificacion } });
-    if (existingCliente) {
-      return res.status(400).json({
-        success: false,
-        message: 'El número de identificación ya está registrado'
-      });
-    }
-
-    if (email) {
-      const existingEmail = await Cliente.findOne({ where: { email } });
-      if (existingEmail) {
-        return res.status(400).json({
-          success: false,
-          message: 'El email ya está registrado'
-        });
-      }
-    }
-
-    const nuevoCliente = await Cliente.create({
-      tipoIdentificacion,
-      numeroIdentificacion,
-      nombre,
-      apellido,
-      telefono,
-      email,
-      direccion,
-      habilitado: true
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'Cliente registrado exitosamente',
-      data: nuevoCliente
-    });
+    const nuevoCliente = await clienteService.create(req.body);
+    res.status(201).json({ success: true, message: 'Cliente registrado exitosamente', data: nuevoCliente });
   } catch (error) {
-    console.error('Error al registrar cliente:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al registrar cliente',
-      error: error.message
-    });
+    next(error);
   }
 };
 
-// ============================================
-// Actualizar un cliente
-// ============================================
-const actualizarCliente = async (req, res) => {
+const actualizarCliente = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, direccion } = req.body;
-
-    const cliente = await Cliente.findByPk(id);
-    if (!cliente) {
-      return res.status(404).json({
-        success: false,
-        message: 'Cliente no encontrado'
-      });
-    }
-
-    if (numeroIdentificacion && numeroIdentificacion !== cliente.numeroIdentificacion) {
-      const existingCliente = await Cliente.findOne({
-        where: { numeroIdentificacion, id: { [require('sequelize').Op.ne]: id } }
-      });
-      if (existingCliente) {
-        return res.status(400).json({
-          success: false,
-          message: 'El número de identificación ya está registrado'
-        });
-      }
-    }
-
-    if (email && email !== cliente.email) {
-      const existingEmail = await Cliente.findOne({
-        where: { email, id: { [require('sequelize').Op.ne]: id } }
-      });
-      if (existingEmail) {
-        return res.status(400).json({
-          success: false,
-          message: 'El email ya está registrado'
-        });
-      }
-    }
-
-    await cliente.update({
-      tipoIdentificacion: tipoIdentificacion || cliente.tipoIdentificacion,
-      numeroIdentificacion: numeroIdentificacion || cliente.numeroIdentificacion,
-      nombre: nombre || cliente.nombre,
-      apellido: apellido || cliente.apellido,
-      telefono: telefono || cliente.telefono,
-      email: email || cliente.email,
-      direccion: direccion || cliente.direccion
-    });
-
-    res.json({
-      success: true,
-      message: 'Cliente actualizado exitosamente',
-      data: cliente
-    });
+    const cliente = await clienteService.update(id, req.body);
+    res.json({ success: true, message: 'Cliente actualizado exitosamente', data: cliente });
   } catch (error) {
-    console.error('Error al actualizar cliente:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al actualizar cliente',
-      error: error.message
-    });
+    next(error);
   }
 };
 
-// ============================================
-// Toggle habilitado/inhabilitado
-// ============================================
-const toggleHabilitadoCliente = async (req, res) => {
+const toggleHabilitadoCliente = async (req, res, next) => {
   try {
     const { id } = req.params;
-
-    const cliente = await Cliente.findByPk(id);
-    if (!cliente) {
-      return res.status(404).json({
-        success: false,
-        message: 'Cliente no encontrado'
-      });
-    }
-
-    await cliente.update({ habilitado: !cliente.habilitado });
-
+    const cliente = await clienteService.toggleHabilitado(id);
     res.json({
       success: true,
       message: `Cliente ${cliente.habilitado ? 'habilitado' : 'inhabilitado'} exitosamente`,
       data: cliente
     });
   } catch (error) {
-    console.error('Error al cambiar estado del cliente:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al cambiar estado del cliente',
-      error: error.message
-    });
+    next(error);
+  }
+};
+
+const getPageOfCliente = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const result = await clienteService.getPageOf(id, { limit });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
   }
 };
 
@@ -206,4 +73,5 @@ module.exports = {
   registrarCliente,
   actualizarCliente,
   toggleHabilitadoCliente,
+  getPageOfCliente,
 };

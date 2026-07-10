@@ -5,8 +5,11 @@ const Ruta = sequelize.define('Ruta', {
   idRuta: {
     type: DataTypes.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
-    field: 'idRuta'
+    autoIncrement: true
+  },
+  nombreRuta: {
+    type: DataTypes.STRING(150),
+    allowNull: true
   },
   idVehiculo: {
     type: DataTypes.INTEGER,
@@ -20,12 +23,25 @@ const Ruta = sequelize.define('Ruta', {
     type: DataTypes.INTEGER,
     allowNull: false
   },
+  fechaSalida: {
+    type: DataTypes.DATEONLY,
+    allowNull: true
+  },
   horaSalida: {
     type: DataTypes.TIME,
     allowNull: true
   },
   horaLlegadaEstimada: {
     type: DataTypes.TIME,
+    allowNull: true
+  },
+  estado: {
+    type: DataTypes.STRING(30),
+    allowNull: false,
+    defaultValue: 'Programada'
+  },
+  observaciones: {
+    type: DataTypes.TEXT,
     allowNull: true
   },
   habilitado: {
@@ -38,7 +54,8 @@ const Ruta = sequelize.define('Ruta', {
   }
 }, {
   tableName: 'ruta',
-  timestamps: false
+  timestamps: false,
+  underscored: true
 });
 
 module.exports = Ruta;

@@ -5,12 +5,7 @@ const Vehiculo = sequelize.define('Vehiculo', {
   idVehiculo: {
     type: DataTypes.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
-    field: 'idVehiculo'
-  },
-  idConductor: {
-    type: DataTypes.INTEGER,
-    allowNull: false
+    autoIncrement: true
   },
   idPropietario: {
     type: DataTypes.INTEGER,
@@ -20,6 +15,10 @@ const Vehiculo = sequelize.define('Vehiculo', {
     type: DataTypes.STRING(10),
     allowNull: false,
     unique: true
+  },
+  tarjetaPropiedad: {
+    type: DataTypes.STRING(50),
+    allowNull: true
   },
   marca: {
     type: DataTypes.STRING(50),
@@ -37,13 +36,18 @@ const Vehiculo = sequelize.define('Vehiculo', {
     type: DataTypes.STRING(50),
     allowNull: true
   },
+  origen: {
+    type: DataTypes.STRING(20),
+    allowNull: false,
+    defaultValue: 'Propio'
+  },
   capacidad: {
     type: DataTypes.DECIMAL(10, 2),
     allowNull: true
   },
   estado: {
     type: DataTypes.STRING(30),
-    defaultValue: 'disponible'
+    defaultValue: 'Disponible'
   },
   habilitado: {
     type: DataTypes.BOOLEAN,
@@ -55,19 +59,22 @@ const Vehiculo = sequelize.define('Vehiculo', {
   },
   vencimientoSOAT: {
     type: DataTypes.DATEONLY,
-    allowNull: true
+    allowNull: false,
+    field: 'vencimiento_soat'
   },
   vencimientoRevisionTecnica: {
     type: DataTypes.DATEONLY,
-    allowNull: true
+    allowNull: false
   },
   vencimientoSeguroTerceros: {
     type: DataTypes.DATEONLY,
-    allowNull: true
+    allowNull: false
   }
+  
 }, {
   tableName: 'vehiculo',
-  timestamps: false
+  timestamps: false,
+  underscored: true
 });
 
 module.exports = Vehiculo;

@@ -1,163 +1,87 @@
-const { Destino, Ruta } = require('../models');
+const { sequelize } = require('../models');
+const destinoService = require('../services/destinoService');
 
-exports.getAll = async (req, res) => {
+exports.getAll = async (req, res, next) => {
   try {
-    const { habilitado } = req.query;
-    
-    const where = {};
-    if (habilitado !== undefined) where.habilitado = habilitado === 'true';
-
-    const destinos = await Destino.findAll({ where });
-
-    res.json({
-      success: true,
-      data: destinos
-    });
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const sortBy = req.query.sortBy;
+    const filters = {
+      habilitado: req.query.habilitado,
+      departamento: req.query.departamento,
+      q: req.query.q,
+      page,
+      limit,
+      sortBy,
+    };
+    const result = await destinoService.getAll(filters);
+    res.json({ success: true, data: result.data, total: result.total });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error al obtener destinos',
-      error: error.message
-    });
+    next(error);
   }
 };
 
-exports.getById = async (req, res) => {
+exports.getById = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const destino = await Destino.findByPk(id);
-
-    if (!destino) {
-      return res.status(404).json({
-        success: false,
-        message: 'Destino no encontrado'
-      });
-    }
-
-    res.json({
-      success: true,
-      data: destino
-    });
+    const destino = await destinoService.getById(id);
+    res.json({ success: true, data: destino });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error al obtener destino',
-      error: error.message
-    });
+    next(error);
   }
 };
 
-exports.create = async (req, res) => {
+exports.create = async (req, res, next) => {
   try {
-    const { departamento, ciudad, tarifaBase } = req.body;
-
-    const destino = await Destino.create({
-      departamento,
-      ciudad,
-      tarifaBase: tarifaBase || 0
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'Destino creado exitosamente',
-      data: destino
-    });
+    const destino = await destinoService.create(req.body);
+    res.status(201).json({ success: true, message: 'Destino creado exitosamente', data: destino });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error al crear destino',
-      error: error.message
-    });
+    next(error);
   }
 };
 
-exports.update = async (req, res) => {
+exports.update = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { departamento, ciudad, tarifaBase, habilitado } = req.body;
-
-    const destino = await Destino.findByPk(id);
-
-    if (!destino) {
-      return res.status(404).json({
-        success: false,
-        message: 'Destino no encontrado'
-      });
-    }
-
-    await destino.update({
-      departamento: departamento || destino.departamento,
-      ciudad: ciudad || destino.ciudad,
-      tarifaBase: tarifaBase !== undefined ? tarifaBase : destino.tarifaBase,
-      habilitado: habilitado !== undefined ? habilitado : destino.habilitado
-    });
-
-    res.json({
-      success: true,
-      message: 'Destino actualizado exitosamente',
-      data: destino
-    });
+    const destino = await destinoService.update(id, req.body);
+    res.json({ success: true, message: 'Destino actualizado exitosamente', data: destino });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error al actualizar destino',
-      error: error.message
-    });
+    next(error);
   }
 };
 
-exports.delete = async (req, res) => {
+exports.delete = async (req, res, next) => {
+  // Método obsoleto: use PATCH /destinos/:id/toggle-habilitado
+  res.status(405).json({ success: false, message: 'Método obsoleto. Use PATCH /destinos/:id/toggle-habilitado para inhabilitar/restaurar.' });
+};
+
+exports.getRutas = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const destino = await Destino.findByPk(id);
-
-    if (!destino) {
-      return res.status(404).json({
-        success: false,
-        message: 'Destino no encontrado'
-      });
-    }
-
-    await destino.update({ habilitado: false });
-
-    res.json({
-      success: true,
-      message: 'Destino deshabilitado exitosamente'
-    });
+    const rutas = await destinoService.getRutas(id);
+    res.json({ success: true, data: rutas });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error al eliminar destino',
-      error: error.message
-    });
+    next(error);
   }
 };
 
-exports.getRutas = async (req, res) => {
+exports.getPageOf = async (req, res, next) => {
   try {
     const { id } = req.params;
-    
-    const destino = await Destino.findByPk(id);
-    if (!destino) {
-      return res.status(404).json({
-        success: false,
-        message: 'Destino no encontrado'
-      });
-    }
-
-    const rutas = await Ruta.findAll({
-      where: { idDestino: id }
-    });
-
-    res.json({
-      success: true,
-      data: rutas
-    });
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const result = await destinoService.getPageOf(id, { limit });
+    res.json({ success: true, data: result });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error al obtener rutas del destino',
-      error: error.message
-    });
+    next(error);
+  }
+};
+
+exports.toggleHabilitado = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const destino = await destinoService.toggleHabilitado(id);
+    res.json({ success: true, message: `Destino ${destino.habilitado ? 'habilitado' : 'inhabilitado'} exitosamente`, data: destino });
+  } catch (error) {
+    next(error);
   }
 };

@@ -5,8 +5,7 @@ const Destinatario = sequelize.define('Destinatario', {
   idDestinatario: {
     type: DataTypes.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
-    field: 'idDestinatario'
+    autoIncrement: true
   },
   idEncomiendaVenta: {
     type: DataTypes.INTEGER,
@@ -26,7 +25,8 @@ const Destinatario = sequelize.define('Destinatario', {
   }
 }, {
   tableName: 'destinatario',
-  timestamps: false
+  timestamps: false,
+  underscored: true
 });
 
 module.exports = Destinatario;

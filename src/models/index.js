@@ -51,10 +51,6 @@ Permiso.hasMany(RolPermiso, { foreignKey: 'idPermiso', as: 'rolesPermisos' });
 Usuario.hasOne(Conductor, { foreignKey: 'idUsuario', as: 'conductor' });
 Conductor.belongsTo(Usuario, { foreignKey: 'idUsuario', as: 'usuario' });
 
-// Conductor - Vehiculo (1:N)
-Conductor.hasMany(Vehiculo, { foreignKey: 'idConductor', as: 'vehiculos' });
-Vehiculo.belongsTo(Conductor, { foreignKey: 'idConductor', as: 'conductor' });
-
 // PropietarioVehiculo - Vehiculo (1:N)
 PropietarioVehiculo.hasMany(Vehiculo, { foreignKey: 'idPropietario', as: 'vehiculos' });
 Vehiculo.belongsTo(PropietarioVehiculo, { foreignKey: 'idPropietario', as: 'propietario' });

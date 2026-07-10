@@ -5,26 +5,20 @@ const EncomiendaVenta = sequelize.define('EncomiendaVenta', {
   idEncomiendaVenta: {
     type: DataTypes.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
-    field: 'idEncomiendaVenta'
+    autoIncrement: true
   },
   idCliente: {
     type: DataTypes.INTEGER,
     allowNull: false
   },
-idRuta: {
-      type: DataTypes.INTEGER,
-      allowNull: true,
-      field: 'idRuta'
-    },
+  idRuta: {
+    type: DataTypes.INTEGER,
+    allowNull: false
+  },
   numeroGuia: {
     type: DataTypes.STRING(50),
     allowNull: false,
     unique: true
-  },
-  numeroFactura: {
-    type: DataTypes.STRING(50),
-    allowNull: true
   },
   fechaRegistro: {
     type: DataTypes.DATEONLY,
@@ -40,7 +34,7 @@ idRuta: {
   },
   estado: {
     type: DataTypes.STRING(30),
-    defaultValue: 'pendiente de recogida'
+    defaultValue: 'Programada'
   },
   observaciones: {
     type: DataTypes.TEXT,
@@ -58,21 +52,27 @@ idRuta: {
     type: DataTypes.DECIMAL(12, 2),
     defaultValue: 0
   },
+  tokenSeguimiento: {
+    type: DataTypes.STRING(64),
+    allowNull: true,
+    unique: true
+  },
   metodoPago: {
     type: DataTypes.STRING(30),
     allowNull: true
   },
   estadoPago: {
     type: DataTypes.STRING(20),
-    defaultValue: 'pendiente'
+    defaultValue: 'Pendiente'
   },
   habilitado: {
     type: DataTypes.BOOLEAN,
     defaultValue: true
   }
 }, {
-  tableName: 'encomiendaVenta',
-  timestamps: false
+  tableName: 'encomienda_venta',
+  timestamps: false,
+  underscored: true
 });
 
 module.exports = EncomiendaVenta;

@@ -5,8 +5,7 @@ const Conductor = sequelize.define('Conductor', {
   idConductor: {
     type: DataTypes.INTEGER,
     primaryKey: true,
-    autoIncrement: true,
-    field: 'idConductor'
+    autoIncrement: true
   },
   idUsuario: {
     type: DataTypes.INTEGER,
@@ -19,7 +18,8 @@ const Conductor = sequelize.define('Conductor', {
   },
   numeroLicencia: {
     type: DataTypes.STRING(20),
-    allowNull: true
+    allowNull: true,
+    unique: true
   },
   vencimientoLicencia: {
     type: DataTypes.DATEONLY,
@@ -27,7 +27,7 @@ const Conductor = sequelize.define('Conductor', {
   },
   estado: {
     type: DataTypes.STRING(30),
-    defaultValue: 'activo'
+    defaultValue: 'Disponible'
   },
   habilitado: {
     type: DataTypes.BOOLEAN,
@@ -35,7 +35,8 @@ const Conductor = sequelize.define('Conductor', {
   }
 }, {
   tableName: 'conductor',
-  timestamps: false
+  timestamps: false,
+  underscored: true
 });
 
 module.exports = Conductor;
