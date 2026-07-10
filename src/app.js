@@ -13,11 +13,15 @@ const app = express();
 
 // Middlewares
 app.use(helmet());
+// Orígenes permitidos: localhost siempre (dev), más los que vengan en la env var
+// FRONTEND_URLS (separados por coma) — así se agrega/cambia el dominio de Vercel
+// en producción sin tocar código ni redesplegar el backend.
+const allowedOrigins = [
+  'http://localhost:5173',
+  ...(process.env.FRONTEND_URLS ? process.env.FRONTEND_URLS.split(',').map(u => u.trim()) : []),
+];
 app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    // 'https://tu-app.vercel.app'  ← agregar cuando se despliegue en Vercel
-  ],
+  origin: allowedOrigins,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
