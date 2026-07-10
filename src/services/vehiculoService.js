@@ -70,6 +70,7 @@ const create = async (data) => {
   const {
     idPropietario,
     placa,
+    tarjetaPropiedad,
     marca,
     modelo,
     color,
@@ -86,9 +87,17 @@ const create = async (data) => {
     throw new AppError('La placa ya está registrada', 400);
   }
 
+  if (tarjetaPropiedad) {
+    const existingTarjeta = await Vehiculo.findOne({ where: { tarjetaPropiedad } });
+    if (existingTarjeta) {
+      throw new AppError('La tarjeta de propiedad ya está registrada', 400);
+    }
+  }
+
   const vehiculoCreado = await Vehiculo.create({
     idPropietario,
     placa,
+    tarjetaPropiedad,
     marca,
     modelo,
     color,
@@ -111,6 +120,7 @@ const update = async (id, data) => {
   const {
     idPropietario,
     placa,
+    tarjetaPropiedad,
     marca,
     modelo,
     color,
@@ -137,9 +147,19 @@ const update = async (id, data) => {
     }
   }
 
+  if (tarjetaPropiedad && tarjetaPropiedad !== vehiculo.tarjetaPropiedad) {
+    const existingTarjeta = await Vehiculo.findOne({
+      where: { tarjetaPropiedad, idVehiculo: { [Op.ne]: id } },
+    });
+    if (existingTarjeta) {
+      throw new AppError('La tarjeta de propiedad ya está registrada', 400);
+    }
+  }
+
   await vehiculo.update({
     idPropietario: idPropietario || vehiculo.idPropietario,
     placa: placa || vehiculo.placa,
+    tarjetaPropiedad: tarjetaPropiedad !== undefined ? tarjetaPropiedad : vehiculo.tarjetaPropiedad,
     marca: marca !== undefined ? marca : vehiculo.marca,
     modelo: modelo !== undefined ? modelo : vehiculo.modelo,
     color: color !== undefined ? color : vehiculo.color,

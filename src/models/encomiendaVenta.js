@@ -20,10 +20,6 @@ const EncomiendaVenta = sequelize.define('EncomiendaVenta', {
     allowNull: false,
     unique: true
   },
-  numeroFactura: {
-    type: DataTypes.STRING(50),
-    allowNull: true
-  },
   fechaRegistro: {
     type: DataTypes.DATEONLY,
     defaultValue: DataTypes.NOW

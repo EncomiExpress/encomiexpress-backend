@@ -96,7 +96,15 @@ app.get('/api/health', async (req, res) => {
   });
 });
 
-// Endpoint para inicializar datos de la base de datos (solo disponible en desarrollo)
+// Endpoint para inicializar datos de la base de datos (solo disponible en desarrollo).
+// Bloqueado en producción a propósito: crea el rol admin y sus permisos ya habilitados,
+// sin login previo. En producción, el primer admin se crea corriendo `npm run db:seed`
+// manualmente (una sola vez) apuntando las variables de entorno a la base de datos real
+// — no como request HTTP.
+// Distinto de POST /api/auth/register (authController.js): ese SÍ queda disponible en
+// producción a propósito, porque siempre crea la cuenta inhabilitada y pendiente de
+// aprobación (nunca queda activa sin que un admin la habilite) — por eso no necesita
+// este mismo bloqueo.
 app.post('/api/seed', async (req, res, next) => {
   if (process.env.NODE_ENV === 'production') {
     return next(new AppError('Endpoint no disponible en producción', 403));

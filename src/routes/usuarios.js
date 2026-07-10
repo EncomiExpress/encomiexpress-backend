@@ -151,6 +151,33 @@ router.patch('/:id/toggle-habilitado', authorizePermission('inhabilitar_usuario'
 
 /**
  * @swagger
+ * /usuarios/{id}/ignorar-registro:
+ *   patch:
+ *     summary: Ignorar una solicitud de autoregistro pendiente
+ *     description: |
+ *       Para cuentas creadas por autoregistro público (POST /auth/register) que un
+ *       admin decide no aprobar. Quita la marca de "pendiente de activación" sin
+ *       habilitar la cuenta — queda inhabilitada igual que cualquier otra.
+ *     tags: [Usuarios]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Solicitud ignorada correctamente
+ *       400:
+ *         description: El usuario no tiene un registro pendiente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.patch('/:id/ignorar-registro', authorizePermission('inhabilitar_usuario'), usuarioController.ignorarRegistro);
+
+/**
+ * @swagger
  * /usuarios/{id}/change-password:
  *   post:
  *     summary: Cambiar contraseña de un usuario específico

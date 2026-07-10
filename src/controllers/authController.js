@@ -24,6 +24,18 @@ const refresh = async (req, res, next) => {
 
 const register = async (req, res, next) => {
   try {
+    // Autoregistro público sin login (usado por la página /register del frontend,
+    // pensada para que el personal administrativo se autoregistre sin que un admin
+    // tenga que digitar sus datos). A propósito NO se bloquea en producción como sí
+    // hace /api/seed: authService.register() SIEMPRE fuerza habilitado=false,
+    // registroPendiente=true e idRol=1 (admin) sin importar lo que mande el cliente,
+    // así que una cuenta creada por aquí no puede iniciar sesión hasta que un
+    // administrador ya activo la habilite (botón "Habilitar") desde el módulo de
+    // Usuarios — eso limpia registroPendiente. Ese mismo módulo también permite
+    // "Ignorar" una solicitud (deja la cuenta inhabilitada sin la marca de pendiente,
+    // sin habilitarla). El registro normal de usuarios (POST /api/usuarios, protegido,
+    // requiere login + permiso registrar_usuario) no pasa por aquí y siempre crea
+    // usuarios ya habilitados con el rol que el admin elija.
     const data = req.body;
     const result = await authService.register(data);
     res.status(201).json({ success: true, message: 'Usuario registrado exitosamente', data: result });

@@ -13,11 +13,25 @@ const ESTADOS_VALIDOS = [
 const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia', 'Nequi'];
 const ESTADOS_PAGO_VALIDOS = ['Pendiente', 'Pagado'];
 
-const generarNumeroGuia = async () => {
-  const prefix = 'EE';
-  const timestamp = Date.now().toString().slice(-8);
-  const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-  return `${prefix}-${timestamp}-${random}`;
+// Genera numeroGuia secuencial por año (EE-2026-000042). pg_advisory_xact_lock serializa
+// solo este paso puntual (conteo + siguiente número) entre transacciones concurrentes que
+// registren una venta en el mismo año; se libera solo al terminar la transacción. Así se
+// evita el choque de números sin necesitar una tabla contador.
+const generarNumeroGuia = async (transaction) => {
+  const anio = new Date().getFullYear();
+
+  await sequelize.query('SELECT pg_advisory_xact_lock(hashtext(:clave))', {
+    replacements: { clave: `guia-${anio}` },
+    transaction,
+  });
+
+  const totalAnio = await EncomiendaVenta.count({
+    where: { numeroGuia: { [sequelize.Sequelize.Op.like]: `EE-${anio}-%` } },
+    transaction,
+  });
+
+  const secuencia = (totalAnio + 1).toString().padStart(6, '0');
+  return `EE-${anio}-${secuencia}`;
 };
 
 const generarTokenSeguimiento = (numeroGuia) => {
@@ -54,7 +68,6 @@ const getAll = async ({ estado, idCliente, idRuta, fechaInicio, fechaFin, habili
   if (q) {
     where[sequelize.Sequelize.Op.or] = [
       { numeroGuia: { [sequelize.Sequelize.Op.iLike]: `%${q}%` } },
-      { numeroFactura: { [sequelize.Sequelize.Op.iLike]: `%${q}%` } },
       { estado: { [sequelize.Sequelize.Op.iLike]: `%${q}%` } },
       { estadoPago: { [sequelize.Sequelize.Op.iLike]: `%${q}%` } },
       { '$cliente.nombre$': { [sequelize.Sequelize.Op.iLike]: `%${q}%` } },
@@ -195,7 +208,6 @@ const create = async (data) => {
     const {
       idCliente,
       idRuta,
-      numeroFactura,
       fechaEstimadaEntrega,
       observaciones,
       valorServicio,
@@ -236,12 +248,7 @@ const create = async (data) => {
       throw new AppError(`Estado de pago inv├ílido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
     }
 
-    let numeroGuia = await generarNumeroGuia();
-    let guiaExistente = await EncomiendaVenta.findOne({ where: { numeroGuia } });
-    while (guiaExistente) {
-      numeroGuia = await generarNumeroGuia();
-      guiaExistente = await EncomiendaVenta.findOne({ where: { numeroGuia } });
-    }
+    const numeroGuia = await generarNumeroGuia(transaction);
 
     const valorImpuestos = impuestos || 0;
     const total = (valorServicio || 0) + valorImpuestos;
@@ -253,7 +260,6 @@ const create = async (data) => {
         idRuta: idRuta || null,
         tokenSeguimiento,
         numeroGuia,
-        numeroFactura: numeroFactura || null,
         fechaEstimadaEntrega: fechaEstimadaEntrega || null,
         observaciones: observaciones || null,
         valorServicio: valorServicio || 0,
@@ -328,7 +334,6 @@ const update = async (id, data) => {
   try {
     const {
       idRuta,
-      numeroFactura,
       fechaEstimadaEntrega,
       observaciones,
       valorServicio,
@@ -386,7 +391,6 @@ const update = async (id, data) => {
     await encomienda.update(
       {
         idRuta: nuevoIdRuta,
-        numeroFactura: numeroFactura !== undefined ? numeroFactura : encomienda.numeroFactura,
         fechaEstimadaEntrega:
           fechaEstimadaEntrega !== undefined
             ? fechaEstimadaEntrega

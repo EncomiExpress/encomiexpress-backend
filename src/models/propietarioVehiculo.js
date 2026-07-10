@@ -32,10 +32,6 @@ const PropietarioVehiculo = sequelize.define('PropietarioVehiculo', {
     type: DataTypes.STRING(150),
     allowNull: true
   },
-  tarjetaPropiedad: {
-    type: DataTypes.STRING(50),
-    allowNull: true
-  },
   tipoFlota: {
     type: DataTypes.STRING(50),
     allowNull: true

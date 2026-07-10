@@ -111,7 +111,13 @@ const refresh = async (refreshToken) => {
 };
 
 const register = async (data) => {
-  const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, password, idRol } = data;
+  // Autoregistro público (sin login) — ver nota en authController.js. Se ignora a
+  // propósito cualquier idRol/habilitado que venga en el body: todo autoregistro
+  // queda con rol Administrador pero SIEMPRE inhabilitado y marcado como pendiente,
+  // hasta que un admin ya activo lo habilite desde el módulo de Usuarios (eso limpia
+  // registroPendiente, ver usuarioService.toggleHabilitado). Si se elimina esta
+  // función en el futuro, también revisar authController.js y routes/auth.js.
+  const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, password } = data;
 
   const existingEmail = await Usuario.findOne({ where: { email } });
   if (existingEmail) {
@@ -132,7 +138,9 @@ const register = async (data) => {
     telefono,
     email,
     password: hashedPassword,
-    idRol: idRol || 2
+    idRol: 1,
+    habilitado: false,
+    registroPendiente: true,
   });
 
   const token = generateToken({

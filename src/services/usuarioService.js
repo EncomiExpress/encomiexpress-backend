@@ -202,7 +202,34 @@ const toggleHabilitado = async (id, currentUserId) => {
     }
   }
 
-  usuario.habilitado = !usuario.habilitado;
+  const nuevoHabilitado = !usuario.habilitado;
+  // Si se está habilitando (aprobando) una cuenta que venía de autoregistro
+  // (POST /auth/register), se limpia la marca de pendiente en el mismo paso.
+  if (nuevoHabilitado && usuario.registroPendiente) {
+    usuario.registroPendiente = false;
+  }
+  usuario.habilitado = nuevoHabilitado;
+  await usuario.save();
+
+  return usuario;
+};
+
+// Para cuentas de autoregistro que un admin decide NO habilitar (ej. no es un
+// empleado real): quita la marca de "pendiente de activación" sin habilitar la
+// cuenta — queda como una cuenta inhabilitada normal, indistinguible de cualquier
+// otra que un admin haya inhabilitado por su cuenta.
+const ignorarRegistro = async (id) => {
+  const usuario = await Usuario.findByPk(id);
+
+  if (!usuario) {
+    throw new AppError('Usuario no encontrado', 404);
+  }
+
+  if (!usuario.registroPendiente) {
+    throw new AppError('Este usuario no tiene un registro pendiente por ignorar', 400);
+  }
+
+  usuario.registroPendiente = false;
   await usuario.save();
 
   return usuario;
@@ -214,5 +241,6 @@ module.exports = {
   create,
   update,
   changePassword,
-  toggleHabilitado
+  toggleHabilitado,
+  ignorarRegistro
 };

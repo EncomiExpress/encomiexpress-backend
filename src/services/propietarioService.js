@@ -72,7 +72,6 @@ const create = async (data) => {
     apellido,
     telefono,
     email,
-    tarjetaPropiedad,
     tipoFlota
   } = data;
 
@@ -88,13 +87,6 @@ const create = async (data) => {
     }
   }
 
-  if (tarjetaPropiedad) {
-    const existingTarjeta = await PropietarioVehiculo.findOne({ where: { tarjetaPropiedad } });
-    if (existingTarjeta) {
-      throw new AppError('La tarjeta de propiedad ya está registrada', 400);
-    }
-  }
-
   const propietario = await PropietarioVehiculo.create({
     tipoIdentificacion,
     numeroIdentificacion,
@@ -102,7 +94,6 @@ const create = async (data) => {
     apellido,
     telefono,
     email,
-    tarjetaPropiedad,
     tipoFlota
   });
 
@@ -117,7 +108,6 @@ const update = async (id, data) => {
     apellido,
     telefono,
     email,
-    tarjetaPropiedad,
     tipoFlota,
     habilitado
   } = data;
@@ -146,15 +136,6 @@ const update = async (id, data) => {
     }
   }
 
-  if (tarjetaPropiedad && tarjetaPropiedad !== propietario.tarjetaPropiedad) {
-    const existingTarjeta = await PropietarioVehiculo.findOne({
-      where: { tarjetaPropiedad, idPropietario: { [Op.ne]: id } },
-    });
-    if (existingTarjeta) {
-      throw new AppError('La tarjeta de propiedad ya está registrada', 400);
-    }
-  }
-
   await propietario.update({
     tipoIdentificacion: tipoIdentificacion || propietario.tipoIdentificacion,
     numeroIdentificacion: numeroIdentificacion || propietario.numeroIdentificacion,
@@ -162,7 +143,6 @@ const update = async (id, data) => {
     apellido: apellido || propietario.apellido,
     telefono: telefono !== undefined ? telefono : propietario.telefono,
     email: email !== undefined ? email : propietario.email,
-    tarjetaPropiedad: tarjetaPropiedad !== undefined ? tarjetaPropiedad : propietario.tarjetaPropiedad,
     tipoFlota: tipoFlota !== undefined ? tipoFlota : propietario.tipoFlota,
     habilitado: habilitado !== undefined ? habilitado : propietario.habilitado
   });

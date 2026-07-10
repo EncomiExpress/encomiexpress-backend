@@ -68,3 +68,13 @@ exports.toggleHabilitado = async (req, res, next) => {
     next(error);
   }
 };
+
+exports.ignorarRegistro = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const usuario = await usuarioService.ignorarRegistro(id);
+    res.json({ success: true, message: 'Solicitud de registro ignorada', data: usuario });
+  } catch (error) {
+    next(error);
+  }
+};

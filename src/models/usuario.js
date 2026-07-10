@@ -44,6 +44,14 @@ const Usuario = sequelize.define('Usuario', {
   habilitado: {
     type: DataTypes.BOOLEAN,
     defaultValue: true
+  },
+  // true solo para cuentas creadas por autoregistro público (POST /auth/register,
+  // ver authService.register) mientras esperan que un admin las habilite por primera
+  // vez. Se limpia a false en ese momento (ver usuarioService.toggleHabilitado) — así
+  // el frontend distingue "pendiente de activación" de "inhabilitada normalmente".
+  registroPendiente: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
   }
 }, {
   tableName: 'usuario',

@@ -16,6 +16,10 @@ const Vehiculo = sequelize.define('Vehiculo', {
     allowNull: false,
     unique: true
   },
+  tarjetaPropiedad: {
+    type: DataTypes.STRING(50),
+    allowNull: true
+  },
   marca: {
     type: DataTypes.STRING(50),
     allowNull: true
