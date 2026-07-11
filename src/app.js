@@ -44,6 +44,12 @@ const encomiendaRoutes = require('./routes/encomiendas');
 const rolRoutes = require('./routes/roles');
 const permisosRoutes = require('./routes/permisos');
 
+// Respuesta simple en la raíz — nadie la usa desde el frontend (que consume /api/*),
+// pero evita el 404 crudo si alguien abre la URL directo o algún monitor la pinguea.
+app.get('/', (req, res) => {
+  res.json({ success: true, message: 'EncomiExpress API' });
+});
+
 // Documentación Swagger (solo en desarrollo)
 if (process.env.NODE_ENV !== 'production') {
   app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
