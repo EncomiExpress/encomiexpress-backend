@@ -38,7 +38,7 @@ const buildEmailShell = ({ badgeBg, icon, heading, bodyHtml, extraHtml = '' }) =
   </div>
 `;
 
-const sendPasswordRecoveryEmail = async (email, tempPassword) => {
+const sendPasswordRecoveryEmail = async (email, resetUrl) => {
   const mailOptions = {
     from: process.env.EMAIL_USER,
     to: email,
@@ -47,14 +47,16 @@ const sendPasswordRecoveryEmail = async (email, tempPassword) => {
       badgeBg: '#CC181820',
       icon: ICONS.candado,
       heading: 'Recuperación de contraseña',
-      bodyHtml: `Has solicitado recuperar tu contraseña en <b>EncomiExpress</b>. Tu contraseña temporal es:`,
+      bodyHtml: `Has solicitado recuperar tu contraseña en <b>EncomiExpress</b>. Haz clic en el siguiente botón para elegir una nueva:`,
       extraHtml: `
-        <div style="background:#f4efe9;border-radius:8px;padding:16px;text-align:center;font-family:'Courier New',Courier,monospace;font-size:26px;font-weight:700;letter-spacing:.12em;color:#1a0e0c;margin:0 36px 20px;">
-          ${tempPassword}
+        <div style="text-align:center;margin:0 0 20px;">
+          <a href="${resetUrl}" target="_blank" style="display:inline-block;background:#CC1818;color:#ffffff;text-decoration:none;font-weight:700;font-size:14.5px;padding:12px 28px;border-radius:8px;">
+            Elegir nueva contraseña
+          </a>
         </div>
         <p style="font-size:12.5px;color:#8a7f78;line-height:1.6;text-align:center;margin:0 0 26px;padding:0 36px;">
-          Esta contraseña es temporal — te recomendamos cambiarla después de iniciar sesión.<br>
-          Si no solicitaste este cambio, ignora este correo.
+          Este enlace vence en 30 minutos y solo se puede usar una vez.<br>
+          Si no solicitaste este cambio, ignora este correo — tu contraseña actual sigue siendo válida.
         </p>
       `,
     }),

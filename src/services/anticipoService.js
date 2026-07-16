@@ -13,11 +13,17 @@ const buildOrder = (sortBy) => {
   };
   const parts = sortBy.split('.');
   const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
+  // Desempate por id: sin esto, filas con el mismo valor en el campo ordenado pueden
+  // salir en distinto orden relativo según el LIMIT de cada consulta.
   if (parts[0] === 'conductor') {
-    return [[{ model: Conductor, as: 'conductor' }, { model: Usuario, as: 'usuario' }, 'nombre', direction]];
+    return [
+      [{ model: Conductor, as: 'conductor' }, { model: Usuario, as: 'usuario' }, 'nombre', direction],
+      ['idAnticipoExcedente', direction],
+    ];
   }
   const field = allowed[parts[0]] || 'idAnticipoExcedente';
-  return [[field, direction]];
+  if (field === 'idAnticipoExcedente') return [[field, direction]];
+  return [[field, direction], ['idAnticipoExcedente', direction]];
 };
 
 const getAll = async ({ idConductor, idRuta, estado, habilitado, anio, mes, q, page = 1, limit = 10, sortBy } = {}) => {

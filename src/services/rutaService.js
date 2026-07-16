@@ -10,7 +10,10 @@ const buildOrder = (sortBy) => {
   const parts = sortBy.split('.');
   const field = allowed.includes(parts[0]) ? parts[0] : 'fechaSalida';
   const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
-  return [[field, direction]];
+  // Desempate por id: sin esto, filas con el mismo valor en "field" (ej. mismo estado)
+  // pueden salir en distinto orden relativo según el LIMIT de cada consulta.
+  if (field === 'idRuta') return [[field, direction]];
+  return [[field, direction], ['idRuta', direction]];
 };
 
 const buildRutaWhere = ({ habilitado, estado, anio, mes, q, idConductor, idVehiculo, idDestino }) => {
@@ -69,7 +72,7 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
     include,
     limit,
     offset,
-    order: order.length > 0 ? order : [['fechaSalida', 'DESC'], ['horaSalida', 'DESC']],
+    order: order.length > 0 ? order : [['fechaSalida', 'DESC'], ['horaSalida', 'DESC'], ['idRuta', 'DESC']],
     distinct: true,
     subQuery: false,
   });

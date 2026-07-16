@@ -10,11 +10,15 @@ const buildOrder = (sortBy) => {
   const parts = sortBy.split('.');
   const field = parts[0];
   const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
+  // Desempate por id: sin esto, filas con el mismo valor en el campo ordenado pueden
+  // salir en distinto orden relativo según el LIMIT de cada consulta.
   if (['nombre', 'apellido'].includes(field)) {
-    return [[{ model: Usuario, as: 'usuario' }, field, direction]];
+    return [[{ model: Usuario, as: 'usuario' }, field, direction], ['idConductor', direction]];
   }
   const allowedDirect = ['estado', 'idConductor', 'habilitado', 'numeroLicencia'];
-  return [[allowedDirect.includes(field) ? field : 'idConductor', direction]];
+  const resolvedField = allowedDirect.includes(field) ? field : 'idConductor';
+  if (resolvedField === 'idConductor') return [[resolvedField, direction]];
+  return [[resolvedField, direction], ['idConductor', direction]];
 };
 
 const getAll = async ({ estado, habilitado, q, page = 1, limit = 10, sortBy } = {}) => {

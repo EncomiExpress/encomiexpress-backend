@@ -8,7 +8,10 @@ const buildOrder = (sortBy) => {
   const parts = sortBy.split('.');
   const field = allowed.includes(parts[0]) ? parts[0] : 'idRol';
   const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
-  return [[field, direction]];
+  // Desempate por id: sin esto, filas con el mismo valor en "field" pueden salir en
+  // distinto orden relativo según el LIMIT de cada consulta.
+  if (field === 'idRol') return [[field, direction]];
+  return [[field, direction], ['idRol', direction]];
 };
 
 const getAll = async ({ habilitado, q, page = 1, limit = 50, sortBy } = {}) => {

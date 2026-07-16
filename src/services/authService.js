@@ -1,7 +1,6 @@
 const bcrypt = require('bcryptjs');
-const crypto = require('crypto');
 const { Usuario, Rol, Permiso, Conductor } = require('../models');
-const { generateToken, generateRefreshToken, verifyRefreshToken } = require('../middlewares/auth');
+const { generateToken, generateRefreshToken, verifyRefreshToken, generateResetPasswordToken, verifyResetPasswordToken } = require('../middlewares/auth');
 const AppError = require('../errors/appError');
 
 const login = async (email, password) => {
@@ -235,24 +234,46 @@ const recuperarPassword = async (email) => {
 
   const usuario = await Usuario.findOne({ where: { email } });
 
-  // No revelamos si el email existe o no en el sistema (evita que alguien use
-  // este endpoint público para averiguar qué correos están registrados).
-  // Si no existe, simplemente no hacemos nada más — la respuesta al cliente
-  // es la misma en ambos casos.
+  // No revela si el correo existe o no — misma respuesta en ambos casos.
   if (!usuario) {
     return;
   }
 
-  // Aleatoriedad criptográficamente segura (Math.random no lo es).
-  const tempPassword = crypto.randomBytes(6).toString('hex');
+  // El sello (fragmento del hash actual) invalida el token solo con que la
+  // contraseña cambie — hace el enlace de un solo uso sin guardarlo en la BD.
+  const resetToken = generateResetPasswordToken({
+    idUsuario: usuario.idUsuario,
+    sello: usuario.password.slice(-10),
+  });
+  const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/resetear-password?token=${resetToken}`;
 
-  // El correo se manda ANTES de tocar la contraseña real. Si el envío falla
-  // (ej. credenciales SMTP mal configuradas), la cuenta se queda intacta en
-  // vez de quedar con una contraseña nueva que nadie llegó a recibir.
   const { sendPasswordRecoveryEmail } = require('../config/email');
-  await sendPasswordRecoveryEmail(email, tempPassword);
+  await sendPasswordRecoveryEmail(email, resetUrl);
+};
 
-  const hashedPassword = await bcrypt.hash(tempPassword, 10);
+const resetearPassword = async (token, passwordNueva) => {
+  if (!token || !passwordNueva) {
+    throw new AppError('Token y nueva contraseña son requeridos', 400);
+  }
+
+  let decoded;
+  try {
+    decoded = verifyResetPasswordToken(token);
+  } catch {
+    throw new AppError('El enlace no es válido o ya venció. Solicita uno nuevo.', 400);
+  }
+
+  const usuario = await Usuario.findByPk(decoded.idUsuario);
+  if (!usuario) {
+    throw new AppError('El enlace no es válido o ya venció. Solicita uno nuevo.', 400);
+  }
+
+  if (usuario.password.slice(-10) !== decoded.sello) {
+    // La contraseña ya cambió desde que se generó el enlace — no se reutiliza.
+    throw new AppError('Este enlace ya fue usado. Solicita uno nuevo.', 400);
+  }
+
+  const hashedPassword = await bcrypt.hash(passwordNueva, 10);
   await usuario.update({ password: hashedPassword });
 };
 
@@ -291,5 +312,6 @@ module.exports = {
   getProfile,
   getConductorProfile,
   recuperarPassword,
+  resetearPassword,
   cambiarPassword
 };

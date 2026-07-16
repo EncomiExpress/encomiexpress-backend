@@ -99,11 +99,23 @@ const verifyRefreshToken = (token) => {
   return jwt.verify(token, process.env.JWT_REFRESH_SECRET);
 };
 
+// Clave derivada de JWT_SECRET pero distinta — un token de reseteo nunca sirve
+// como token de acceso ni como refresh token, solo para cambiar la contraseña.
+const generateResetPasswordToken = (payload) => {
+  return jwt.sign(payload, process.env.JWT_SECRET + '_reset_password', { expiresIn: '30m' });
+};
+
+const verifyResetPasswordToken = (token) => {
+  return jwt.verify(token, process.env.JWT_SECRET + '_reset_password');
+};
+
 module.exports = {
   authenticate,
   authorize,
   authorizePermission,
   generateToken,
   generateRefreshToken,
-  verifyRefreshToken
+  verifyRefreshToken,
+  generateResetPasswordToken,
+  verifyResetPasswordToken
 };

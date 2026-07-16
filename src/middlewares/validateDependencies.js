@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { Ruta, EncomiendaVenta, Vehiculo, Destino, AnticipoExcedente } = require('../models');
+const { Ruta, EncomiendaVenta, Vehiculo, Destino, AnticipoExcedente, Paquete } = require('../models');
 
 // ─── Funciones detalladas (devuelven { bloqueado, dependencias[] }) ────────────
 
@@ -84,12 +84,13 @@ const verificarDependenciasCliente = async (clienteId) => {
       idCliente: clienteId,
       estado: { [Op.notIn]: ['Entregada', 'Cancelada'] }
     },
-    attributes: ['idEncomiendaVenta', 'numeroGuia', 'estado']
+    attributes: ['idEncomiendaVenta', 'estado'],
+    include: [{ model: Paquete, as: 'paquetes', attributes: ['numeroGuia'], required: false, limit: 1 }]
   });
   const dependencias = encomiendas.map(e => ({
     tipo: 'Encomienda',
     id: e.idEncomiendaVenta,
-    descripcion: `Guía ${e.numeroGuia} (${e.estado})`
+    descripcion: `Guía ${e.paquetes?.[0]?.numeroGuia || '#' + e.idEncomiendaVenta} (${e.estado})`
   }));
   return { bloqueado: dependencias.length > 0, dependencias };
 };
@@ -100,12 +101,13 @@ const verificarDependenciasRuta = async (rutaId) => {
       idRuta: rutaId,
       estado: { [Op.notIn]: ['Entregada', 'Cancelada'] }
     },
-    attributes: ['idEncomiendaVenta', 'numeroGuia', 'estado']
+    attributes: ['idEncomiendaVenta', 'estado'],
+    include: [{ model: Paquete, as: 'paquetes', attributes: ['numeroGuia'], required: false, limit: 1 }]
   });
   const dependencias = encomiendas.map(e => ({
     tipo: 'Encomienda',
     id: e.idEncomiendaVenta,
-    descripcion: `Guía ${e.numeroGuia} (${e.estado})`
+    descripcion: `Guía ${e.paquetes?.[0]?.numeroGuia || '#' + e.idEncomiendaVenta} (${e.estado})`
   }));
   return { bloqueado: dependencias.length > 0, dependencias };
 };

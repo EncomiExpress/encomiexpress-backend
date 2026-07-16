@@ -3,7 +3,7 @@ const router = express.Router();
 const authController = require('../controllers/authController');
 const { authenticate } = require('../middlewares/auth');
 const { validate } = require('../middlewares/validation');
-const { loginValidation, registerValidation, recoverPasswordValidation, cambiarPasswordValidation } = require('../validators/authValidator');
+const { loginValidation, registerValidation, recoverPasswordValidation, cambiarPasswordValidation, resetPasswordValidation } = require('../validators/authValidator');
 const { authLimiter, loginLimiter } = require('../middlewares/rateLimiter');
 
 /**
@@ -107,7 +107,7 @@ router.post('/refresh', authLimiter, authController.refresh);
  * @swagger
  * /auth/recuperar-password:
  *   post:
- *     summary: Enviar contraseña temporal al correo
+ *     summary: Enviar enlace de reseteo de contraseña al correo
  *     tags: [Auth]
  *     security: []
  *     requestBody:
@@ -125,10 +125,42 @@ router.post('/refresh', authLimiter, authController.refresh);
  *       200:
  *         description: >
  *           Mismo mensaje exista o no el correo (evita revelar qué correos están
- *           registrados). Si existe, se manda una contraseña temporal por email
- *           — requiere SMTP configurado (EMAIL_HOST/EMAIL_USER/EMAIL_PASS).
+ *           registrados). Si existe, se manda un enlace de reseteo por email (vence
+ *           en 30 min, un solo uso) — requiere SMTP configurado
+ *           (EMAIL_HOST/EMAIL_USER/EMAIL_PASS) y FRONTEND_URL para armar el enlace.
  */
 router.post('/recuperar-password', authLimiter, recoverPasswordValidation, validate, authController.recuperarPassword);
+
+/**
+ * @swagger
+ * /auth/resetear-password:
+ *   post:
+ *     summary: Elegir nueva contraseña con el token del enlace de recuperar-password
+ *     tags: [Auth]
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [token, passwordNueva]
+ *             properties:
+ *               token:
+ *                 type: string
+ *               passwordNueva:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Contraseña actualizada correctamente
+ *       400:
+ *         description: Token inválido, vencido, o ya usado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.post('/resetear-password', authLimiter, resetPasswordValidation, validate, authController.resetearPassword);
 
 /**
  * @swagger

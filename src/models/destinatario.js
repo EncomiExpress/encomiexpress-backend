@@ -9,7 +9,8 @@ const Destinatario = sequelize.define('Destinatario', {
   },
   idEncomiendaVenta: {
     type: DataTypes.INTEGER,
-    allowNull: false
+    allowNull: false,
+    unique: true
   },
   nombreDestinatario: {
     type: DataTypes.STRING(150),

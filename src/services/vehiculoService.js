@@ -9,7 +9,10 @@ const buildOrder = (sortBy) => {
   const parts = sortBy.split('.');
   const field = allowed.includes(parts[0]) ? parts[0] : 'idVehiculo';
   const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
-  return [[field, direction]];
+  // Desempate por id: sin esto, filas con el mismo valor en "field" pueden salir en
+  // distinto orden relativo según el LIMIT de cada consulta.
+  if (field === 'idVehiculo') return [[field, direction]];
+  return [[field, direction], ['idVehiculo', direction]];
 };
 
 const getAll = async ({ estado, tipo, habilitado, q, idPropietario, page = 1, limit = 10, sortBy } = {}) => {

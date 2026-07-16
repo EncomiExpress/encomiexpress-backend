@@ -11,6 +11,13 @@ if (missingEnvVars.length > 0) {
   process.exit(1);
 }
 
+// No tumba el servidor (el resto de la app funciona sin ella) — solo avisa, porque
+// sin esto los enlaces de correo (recuperar contraseña, seguimiento) apuntan a
+// localhost en silencio, sin ningún error visible.
+if (process.env.NODE_ENV === 'production' && !process.env.FRONTEND_URL) {
+  console.warn('⚠️  FRONTEND_URL no está configurada — los enlaces de correo (recuperar contraseña, seguimiento) apuntarán a localhost y no funcionarán para los usuarios.');
+}
+
 const PORT = process.env.PORT || 3000;
 
 const startServer = async () => {

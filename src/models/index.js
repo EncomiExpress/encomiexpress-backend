@@ -84,8 +84,8 @@ EncomiendaVenta.belongsTo(Cliente, { foreignKey: 'idCliente', as: 'cliente' });
 Ruta.hasMany(EncomiendaVenta, { foreignKey: 'idRuta', as: 'encomiendas' });
 EncomiendaVenta.belongsTo(Ruta, { foreignKey: 'idRuta', as: 'ruta' });
 
-// EncomiendaVenta - Destinatario (1:N)
-EncomiendaVenta.hasMany(Destinatario, { foreignKey: 'idEncomiendaVenta', as: 'destinatarios' });
+// EncomiendaVenta - Destinatario (1:1)
+EncomiendaVenta.hasOne(Destinatario, { foreignKey: 'idEncomiendaVenta', as: 'destinatario' });
 Destinatario.belongsTo(EncomiendaVenta, { foreignKey: 'idEncomiendaVenta', as: 'encomienda' });
 
 // EncomiendaVenta - Paquete (1:N)

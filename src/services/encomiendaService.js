@@ -11,10 +11,17 @@ const ESTADOS_VALIDOS = [
 const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia', 'Nequi'];
 const ESTADOS_PAGO_VALIDOS = ['Pendiente', 'Pagado'];
 
-// Genera numeroGuia secuencial por año (EE-2026-000042). pg_advisory_xact_lock serializa
-// solo este paso puntual (conteo + siguiente número) entre transacciones concurrentes que
-// registren una venta en el mismo año; se libera solo al terminar la transacción. Así se
-// evita el choque de números sin necesitar una tabla contador.
+// Genera numeroGuia por año (EE-2026-483920), uno POR PAQUETE (no por venta) — cada
+// paquete físico necesita su propio número de guía/código de barras único, porque en la
+// práctica se despachan por separado.
+//
+// Los 6 dígitos son ALEATORIOS, no un contador visible — un número secuencial revela
+// cuántos envíos se han hecho y en qué orden, algo que no hace falta exponer. Como el
+// espacio de 6 dígitos (1.000.000 de valores) es finito, se verifica que no exista ya
+// y se reintenta unas pocas veces en el caso (raro) de que choque con uno existente.
+// pg_advisory_xact_lock serializa este paso entre transacciones concurrentes del mismo
+// año, para que dos paquetes nunca puedan "reservar" el mismo número al mismo tiempo;
+// se libera solo al terminar la transacción completa.
 const generarNumeroGuia = async (transaction) => {
   const anio = new Date().getFullYear();
 
@@ -23,30 +30,47 @@ const generarNumeroGuia = async (transaction) => {
     transaction,
   });
 
-  const totalAnio = await EncomiendaVenta.count({
-    where: { numeroGuia: { [sequelize.Sequelize.Op.like]: `EE-${anio}-%` } },
-    transaction,
-  });
+  for (let intento = 0; intento < 5; intento++) {
+    const secuencia = crypto.randomInt(0, 1000000).toString().padStart(6, '0');
+    const numeroGuia = `EE-${anio}-${secuencia}`;
+    const existente = await Paquete.findOne({ where: { numeroGuia }, transaction });
+    if (!existente) return numeroGuia;
+  }
 
-  const secuencia = (totalAnio + 1).toString().padStart(6, '0');
-  return `EE-${anio}-${secuencia}`;
+  throw new AppError('No se pudo generar un número de guía único, intenta de nuevo.', 500);
 };
 
-const generarTokenSeguimiento = (numeroGuia) => {
-  return crypto
-    .createHash('sha256')
-    .update(numeroGuia + (process.env.JWT_SECRET || 'secret'))
-    .digest('hex')
-    .substring(0, 32);
-};
+// Ya no se deriva de numeroGuia (la venta no tiene uno único cuando hay varios
+// paquetes) — un token aleatorio es además más seguro que hashear un número
+// de guía secuencial y por tanto parcialmente adivinable.
+const generarTokenSeguimiento = () => crypto.randomBytes(16).toString('hex');
 
+// "numeroGuia" ya no es columna de encomienda_venta (vive en paquete, uno por paquete) —
+// para poder seguir ordenando el listado por ese criterio, se ordena por la guía del
+// paquete más antiguo de cada venta (el "paquete 1"), vía subquery correlacionada.
 const buildOrder = (sortBy) => {
   if (!sortBy) return [];
   const allowed = ['fechaRegistro', 'estado', 'estadoPago', 'numeroGuia', 'idEncomiendaVenta', 'habilitado'];
   const parts = sortBy.split('.');
   const field = allowed.includes(parts[0]) ? parts[0] : 'fechaRegistro';
   const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
-  return [[field, direction]];
+  // Desempate por id: sin esto, cuando varias filas comparten el mismo valor en "field"
+  // (ej. mismo fechaRegistro, mismo estado), Postgres puede devolverlas en distinto orden
+  // relativo según el LIMIT/OFFSET de cada consulta — se ve como que una fila "salta" de
+  // posición al cambiar el tamaño de página, aunque nada haya cambiado en los datos.
+  if (field === 'numeroGuia') {
+    return [
+      [
+        sequelize.literal(
+          '(SELECT numero_guia FROM paquete WHERE paquete.id_encomienda_venta = "EncomiendaVenta"."id_encomienda_venta" ORDER BY id_paquete ASC LIMIT 1)'
+        ),
+        direction,
+      ],
+      ['idEncomiendaVenta', direction],
+    ];
+  }
+  if (field === 'idEncomiendaVenta') return [[field, direction]];
+  return [[field, direction], ['idEncomiendaVenta', direction]];
 };
 
 const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, metodoPago, q, page = 1, limit = 10, sortBy } = {}) => {
@@ -62,7 +86,6 @@ const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, metod
     const { Op } = sequelize.Sequelize;
     const trimmed = q.trim();
     const conditions = [
-      { numeroGuia: { [Op.iLike]: `%${trimmed}%` } },
       { estado: { [Op.iLike]: `%${trimmed}%` } },
       { estadoPago: { [Op.iLike]: `%${trimmed}%` } },
       { '$cliente.nombre$': { [Op.iLike]: `%${trimmed}%` } },
@@ -76,6 +99,18 @@ const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, metod
       conditions.push({ [Op.and]: [{ '$cliente.nombre$': { [Op.iLike]: primero } }, { '$cliente.apellido$': { [Op.iLike]: resto } }] });
       conditions.push({ [Op.and]: [{ '$cliente.apellido$': { [Op.iLike]: primero } }, { '$cliente.nombre$': { [Op.iLike]: resto } }] });
     }
+
+    // numeroGuia vive en Paquete (uno por paquete), no en EncomiendaVenta — se busca
+    // aparte y se combina por idEncomiendaVenta, para que una venta aparezca en los
+    // resultados sin importar cuál de sus paquetes coincida con la búsqueda.
+    const paquetesCoincidentes = await Paquete.findAll({
+      where: { numeroGuia: { [Op.iLike]: `%${trimmed}%` } },
+      attributes: ['idEncomiendaVenta'],
+    });
+    if (paquetesCoincidentes.length > 0) {
+      conditions.push({ idEncomiendaVenta: { [Op.in]: paquetesCoincidentes.map((p) => p.idEncomiendaVenta) } });
+    }
+
     where[Op.or] = conditions;
   }
 
@@ -101,12 +136,12 @@ const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, metod
           { model: Destino, as: 'destino', required: false },
         ],
       },
-      { model: Destinatario, as: 'destinatarios', separate: true },
+      { model: Destinatario, as: 'destinatario' },
       { model: Paquete, as: 'paquetes', separate: true },
     ],
     limit,
     offset,
-    order: order.length > 0 ? order : [['fechaRegistro', 'DESC']],
+    order: order.length > 0 ? order : [['fechaRegistro', 'DESC'], ['idEncomiendaVenta', 'DESC']],
     distinct: true,
     subQuery: false,
   });
@@ -133,7 +168,7 @@ const getById = async (id) => {
           { model: Destino, as: 'destino', required: false },
         ],
       },
-      { model: Destinatario, as: 'destinatarios' },
+      { model: Destinatario, as: 'destinatario' },
       { model: Paquete, as: 'paquetes' },
     ],
   });
@@ -162,7 +197,7 @@ const getPublicByToken = async (token) => {
           { model: Destino, as: 'destino', required: false, attributes: ['ciudad', 'departamento'] },
         ],
       },
-      { model: Destinatario, as: 'destinatarios', limit: 1 },
+      { model: Destinatario, as: 'destinatario' },
       { model: Paquete, as: 'paquetes', limit: 1 },
     ],
   });
@@ -170,15 +205,12 @@ const getPublicByToken = async (token) => {
   if (!encomienda) throw new AppError('Encomienda no encontrada', 404);
 
   return {
-    numeroGuia: encomienda.numeroGuia,
+    numeroGuia: encomienda.paquetes?.[0]?.numeroGuia || null,
     estado: encomienda.estado,
     fechaRegistro: encomienda.fechaRegistro,
     fechaEstimadaEntrega: encomienda.fechaEstimadaEntrega,
     remitente: `${encomienda.cliente?.nombre || ''} ${encomienda.cliente?.apellido || ''}`.trim(),
-    destinatario:
-      encomienda.destinatarios && encomienda.destinatarios[0]
-        ? encomienda.destinatarios[0].nombreDestinatario
-        : null,
+    destinatario: encomienda.destinatario?.nombreDestinatario || null,
     destino:
       encomienda.ruta && encomienda.ruta.destino
         ? `${encomienda.ruta.destino.ciudad} - ${encomienda.ruta.destino.departamento}`
@@ -274,18 +306,15 @@ const create = async (data) => {
       throw new AppError(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
     }
 
-    const numeroGuia = await generarNumeroGuia(transaction);
-
     const valorImpuestos = impuestos || 0;
     const total = (valorServicio || 0) + valorImpuestos;
-    const tokenSeguimiento = generarTokenSeguimiento(numeroGuia);
+    const tokenSeguimiento = generarTokenSeguimiento();
 
     const encomienda = await EncomiendaVenta.create(
       {
         idCliente,
         idRuta,
         tokenSeguimiento,
-        numeroGuia,
         fechaEstimadaEntrega: fechaEstimadaEntrega || null,
         observaciones: observaciones || null,
         valorServicio: valorServicio || 0,
@@ -315,6 +344,7 @@ const create = async (data) => {
         await Paquete.create(
           {
             idEncomiendaVenta: encomienda.idEncomiendaVenta,
+            numeroGuia: await generarNumeroGuia(transaction),
             descripcionContenido: pkg.descripcionContenido || null,
             peso: pkg.peso || null,
             alto: pkg.alto || null,
@@ -333,7 +363,7 @@ const create = async (data) => {
       include: [
         { model: Cliente, as: 'cliente' },
         { model: Ruta, as: 'ruta', required: false },
-        { model: Destinatario, as: 'destinatarios' },
+        { model: Destinatario, as: 'destinatario' },
         { model: Paquete, as: 'paquetes' },
       ],
     });
@@ -472,21 +502,42 @@ const update = async (id, data) => {
     }
 
     if (paquetes && paquetes.length > 0) {
-      await Paquete.destroy({ where: { idEncomiendaVenta: id }, transaction });
+      // Diff en vez de "borrar todo y recrear": cada paquete tiene su propio número de
+      // guía/código de barras físico, así que editar la venta (o incluso editar OTRO
+      // paquete) nunca debe reasignarle un número nuevo a uno que no cambió. Solo se
+      // crea guía nueva para paquetes realmente nuevos (sin idPaquete); los que ya
+      // existían se actualizan en el mismo registro, y los que ya no vienen en el
+      // payload (se quitaron en el formulario) se eliminan.
+      const existentes = await Paquete.findAll({ where: { idEncomiendaVenta: id }, transaction });
+      const existentesPorId = new Map(existentes.map((p) => [p.idPaquete, p]));
+      const idsConservados = new Set();
 
       for (const pkg of paquetes) {
-        await Paquete.create(
-          {
-            idEncomiendaVenta: id,
-            descripcionContenido: pkg.descripcionContenido || null,
-            peso: pkg.peso || null,
-            alto: pkg.alto || null,
-            ancho: pkg.ancho || null,
-            profundidad: pkg.profundidad || null,
-            valorDeclarado: pkg.valorDeclarado || null,
-          },
-          { transaction }
-        );
+        const datos = {
+          descripcionContenido: pkg.descripcionContenido || null,
+          peso: pkg.peso || null,
+          alto: pkg.alto || null,
+          ancho: pkg.ancho || null,
+          profundidad: pkg.profundidad || null,
+          valorDeclarado: pkg.valorDeclarado || null,
+        };
+
+        if (pkg.idPaquete && existentesPorId.has(pkg.idPaquete)) {
+          idsConservados.add(pkg.idPaquete);
+          await existentesPorId.get(pkg.idPaquete).update(datos, { transaction });
+        } else {
+          await Paquete.create(
+            { idEncomiendaVenta: id, numeroGuia: await generarNumeroGuia(transaction), ...datos },
+            { transaction }
+          );
+        }
+      }
+
+      const idsAEliminar = existentes
+        .filter((p) => !idsConservados.has(p.idPaquete))
+        .map((p) => p.idPaquete);
+      if (idsAEliminar.length > 0) {
+        await Paquete.destroy({ where: { idPaquete: idsAEliminar }, transaction });
       }
     }
 
@@ -496,7 +547,7 @@ const update = async (id, data) => {
       include: [
         { model: Cliente, as: 'cliente' },
         { model: Ruta, as: 'ruta', required: false },
-        { model: Destinatario, as: 'destinatarios' },
+        { model: Destinatario, as: 'destinatario' },
         { model: Paquete, as: 'paquetes' },
       ],
     });
@@ -561,7 +612,7 @@ const toggleHabilitado = async (id) => {
       throw new AppError(
         `No se puede inhabilitar la encomienda porque está en estado "${encomienda.estado}"`,
         409,
-        [{ tipo: 'Estado activo', id: encomienda.idEncomiendaVenta, descripcion: `La encomienda ${encomienda.numeroGuia || '#' + encomienda.idEncomiendaVenta} está en estado "${encomienda.estado}" y no ha finalizado` }],
+        [{ tipo: 'Estado activo', id: encomienda.idEncomiendaVenta, descripcion: `La encomienda #${encomienda.idEncomiendaVenta} está en estado "${encomienda.estado}" y no ha finalizado` }],
         'DEPENDENCY_CONFLICT'
       );
     }
@@ -573,7 +624,7 @@ const toggleHabilitado = async (id) => {
   const encomiendaActualizada = await EncomiendaVenta.findByPk(id, {
     include: [
       { model: Cliente, as: 'cliente' },
-      { model: Destinatario, as: 'destinatarios' },
+      { model: Destinatario, as: 'destinatario' },
       { model: Paquete, as: 'paquetes' },
       {
         model: Ruta,

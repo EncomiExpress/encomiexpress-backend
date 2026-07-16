@@ -27,7 +27,10 @@ const createValidation = [
     .optional()
     .isIn(ESTADOS_PAGO_VALIDOS)
     .withMessage(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`),
-  body('destinatario').optional().isObject().withMessage('Destinatario debe ser un objeto'),
+  body('destinatario').notEmpty().withMessage('El destinatario es obligatorio').isObject().withMessage('Destinatario debe ser un objeto'),
+  body('destinatario.nombreDestinatario')
+    .notEmpty().withMessage('El nombre del destinatario es obligatorio')
+    .isLength({ max: 150 }).withMessage('El nombre del destinatario es demasiado largo'),
   body('paquetes').isArray({ min: 1 }).withMessage('Debe registrar al menos un paquete'),
   body('paquetes.*.peso')
     .notEmpty().withMessage('El peso del paquete es obligatorio')
@@ -48,6 +51,11 @@ const updateValidation = [
     .optional()
     .isIn(ESTADOS_PAGO_VALIDOS)
     .withMessage(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`),
+  body('destinatario').optional().isObject().withMessage('Destinatario debe ser un objeto'),
+  body('destinatario.nombreDestinatario')
+    .if(body('destinatario').exists())
+    .notEmpty().withMessage('El nombre del destinatario es obligatorio')
+    .isLength({ max: 150 }).withMessage('El nombre del destinatario es demasiado largo'),
   body('paquetes').optional().isArray({ min: 1 }).withMessage('Debe registrar al menos un paquete'),
   body('paquetes.*.peso')
     .notEmpty().withMessage('El peso del paquete es obligatorio')

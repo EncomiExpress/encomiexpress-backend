@@ -67,7 +67,17 @@ const recuperarPassword = async (req, res, next) => {
     const { email } = req.body;
     await authService.recuperarPassword(email);
     // Mismo mensaje exista o no el correo — ver nota en authService.recuperarPassword.
-    res.json({ success: true, message: 'Si el correo está registrado, recibirás una contraseña temporal en tu email' });
+    res.json({ success: true, message: 'Si el correo está registrado, recibirás un enlace para elegir una nueva contraseña' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const resetearPassword = async (req, res, next) => {
+  try {
+    const { token, passwordNueva } = req.body;
+    await authService.resetearPassword(token, passwordNueva);
+    res.json({ success: true, message: 'Contraseña actualizada correctamente' });
   } catch (error) {
     next(error);
   }
@@ -91,5 +101,6 @@ module.exports = {
   getProfile,
   getConductorProfile,
   recuperarPassword,
+  resetearPassword,
   cambiarPassword
 };

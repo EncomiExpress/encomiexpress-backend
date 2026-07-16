@@ -27,9 +27,15 @@ const cambiarPasswordValidation = [
   body('passwordNueva').matches(PASSWORD_REGEX).withMessage(PASSWORD_MESSAGE),
 ];
 
+const resetPasswordValidation = [
+  body('token').notEmpty().withMessage('Token es requerido'),
+  body('passwordNueva').matches(PASSWORD_REGEX).withMessage(PASSWORD_MESSAGE),
+];
+
 module.exports = {
   loginValidation,
   registerValidation,
   recoverPasswordValidation,
   cambiarPasswordValidation,
+  resetPasswordValidation,
 };
