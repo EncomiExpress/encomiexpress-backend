@@ -1,4 +1,4 @@
-const { PropietarioVehiculo, Vehiculo } = require('../models');
+const { PropietarioVehiculo } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { verificarDependenciasPropietario } = require('../middlewares/validateDependencies');
@@ -47,7 +47,7 @@ const getAll = async ({ habilitado, q, tipoFlota, page = 1, limit = 10, sortBy }
     where,
     limit,
     offset,
-    order: order.length > 0 ? order : [['idPropietario', 'ASC']],
+    order: order.length > 0 ? order : [['idPropietario', 'DESC']],
     distinct: true,
   });
 
@@ -151,19 +151,6 @@ const update = async (id, data) => {
 };
 
 
-const getVehiculos = async (id) => {
-  const propietario = await PropietarioVehiculo.findByPk(id);
-  if (!propietario) {
-    throw new AppError('Propietario no encontrado', 404);
-  }
-
-  const vehiculos = await Vehiculo.findAll({
-    where: { idPropietario: id }
-  });
-
-  return vehiculos;
-};
-
 const getPageOf = async (id, { limit = 10 } = {}) => {
   const record = await PropietarioVehiculo.findByPk(id, { attributes: ['idPropietario'] });
   if (!record) throw new AppError('Propietario no encontrado', 404);
@@ -199,7 +186,6 @@ module.exports = {
   getById,
   create,
   update,
-  getVehiculos,
   toggleHabilitado,
   getPageOf,
 };

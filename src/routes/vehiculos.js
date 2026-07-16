@@ -3,7 +3,7 @@ const router = express.Router();
 const { validate } = require('../middlewares/validation');
 const vehiculoController = require('../controllers/vehiculoController');
 const { authenticate, authorizePermission } = require('../middlewares/auth');
-const { createValidation, cambiarEstadoValidation } = require('../validators/vehiculosValidator');
+const { createValidation, updateValidation, cambiarEstadoValidation } = require('../validators/vehiculosValidator');
 
 router.use(authenticate);
 
@@ -106,7 +106,7 @@ router.post('/', authorizePermission('registrar_vehiculo'), createValidation, va
  *       200:
  *         description: Vehículo actualizado
  */
-router.put('/:id', authorizePermission('actualizar_vehiculo'), vehiculoController.update);
+router.put('/:id', authorizePermission('actualizar_vehiculo'), updateValidation, validate, vehiculoController.update);
 
 /**
  * @swagger

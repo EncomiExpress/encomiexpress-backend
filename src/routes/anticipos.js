@@ -4,7 +4,7 @@ const { validate } = require('../middlewares/validation');
 const anticipoController = require('../controllers/anticipoExcedenteController');
 const { authenticate, authorize, authorizePermission } = require('../middlewares/auth');
 const { upload } = require('../config/cloudinary');
-const { createValidation } = require('../validators/anticiposValidator');
+const { createValidation, updateValidation } = require('../validators/anticiposValidator');
 
 /**
  * @swagger
@@ -40,6 +40,18 @@ const { createValidation } = require('../validators/anticiposValidator');
  *         description: Lista paginada de anticipos
  */
 router.get('/', authenticate, authorizePermission('listar_anticipo'), anticipoController.getAll);
+
+/**
+ * @swagger
+ * /anticipos/anios-disponibles:
+ *   get:
+ *     summary: Años distintos en que hay anticipos entregados (para el filtro de Año en el listado)
+ *     tags: [Anticipos]
+ *     responses:
+ *       200:
+ *         description: Lista de años, descendente
+ */
+router.get('/anios-disponibles', authenticate, authorizePermission('listar_anticipo'), anticipoController.getAniosDisponibles);
 
 /**
  * @swagger
@@ -104,7 +116,7 @@ router.post('/', authenticate, authorize('admin', 'conductor'), createValidation
  *       200:
  *         description: Anticipo actualizado
  */
-router.put('/:id', authenticate, authorize('admin', 'conductor'), anticipoController.update);
+router.put('/:id', authenticate, authorize('admin', 'conductor'), updateValidation, validate, anticipoController.update);
 
 /**
  * @swagger
@@ -163,6 +175,30 @@ router.post('/:id/soporte', authenticate, authorize('admin', 'conductor'),
  *         description: Estado actualizado
  */
 router.patch('/:id/estado', authenticate, authorize('admin', 'conductor'), authorizePermission('actualizar_anticipo'), anticipoController.cambiarEstado);
+
+/**
+ * @swagger
+ * /anticipos/{id}/entregar-excedente:
+ *   patch:
+ *     summary: Confirmar que el conductor devolvió el excedente (solo admin) — pasa a Completado y registra la fecha de entrega del excedente como hoy
+ *     tags: [Anticipos]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               soporte: { type: string }
+ *     responses:
+ *       200:
+ *         description: Excedente entregado, anticipo pasa a Completado
+ */
+router.patch('/:id/entregar-excedente', authenticate, authorize('admin'), authorizePermission('actualizar_anticipo'), anticipoController.entregarExcedente);
 
 /**
  * @swagger

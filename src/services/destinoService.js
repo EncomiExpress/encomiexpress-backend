@@ -1,4 +1,4 @@
-const { Destino, Ruta } = require('../models');
+const { Destino } = require('../models');
 const AppError = require('../errors/appError');
 const { verificarDependenciasDestino } = require('../middlewares/validateDependencies');
 const { Op } = require('sequelize');
@@ -31,7 +31,7 @@ const getAll = async ({ habilitado, departamento, q, page = 1, limit = 10, sortB
     where,
     limit,
     offset,
-    order: order.length > 0 ? order : [['idDestino', 'ASC']],
+    order: order.length > 0 ? order : [['idDestino', 'DESC']],
     distinct: true,
   });
 
@@ -105,19 +105,6 @@ const update = async (id, data) => {
 };
 
 
-const getRutas = async (id) => {
-  const destino = await Destino.findByPk(id);
-  if (!destino) {
-    throw new AppError('Destino no encontrado', 404);
-  }
-
-  const rutas = await Ruta.findAll({
-    where: { idDestino: id }
-  });
-
-  return rutas;
-};
-
 const toggleHabilitado = async (id) => {
   const destino = await Destino.findByPk(id);
   if (!destino) throw new AppError('Destino no encontrado', 404);
@@ -158,7 +145,6 @@ module.exports = {
   getById,
   create,
   update,
-  getRutas,
   toggleHabilitado,
   getPageOf,
 };

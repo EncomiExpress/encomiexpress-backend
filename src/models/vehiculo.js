@@ -43,7 +43,7 @@ const Vehiculo = sequelize.define('Vehiculo', {
   },
   capacidad: {
     type: DataTypes.DECIMAL(10, 2),
-    allowNull: true
+    allowNull: false
   },
   estado: {
     type: DataTypes.STRING(30),

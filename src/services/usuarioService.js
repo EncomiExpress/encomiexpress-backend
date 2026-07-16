@@ -1,9 +1,9 @@
 const bcrypt = require('bcryptjs');
-const { Usuario, Rol } = require('../models');
+const { sequelize, Usuario, Rol, Conductor, Cliente } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
-const { Conductor, Cliente } = require('../models');
-const { tieneRutasActivas, tieneVehiculosActivos, tieneAnticiposPendientes, tieneEncomiendasActivasPorCliente } = require('../middlewares/validateDependencies');
+const { tieneRutasActivas, tieneAnticiposPendientes, tieneEncomiendasActivasPorCliente } = require('../middlewares/validateDependencies');
+const { sendRegistroResultadoEmail } = require('../config/email');
 
 const buildOrder = (sortBy) => {
   if (!sortBy) return [];
@@ -19,7 +19,8 @@ const getAll = async ({ habilitado, idRol, q, page = 1, limit = 10, sortBy } = {
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
   if (idRol !== undefined) where.idRol = idRol;
   if (q) {
-    const query = `%${q.trim()}%`;
+    const trimmed = q.trim();
+    const query = `%${trimmed}%`;
     const numericId = Number(q);
     const conditions = [
       { nombre: { [Op.iLike]: query } },
@@ -31,6 +32,13 @@ const getAll = async ({ habilitado, idRol, q, page = 1, limit = 10, sortBy } = {
     ];
     if (!Number.isNaN(numericId)) {
       conditions.unshift({ idUsuario: numericId });
+    }
+    const partes = trimmed.split(/\s+/).filter(Boolean);
+    if (partes.length > 1) {
+      const primero = `%${partes[0]}%`;
+      const resto = `%${partes.slice(1).join(' ')}%`;
+      conditions.push({ [Op.and]: [{ nombre: { [Op.iLike]: primero } }, { apellido: { [Op.iLike]: resto } }] });
+      conditions.push({ [Op.and]: [{ apellido: { [Op.iLike]: primero } }, { nombre: { [Op.iLike]: resto } }] });
     }
     where[Op.or] = conditions;
   }
@@ -46,7 +54,13 @@ const getAll = async ({ habilitado, idRol, q, page = 1, limit = 10, sortBy } = {
     attributes: { exclude: ['password'] },
     limit,
     offset,
-    order: order.length > 0 ? order : [['idUsuario', 'ASC']],
+    // Estado neutral (sin sortBy): más reciente primero, salvo el admin inicial
+    // (id=1), que siempre queda de primero — es la cuenta con la que arranca el
+    // sistema y conviene ubicarla rápido. Si se ordena por otra columna, el
+    // admin se mezcla como cualquier otra fila (no aplica el CASE).
+    order: order.length > 0
+      ? order
+      : [[sequelize.literal('CASE WHEN id_usuario = 1 THEN 0 ELSE 1 END'), 'ASC'], ['idUsuario', 'DESC']],
     distinct: true,
   });
 
@@ -99,8 +113,15 @@ const create = async (data) => {
   };
 };
 
-const update = async (id, data) => {
-  const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, idRol, habilitado } = data;
+const update = async (id, data, currentUserId) => {
+  const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, idRol, habilitado, password } = data;
+
+  // El admin id=1 solo puede editar su propia información — ningún otro admin
+  // puede modificarle nombre, correo, rol, contraseña, etc. Ver misma nota en
+  // toggleHabilitado: evita que otra cuenta deje sin control al dueño original.
+  if (parseInt(id) === 1 && currentUserId !== 1) {
+    throw new AppError('Esta cuenta administradora solo puede editarse a sí misma', 400);
+  }
 
   const usuario = await Usuario.findByPk(id);
 
@@ -122,7 +143,7 @@ const update = async (id, data) => {
     }
   }
 
-  await usuario.update({
+  const datosActualizados = {
     tipoIdentificacion: tipoIdentificacion || usuario.tipoIdentificacion,
     numeroIdentificacion: numeroIdentificacion || usuario.numeroIdentificacion,
     nombre: nombre || usuario.nombre,
@@ -131,7 +152,13 @@ const update = async (id, data) => {
     email: email || usuario.email,
     idRol: idRol || usuario.idRol,
     habilitado: habilitado !== undefined ? habilitado : usuario.habilitado
-  });
+  };
+
+  if (password) {
+    datosActualizados.password = await bcrypt.hash(password, 10);
+  }
+
+  await usuario.update(datosActualizados);
 
   return {
     idUsuario: usuario.idUsuario,
@@ -140,30 +167,22 @@ const update = async (id, data) => {
   };
 };
 
-const changePassword = async (id, { currentPassword, newPassword }) => {
-  const usuario = await Usuario.findByPk(id);
-
-  if (!usuario) {
-    throw new AppError('Usuario no encontrado', 404);
-  }
-
-  const isValid = await bcrypt.compare(currentPassword, usuario.password);
-  if (!isValid) {
-    throw new AppError('Password actual incorrecto', 400);
-  }
-
-  const hashedPassword = await bcrypt.hash(newPassword, 10);
-  await usuario.update({ password: hashedPassword });
-
-  return { message: 'Password actualizado exitosamente' };
-};
-
 const toggleHabilitado = async (id, currentUserId) => {
   if (parseInt(id) === currentUserId) {
     throw new AppError('No puedes inhabilitar tu propia cuenta', 400);
   }
 
-  const usuario = await Usuario.findByPk(id, { include: [{ model: Rol, as: 'rol' }] });
+  // El admin id=1 (el inicial, creado por init.sql/seed.js) nunca se puede inhabilitar,
+  // sin importar quién lo intente — evita que otro admin (ej. una cuenta autoregistrada
+  // ya habilitada) deje sin acceso al dueño original del sistema.
+  if (parseInt(id) === 1) {
+    throw new AppError('Esta cuenta administradora no se puede inhabilitar', 400);
+  }
+
+  const usuario = await Usuario.findByPk(id, {
+    include: [{ model: Rol, as: 'rol' }],
+    attributes: { exclude: ['password'] },
+  });
 
   if (!usuario) {
     throw new AppError('Usuario no encontrado', 404);
@@ -185,9 +204,6 @@ const toggleHabilitado = async (id, currentUserId) => {
       const rutasActivas = await tieneRutasActivas(conductor.idConductor);
       if (rutasActivas) throw new AppError('No se puede inhabilitar el usuario porque el conductor asociado tiene rutas activas', 400);
 
-      const vehiculosActivos = await tieneVehiculosActivos(conductor.idConductor);
-      if (vehiculosActivos) throw new AppError('No se puede inhabilitar el usuario porque el conductor asociado tiene vehículos activos', 400);
-
       const anticiposPendientes = await tieneAnticiposPendientes(conductor.idConductor);
       if (anticiposPendientes) throw new AppError('No se puede inhabilitar el usuario porque el conductor asociado tiene anticipos pendientes', 400);
     }
@@ -205,11 +221,22 @@ const toggleHabilitado = async (id, currentUserId) => {
   const nuevoHabilitado = !usuario.habilitado;
   // Si se está habilitando (aprobando) una cuenta que venía de autoregistro
   // (POST /auth/register), se limpia la marca de pendiente en el mismo paso.
+  const eraRegistroPendiente = usuario.registroPendiente;
   if (nuevoHabilitado && usuario.registroPendiente) {
     usuario.registroPendiente = false;
   }
   usuario.habilitado = nuevoHabilitado;
   await usuario.save();
+
+  // Aviso solo en la transición única pendiente -> habilitado (no en toggles
+  // normales posteriores). Si el correo falla, la aprobación ya quedó guardada.
+  if (nuevoHabilitado && eraRegistroPendiente) {
+    try {
+      await sendRegistroResultadoEmail(usuario.email, usuario.nombre, true);
+    } catch (e) {
+      console.error('Error enviando correo de aprobación de registro:', e.message || e);
+    }
+  }
 
   return usuario;
 };
@@ -232,6 +259,12 @@ const ignorarRegistro = async (id) => {
   usuario.registroPendiente = false;
   await usuario.save();
 
+  try {
+    await sendRegistroResultadoEmail(usuario.email, usuario.nombre, false);
+  } catch (e) {
+    console.error('Error enviando correo de registro ignorado:', e.message || e);
+  }
+
   return usuario;
 };
 
@@ -240,7 +273,6 @@ module.exports = {
   getById,
   create,
   update,
-  changePassword,
   toggleHabilitado,
   ignorarRegistro
 };

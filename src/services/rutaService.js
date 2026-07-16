@@ -1,11 +1,12 @@
-const { Ruta, Vehiculo, Conductor, Destino, EncomiendaVenta, Usuario, Cliente, AnticipoExcedente } = require('../models');
+const { Ruta, Vehiculo, Conductor, Destino, EncomiendaVenta, Usuario, AnticipoExcedente, Paquete, sequelize } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { verificarDependenciasRuta } = require('../middlewares/validateDependencies');
+const { tieneLicenciaVigente } = require('../utils/licenciaHelper');
 
 const buildOrder = (sortBy) => {
   if (!sortBy) return [];
-  const allowed = ['fechaSalida', 'estado', 'idRuta', 'habilitado'];
+  const allowed = ['fechaSalida', 'estado', 'idRuta', 'habilitado', 'nombreRuta'];
   const parts = sortBy.split('.');
   const field = allowed.includes(parts[0]) ? parts[0] : 'fechaSalida';
   const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
@@ -19,18 +20,34 @@ const buildRutaWhere = ({ habilitado, estado, anio, mes, q, idConductor, idVehic
   if (idConductor) where.idConductor = parseInt(idConductor);
   if (idVehiculo) where.idVehiculo = parseInt(idVehiculo);
   if (idDestino) where.idDestino = parseInt(idDestino);
-  if (anio || mes) {
-    where.fechaSalida = {};
-    if (anio) where.fechaSalida[Op.like] = `${anio}%`;
-    if (mes) where.fechaSalida[Op.like] = `${anio ? anio + '-' : ''}${mes.padStart ? mes.padStart(2, '0') : mes}%`;
+  if (anio) {
+    // fecha_salida es tipo DATE en Postgres — LIKE no aplica sobre fechas, hay que
+    // comparar por rango (>= inicio del período, < inicio del siguiente).
+    const anioNum = parseInt(anio);
+    const mesNum = mes ? parseInt(mes) : null;
+    const mesInicio = mesNum || 1;
+    const inicio = `${anioNum}-${String(mesInicio).padStart(2, '0')}-01`;
+    const fin = mesNum
+      ? (mesNum === 12 ? `${anioNum + 1}-01-01` : `${anioNum}-${String(mesNum + 1).padStart(2, '0')}-01`)
+      : `${anioNum + 1}-01-01`;
+    where.fechaSalida = { [Op.gte]: inicio, [Op.lt]: fin };
   }
   if (q) {
-    where[Op.or] = [
-      { nombreRuta: { [Op.iLike]: `%${q}%` } },
-      { '$vehiculo.placa$': { [Op.iLike]: `%${q}%` } },
-      { '$conductor.usuario.nombre$': { [Op.iLike]: `%${q}%` } },
-      { '$conductor.usuario.apellido$': { [Op.iLike]: `%${q}%` } },
+    const trimmed = q.trim();
+    const conditions = [
+      { nombreRuta: { [Op.iLike]: `%${trimmed}%` } },
+      { '$vehiculo.placa$': { [Op.iLike]: `%${trimmed}%` } },
+      { '$conductor.usuario.nombre$': { [Op.iLike]: `%${trimmed}%` } },
+      { '$conductor.usuario.apellido$': { [Op.iLike]: `%${trimmed}%` } },
     ];
+    const partes = trimmed.split(/\s+/).filter(Boolean);
+    if (partes.length > 1) {
+      const primero = `%${partes[0]}%`;
+      const resto = `%${partes.slice(1).join(' ')}%`;
+      conditions.push({ [Op.and]: [{ '$conductor.usuario.nombre$': { [Op.iLike]: primero } }, { '$conductor.usuario.apellido$': { [Op.iLike]: resto } }] });
+      conditions.push({ [Op.and]: [{ '$conductor.usuario.apellido$': { [Op.iLike]: primero } }, { '$conductor.usuario.nombre$': { [Op.iLike]: resto } }] });
+    }
+    where[Op.or] = conditions;
   }
   return where;
 };
@@ -65,6 +82,23 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
     });
     const pendientesSet = new Set(pendientes.map(a => a.idRuta));
     data.forEach(r => { r.dataValues.pendienteLegalizacion = pendientesSet.has(r.idRuta); });
+  }
+
+  // pesoUsado: kg ya ocupados en cada ruta por ventas activas (no canceladas) — usado por
+  // el selector de ruta en Ventas para mostrar cuánta capacidad le queda a cada una.
+  const rutaIds = data.map(r => r.idRuta);
+  if (rutaIds.length > 0) {
+    const ventasConPeso = await EncomiendaVenta.findAll({
+      where: { idRuta: { [Op.in]: rutaIds }, estado: { [Op.ne]: 'Cancelada' } },
+      attributes: ['idRuta'],
+      include: [{ model: Paquete, as: 'paquetes', attributes: ['peso'] }],
+    });
+    const pesoPorRuta = {};
+    ventasConPeso.forEach(v => {
+      const suma = v.paquetes.reduce((s, p) => s + parseFloat(p.peso || 0), 0);
+      pesoPorRuta[v.idRuta] = (pesoPorRuta[v.idRuta] || 0) + suma;
+    });
+    data.forEach(r => { r.dataValues.pesoUsado = pesoPorRuta[r.idRuta] || 0; });
   }
 
   return { data, total: count };
@@ -111,10 +145,8 @@ const create = async (data) => {
   const conductor = await Conductor.findByPk(idConductor);
   if (!conductor) throw new AppError('Conductor no encontrado', 404);
 
-  if (conductor.vencimientoLicencia) {
-    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-    const venc = new Date(conductor.vencimientoLicencia); venc.setHours(0, 0, 0, 0);
-    if (venc < hoy) throw new AppError('El conductor tiene la licencia de conducción vencida y no puede ser asignado a una ruta', 400);
+  if (!tieneLicenciaVigente(conductor.categoriasLicencia)) {
+    throw new AppError('El conductor tiene la licencia de conducción vencida y no puede ser asignado a una ruta', 400);
   }
 
   const destino = await Destino.findByPk(idDestino);
@@ -141,6 +173,14 @@ const update = async (id, data) => {
   const ruta = await Ruta.findByPk(id);
   if (!ruta) throw new AppError('Ruta no encontrada', 404);
 
+  // Edición general solo permitida en Programada (nada comprometido aún) o
+  // Cancelada (se puede reprogramar libremente). "En Curso"/"Completada" ya
+  // tienen guías/anticipos/estados en cascada que dependen de estos datos —
+  // cambiarlos por fuera de updateEstado corrompería esa cadena.
+  if (!['Programada', 'Cancelada'].includes(ruta.estado)) {
+    throw new AppError(`No se puede editar una ruta en estado "${ruta.estado}". Solo se puede editar cuando está Programada o Cancelada.`, 400);
+  }
+
   if (idVehiculo !== undefined) {
     const vehiculoNuevo = await Vehiculo.findByPk(idVehiculo);
     if (!vehiculoNuevo) throw new AppError('Vehículo no encontrado', 404);
@@ -150,10 +190,8 @@ const update = async (id, data) => {
   if (idConductor !== undefined) {
     const conductorNuevo = await Conductor.findByPk(idConductor);
     if (!conductorNuevo) throw new AppError('Conductor no encontrado', 404);
-    if (conductorNuevo.vencimientoLicencia) {
-      const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-      const venc = new Date(conductorNuevo.vencimientoLicencia); venc.setHours(0, 0, 0, 0);
-      if (venc < hoy) throw new AppError('El conductor tiene la licencia de conducción vencida y no puede ser asignado a una ruta', 400);
+    if (!tieneLicenciaVigente(conductorNuevo.categoriasLicencia)) {
+      throw new AppError('El conductor tiene la licencia de conducción vencida y no puede ser asignado a una ruta', 400);
     }
   }
 
@@ -193,6 +231,10 @@ const updateEstado = async (id, estado) => {
 
   if (estado === 'Programada' && ruta.estado === 'En Curso') {
     throw new AppError('No se puede revertir el estado de una ruta en curso a Programada', 400);
+  }
+
+  if (estado === 'Cancelada' && ruta.estado === 'Programada') {
+    throw new AppError('No se puede cancelar una ruta que aún no ha iniciado. Edítala o inhabilítala en su lugar.', 400);
   }
 
   if (estado === 'En Curso') {
@@ -278,10 +320,18 @@ const updateEstado = async (id, estado) => {
       { estado: 'Programada' },
       { where: { idRuta: ruta.idRuta, habilitado: true, estado: { [Op.in]: ['Programada', 'En Tránsito'] } } }
     );
-    await AnticipoExcedente.update(
-      { estado: 'Excedente pendiente' },
-      { where: { idRuta: ruta.idRuta, habilitado: true, estado: { [Op.in]: ['Entregado', 'En Legalización'] } } }
-    );
+    // El excedente se calcula aquí (no solo se fuerza el estado) porque la ruta se
+    // cancela antes de que el conductor legalice: si se dejara en 0, "Confirmar
+    // devolución" quedaría bloqueado para siempre (exige excedente > 0) y esa plata
+    // entregada quedaría huérfana, sin forma de cerrarse en el sistema.
+    const anticiposActivos = await AnticipoExcedente.findAll({
+      where: { idRuta: ruta.idRuta, habilitado: true, estado: { [Op.in]: ['Entregado', 'En Legalización'] } }
+    });
+    for (const anticipo of anticiposActivos) {
+      anticipo.excedente = anticipo.valorAnticipo - anticipo.valorGastado;
+      anticipo.estado = 'Excedente pendiente';
+      await anticipo.save();
+    }
   }
 
   ruta.estado = estado;
@@ -289,36 +339,14 @@ const updateEstado = async (id, estado) => {
   return ruta;
 };
 
-const getEncomiendas = async (id) => {
-  const ruta = await Ruta.findByPk(id);
-  if (!ruta) throw new AppError('Ruta no encontrada', 404);
-
-  const encomiendas = await EncomiendaVenta.findAll({
-    where: { idRuta: id },
-    include: [{ model: Cliente, as: 'cliente' }]
-  });
-
-  return encomiendas;
-};
-
-const getAvailable = async ({ idDestino }) => {
-  const where = { habilitado: true };
-  if (idDestino) where.idDestino = idDestino;
-
-  const rutas = await Ruta.findAll({
-    where,
+const toggleHabilitado = async (id) => {
+  const ruta = await Ruta.findByPk(id, {
     include: [
       { model: Vehiculo, as: 'vehiculo' },
       { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
-      { model: Destino, as: 'destino' }
-    ]
+      { model: Destino, as: 'destino' },
+    ],
   });
-
-  return rutas;
-};
-
-const toggleHabilitado = async (id) => {
-  const ruta = await Ruta.findByPk(id);
   if (!ruta) throw new AppError('Ruta no encontrada', 404);
 
   if (ruta.habilitado === true) {
@@ -336,6 +364,14 @@ const toggleHabilitado = async (id) => {
   ruta.habilitado = !ruta.habilitado;
   await ruta.save();
   return ruta;
+};
+
+const getAniosDisponibles = async () => {
+  const rows = await sequelize.query(
+    'SELECT DISTINCT EXTRACT(YEAR FROM fecha_salida)::int AS anio FROM ruta ORDER BY anio DESC',
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  return rows.map((r) => r.anio);
 };
 
 const getPageOf = async (id, { limit = 10 } = {}) => {
@@ -368,8 +404,7 @@ module.exports = {
   create,
   update,
   updateEstado,
-  getEncomiendas,
-  getAvailable,
   toggleHabilitado,
   getPageOf,
+  getAniosDisponibles,
 };

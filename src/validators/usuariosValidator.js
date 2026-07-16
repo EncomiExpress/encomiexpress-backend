@@ -15,17 +15,12 @@ const updateValidation = [
   r.nombre.optional(),
   r.apellido.optional(),
   r.email.optional(),
+  r.password.optional(),
   body('idRol').optional().isInt().withMessage('ID de rol debe ser un número entero'),
   r.habilitado.optional(),
-];
-
-const changePasswordValidation = [
-  body('currentPassword').notEmpty().withMessage('Password actual es requerido'),
-  body('newPassword').isLength({ min: 6 }).withMessage('Nuevo password debe tener al menos 6 caracteres'),
 ];
 
 module.exports = {
   createValidation,
   updateValidation,
-  changePasswordValidation,
 };

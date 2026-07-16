@@ -3,7 +3,7 @@ const router = express.Router();
 const { validate } = require('../middlewares/validation');
 const propietarioController = require('../controllers/propietarioVehiculoController');
 const { authenticate, authorizePermission } = require('../middlewares/auth');
-const { createValidation } = require('../validators/propietariosValidator');
+const { createValidation, updateValidation } = require('../validators/propietariosValidator');
 
 router.use(authenticate);
 
@@ -102,7 +102,7 @@ router.post('/', authorizePermission('registrar_propietario'), createValidation,
  *       200:
  *         description: Propietario actualizado
  */
-router.put('/:id', authorizePermission('actualizar_propietario'), propietarioController.update);
+router.put('/:id', authorizePermission('actualizar_propietario'), updateValidation, validate, propietarioController.update);
 
 /**
  * @swagger

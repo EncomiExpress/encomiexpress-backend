@@ -12,18 +12,15 @@ const Conductor = sequelize.define('Conductor', {
     allowNull: false,
     unique: true
   },
-  categoriaLicencia: {
-    type: DataTypes.STRING(10),
-    allowNull: true
+  categoriasLicencia: {
+    type: DataTypes.JSONB,
+    allowNull: false,
+    defaultValue: []
   },
   numeroLicencia: {
     type: DataTypes.STRING(20),
     allowNull: true,
     unique: true
-  },
-  vencimientoLicencia: {
-    type: DataTypes.DATEONLY,
-    allowNull: true
   },
   estado: {
     type: DataTypes.STRING(30),

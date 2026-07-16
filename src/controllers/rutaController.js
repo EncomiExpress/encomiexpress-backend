@@ -54,10 +54,6 @@ exports.update = async (req, res) => {
   }
 };
 
-exports.remove = async (req, res) => {
-  res.status(405).json({ success: false, message: 'Método obsoleto. Use PATCH /rutas/:id/toggle-habilitado para inhabilitar/restaurar.' });
-};
-
 exports.updateEstado = async (req, res) => {
   try {
     const { id } = req.params;
@@ -72,26 +68,6 @@ exports.updateEstado = async (req, res) => {
   }
 };
 
-exports.getEncomiendas = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const encomiendas = await rutaService.getEncomiendas(id);
-    res.json({ success: true, data: encomiendas });
-  } catch (error) {
-    res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al obtener encomiendas' });
-  }
-};
-
-exports.getAvailable = async (req, res) => {
-  try {
-    const { idDestino } = req.query;
-    const rutas = await rutaService.getAvailable({ idDestino });
-    res.json({ success: true, data: rutas });
-  } catch (error) {
-    res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al obtener rutas disponibles' });
-  }
-};
-
 exports.toggleHabilitado = async (req, res) => {
   try {
     const { id } = req.params;
@@ -101,6 +77,15 @@ exports.toggleHabilitado = async (req, res) => {
     res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al cambiar estado de la ruta' });
   }
 };
+exports.getAniosDisponibles = async (req, res, next) => {
+  try {
+    const anios = await rutaService.getAniosDisponibles();
+    res.json({ success: true, data: anios });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.getPageOf = async (req, res, next) => {
   try {
     const { id } = req.params;

@@ -3,7 +3,7 @@ const router = express.Router();
 const { validate } = require('../middlewares/validation');
 const destinoController = require('../controllers/destinoController');
 const { authenticate, authorizePermission } = require('../middlewares/auth');
-const { createValidation } = require('../validators/destinosValidator');
+const { createValidation, updateValidation } = require('../validators/destinosValidator');
 
 router.use(authenticate);
 
@@ -101,7 +101,7 @@ router.post('/', authorizePermission('registrar_destino'), createValidation, val
  *       200:
  *         description: Destino actualizado
  */
-router.put('/:id', authorizePermission('actualizar_destino'), destinoController.update);
+router.put('/:id', authorizePermission('actualizar_destino'), updateValidation, validate, destinoController.update);
 
 /**
  * @swagger

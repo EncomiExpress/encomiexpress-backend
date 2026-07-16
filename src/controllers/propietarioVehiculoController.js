@@ -42,21 +42,6 @@ exports.update = async (req, res, next) => {
   }
 };
 
-exports.delete = async (req, res, next) => {
-  // Método obsoleto: use PATCH /propietarios/:id/toggle-habilitado
-  res.status(405).json({ success: false, message: 'Método obsoleto. Use PATCH /propietarios/:id/toggle-habilitado para inhabilitar/restaurar.' });
-};
-
-exports.getVehiculos = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const vehiculos = await propietarioService.getVehiculos(id);
-    res.json({ success: true, data: vehiculos });
-  } catch (error) {
-    next(error);
-  }
-};
-
 exports.getPageOf = async (req, res, next) => {
   try {
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);

@@ -43,11 +43,6 @@ exports.update = async (req, res, next) => {
   }
 };
 
-exports.delete = async (req, res, next) => {
-  // Método obsoleto: use PATCH /conductores/:id/toggle-habilitado
-  res.status(405).json({ success: false, message: 'Método obsoleto. Use PATCH /conductores/:id/toggle-habilitado para inhabilitar/restaurar.' });
-};
-
 exports.getAnticipos = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -67,6 +62,24 @@ exports.cambiarEstado = async (req, res, next) => {
       message: 'Estado del conductor actualizado correctamente',
       data: result
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getPerfil = async (req, res, next) => {
+  try {
+    const perfil = await conductorService.getMiPerfil(req.usuario.idUsuario, req.usuario.rol?.nombre);
+    res.json({ success: true, data: perfil });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.actualizarPerfil = async (req, res, next) => {
+  try {
+    await conductorService.actualizarMiPerfil(req.usuario.idUsuario, req.usuario.rol?.nombre, req.body);
+    res.json({ success: true, message: 'Perfil actualizado exitosamente' });
   } catch (error) {
     next(error);
   }

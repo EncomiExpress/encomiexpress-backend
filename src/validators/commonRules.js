@@ -1,6 +1,12 @@
 const { body } = require('express-validator');
 
+// Debe coincidir con PASSWORD_REGEX en encomiexpress-frontend/src/features/auth/Register.jsx
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^a-zA-Z0-9\s]).{8,64}$/;
+const PASSWORD_MESSAGE = 'La contraseña debe tener 8-64 caracteres, con mayúsculas, minúsculas, números y un carácter especial';
+
 module.exports = {
+  PASSWORD_REGEX,
+  PASSWORD_MESSAGE,
   tipoIdentificacion: {
     required: () => body('tipoIdentificacion').notEmpty().withMessage('Tipo de identificación es requerido'),
     optional: () => body('tipoIdentificacion').optional().notEmpty().withMessage('Tipo de identificación no puede estar vacío'),
@@ -30,8 +36,8 @@ module.exports = {
     optional: () => body('email').optional().isEmail().withMessage('Email inválido'),
   },
   password: {
-    required: () => body('password').isLength({ min: 6 }).withMessage('Password debe tener al menos 6 caracteres'),
-    optional: () => body('password').optional().isLength({ min: 6 }).withMessage('Password debe tener al menos 6 caracteres'),
+    required: () => body('password').matches(PASSWORD_REGEX).withMessage(PASSWORD_MESSAGE),
+    optional: () => body('password').optional().matches(PASSWORD_REGEX).withMessage(PASSWORD_MESSAGE),
   },
   habilitado: {
     optional: () => body('habilitado').optional().isBoolean().withMessage('El campo habilitado debe ser booleano'),

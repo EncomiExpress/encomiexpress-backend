@@ -1,6 +1,7 @@
-const { AnticipoExcedente, Conductor, Ruta, Vehiculo, Destino, Usuario } = require('../models');
+const { AnticipoExcedente, Conductor, Ruta, Vehiculo, Destino, Usuario, sequelize } = require('../models');
 const AppError = require('../errors/appError');
 const { Op } = require('sequelize');
+const { tieneLicenciaVigente } = require('../utils/licenciaHelper');
 
 const buildOrder = (sortBy) => {
   if (!sortBy) return [];
@@ -11,30 +12,52 @@ const buildOrder = (sortBy) => {
     habilitado: 'habilitado',
   };
   const parts = sortBy.split('.');
-  const field = allowed[parts[0]] || 'idAnticipoExcedente';
   const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
+  if (parts[0] === 'conductor') {
+    return [[{ model: Conductor, as: 'conductor' }, { model: Usuario, as: 'usuario' }, 'nombre', direction]];
+  }
+  const field = allowed[parts[0]] || 'idAnticipoExcedente';
   return [[field, direction]];
 };
 
-const getAll = async ({ idConductor, idRuta, estado, habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
+const getAll = async ({ idConductor, idRuta, estado, habilitado, anio, mes, q, page = 1, limit = 10, sortBy } = {}) => {
   try {
     const where = {};
     if (idConductor) where.idConductor = idConductor;
     if (idRuta) where.idRuta = parseInt(idRuta);
     if (estado) where.estado = estado;
     if (habilitado !== undefined) where.habilitado = habilitado === 'true';
+    if (anio) {
+      // fecha_entrega es tipo DATE en Postgres — se filtra por rango, no por LIKE.
+      const anioNum = parseInt(anio);
+      const mesNum = mes ? parseInt(mes) : null;
+      const mesInicio = mesNum || 1;
+      const inicio = `${anioNum}-${String(mesInicio).padStart(2, '0')}-01`;
+      const fin = mesNum
+        ? (mesNum === 12 ? `${anioNum + 1}-01-01` : `${anioNum}-${String(mesNum + 1).padStart(2, '0')}-01`)
+        : `${anioNum + 1}-01-01`;
+      where.fechaEntrega = { [Op.gte]: inicio, [Op.lt]: fin };
+    }
     if (q) {
-      const query = `%${q.trim()}%`;
+      const trimmed = q.trim();
+      const query = `%${trimmed}%`;
       const numericId = Number(q);
       const conditions = [
         { estado: { [Op.iLike]: query } },
         { soporte: { [Op.iLike]: query } },
         { '$conductor.usuario.nombre$': { [Op.iLike]: query } },
         { '$conductor.usuario.apellido$': { [Op.iLike]: query } },
-        { '$ruta.nombreRuta$': { [Op.iLike]: query } },
+        { '$ruta.nombre_ruta$': { [Op.iLike]: query } },
       ];
       if (!Number.isNaN(numericId)) {
         conditions.unshift({ idAnticipoExcedente: numericId });
+      }
+      const partes = trimmed.split(/\s+/).filter(Boolean);
+      if (partes.length > 1) {
+        const primero = `%${partes[0]}%`;
+        const resto = `%${partes.slice(1).join(' ')}%`;
+        conditions.push({ [Op.and]: [{ '$conductor.usuario.nombre$': { [Op.iLike]: primero } }, { '$conductor.usuario.apellido$': { [Op.iLike]: resto } }] });
+        conditions.push({ [Op.and]: [{ '$conductor.usuario.apellido$': { [Op.iLike]: primero } }, { '$conductor.usuario.nombre$': { [Op.iLike]: resto } }] });
       }
       where[Op.or] = conditions;
     }
@@ -100,10 +123,8 @@ const create = async (data) => {
     throw new AppError('Conductor no encontrado', 404);
   }
 
-  if (conductor.vencimientoLicencia) {
-    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
-    const venc = new Date(conductor.vencimientoLicencia); venc.setHours(0, 0, 0, 0);
-    if (venc < hoy) throw new AppError('El conductor tiene la licencia de conducción vencida y no puede recibir anticipos', 400);
+  if (!tieneLicenciaVigente(conductor.categoriasLicencia)) {
+    throw new AppError('El conductor tiene la licencia de conducción vencida y no puede recibir anticipos', 400);
   }
 
   let idRutaFinal = idRuta;
@@ -142,10 +163,16 @@ const create = async (data) => {
   return getAnticipoCompleto(anticipo.idAnticipoExcedente);
 };
 
+// Qué se puede tocar en cada estado (ver CLAUDE.md, "Edición de Anticipos"):
+//   Entregado                      → ruta/conductor/valorAnticipo/fechaEntrega (valorGastado no)
+//   En Legalización                → solo valorGastado (obligatorio)
+//   Excedente pendiente/Completado → nada (avanza con "Confirmar devolución", ver entregarExcedente)
 const update = async (id, data) => {
   const {
+    idConductor,
+    idRuta,
+    valorAnticipo,
     valorGastado,
-    excedente,
     estado,
     soporte,
     fechaEntrega,
@@ -159,6 +186,53 @@ const update = async (id, data) => {
     throw new AppError('Anticipo no encontrado', 404);
   }
 
+  if (['Excedente pendiente', 'Completado'].includes(anticipo.estado)) {
+    throw new AppError(`No se puede editar un anticipo en estado "${anticipo.estado}".`, 400);
+  }
+
+  const enLegalizacion = anticipo.estado === 'En Legalización';
+
+  if (enLegalizacion) {
+    if (idRuta !== undefined || idConductor !== undefined || valorAnticipo !== undefined || fechaEntrega !== undefined) {
+      throw new AppError('La ruta, el conductor, el valor del anticipo y la fecha de entrega ya no se pueden modificar: la ruta ya está en curso.', 400);
+    }
+    if (valorGastado === undefined) {
+      throw new AppError('Debes registrar el valor gastado para legalizar este anticipo.', 400);
+    }
+  } else if (valorGastado !== undefined) {
+    // anticipo.estado === 'Entregado': la ruta todavía no arrancó, así que
+    // todavía no hay nada que legalizar.
+    throw new AppError('No se puede registrar el valor gastado antes de que la ruta esté en curso.', 400);
+  }
+
+  let idRutaFinal;
+  let idConductorFinal;
+  if (idRuta !== undefined) {
+    const ruta = await Ruta.findByPk(idRuta);
+    if (!ruta) {
+      throw new AppError('Ruta no encontrada', 404);
+    }
+    const anticipoExistente = await AnticipoExcedente.findOne({
+      where: {
+        idRuta: parseInt(idRuta),
+        habilitado: true,
+        estado: { [Op.in]: ['Entregado', 'En Legalización'] },
+        idAnticipoExcedente: { [Op.ne]: id },
+      }
+    });
+    if (anticipoExistente) {
+      throw new AppError('Esta ruta ya tiene un anticipo activo. Solo puede existir un anticipo por ruta a la vez.', 409);
+    }
+    // El conductor del anticipo siempre sigue al de la ruta — no se selecciona
+    // aparte, para que nunca queden desincronizados.
+    const conductorDeRuta = await Conductor.findByPk(ruta.idConductor);
+    if (conductorDeRuta && !tieneLicenciaVigente(conductorDeRuta.categoriasLicencia)) {
+      throw new AppError('El conductor de esta ruta tiene la licencia de conducción vencida y no puede recibir anticipos', 400);
+    }
+    idRutaFinal = ruta.idRuta;
+    idConductorFinal = ruta.idConductor;
+  }
+
   const cleanDate = (value) => {
     if (value === undefined) return undefined;
     if (value === null || value === '' || value === 'Invalid date') return null;
@@ -168,9 +242,14 @@ const update = async (id, data) => {
   // Si se provee valorGastado, el estado y excedente se calculan automáticamente
   let autoEstado;
   let autoFechaLegalizacion;
-  let newExcedente = excedente;
+  let newExcedente;
 
   if (valorGastado !== undefined) {
+    // El gasto nunca puede superar lo entregado — así el excedente nunca es
+    // negativo y no hace falta un flujo aparte para "faltantes".
+    if (parseFloat(valorGastado) > parseFloat(anticipo.valorAnticipo)) {
+      throw new AppError('El valor gastado no puede ser mayor al valor del anticipo entregado', 400);
+    }
     newExcedente = parseFloat(anticipo.valorAnticipo) - parseFloat(valorGastado);
     autoEstado = newExcedente > 0 ? 'Excedente pendiente' : 'Completado';
     autoFechaLegalizacion = new Date();
@@ -181,6 +260,9 @@ const update = async (id, data) => {
   const cleanedFechaEntregaExcedente = cleanDate(fechaEntregaExcedente);
 
   await anticipo.update({
+    idRuta: idRutaFinal !== undefined ? idRutaFinal : anticipo.idRuta,
+    idConductor: idConductorFinal !== undefined ? idConductorFinal : anticipo.idConductor,
+    valorAnticipo: valorAnticipo !== undefined ? valorAnticipo : anticipo.valorAnticipo,
     valorGastado: valorGastado !== undefined ? valorGastado : anticipo.valorGastado,
     excedente: newExcedente !== undefined ? newExcedente : anticipo.excedente,
     estado: autoEstado || estado || anticipo.estado,
@@ -317,15 +399,17 @@ const toggleHabilitado = async (id) => {
   anticipo.habilitado = !anticipo.habilitado;
   await anticipo.save();
 
+  const anticipoCompleto = await getAnticipoCompleto(id);
+
   try {
     const app = require('../app');
     const io = app.get('io');
-    if (io) io.emit('anticipo_updated', anticipo);
+    if (io) io.emit('anticipo_updated', anticipoCompleto);
   } catch (e) {
     // no bloquear por fallos al emitir eventos
   }
 
-  return getAnticipoCompleto(id);
+  return anticipoCompleto;
 };
 
 const getPageOf = async (id, { limit = 10 } = {}) => {
@@ -345,6 +429,14 @@ const getPageOf = async (id, { limit = 10 } = {}) => {
   return { page, row };
 };
 
+const getAniosDisponibles = async () => {
+  const rows = await sequelize.query(
+    'SELECT DISTINCT EXTRACT(YEAR FROM fecha_entrega)::int AS anio FROM anticipo_excedente WHERE fecha_entrega IS NOT NULL ORDER BY anio DESC',
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  return rows.map((r) => r.anio);
+};
+
 module.exports = {
   getAll,
   getById,
@@ -356,4 +448,5 @@ module.exports = {
   cambiarEstado,
   toggleHabilitado,
   getPageOf,
+  getAniosDisponibles,
 };

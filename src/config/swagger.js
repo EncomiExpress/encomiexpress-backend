@@ -31,7 +31,7 @@ const options = {
           required: ['email', 'password'],
           properties: {
             email:    { type: 'string', format: 'email', example: 'admin@encomiexpress.com' },
-            password: { type: 'string', example: 'admin123' },
+            password: { type: 'string', example: 'TuContraseña123!' },
           },
         },
         LoginResponse: {
@@ -94,9 +94,8 @@ const options = {
             telefono:             { type: 'string', example: '3109876543' },
             email:                { type: 'string', format: 'email' },
             password:             { type: 'string' },
-            categoriaLicencia:    { type: 'string', example: 'C2' },
+            categoriasLicencia:   { type: 'array', items: { type: 'object', properties: { categoria: { type: 'string', example: 'C2' }, vencimiento: { type: 'string', format: 'date', example: '2027-12-31' } } } },
             numeroLicencia:       { type: 'string', example: '12345678' },
-            vencimientoLicencia:  { type: 'string', format: 'date', example: '2027-12-31' },
           },
         },
         // ── Cliente ──────────────────────────────────────────────────────────

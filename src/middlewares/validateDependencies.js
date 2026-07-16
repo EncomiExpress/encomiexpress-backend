@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { Ruta, EncomiendaVenta, Vehiculo, Conductor, PropietarioVehiculo, Destino, AnticipoExcedente, Usuario } = require('../models');
+const { Ruta, EncomiendaVenta, Vehiculo, Destino, AnticipoExcedente } = require('../models');
 
 // ─── Funciones detalladas (devuelven { bloqueado, dependencias[] }) ────────────
 
@@ -132,11 +132,6 @@ const tieneRutasActivas = async (conductorId) => {
   return count > 0;
 };
 
-const tieneVehiculosActivos = async (conductorId) => {
-  const count = await Vehiculo.count({ where: { idConductor: conductorId, habilitado: true } });
-  return count > 0;
-};
-
 const tieneAnticiposPendientes = async (conductorId) => {
   const count = await AnticipoExcedente.count({ where: { idConductor: conductorId, estado: { [Op.in]: ['Entregado', 'En Legalización', 'Excedente pendiente'] }, habilitado: true } });
   return count > 0;
@@ -176,7 +171,6 @@ module.exports = {
   verificarDependenciasRuta,
   verificarDependenciasAnticipo,
   tieneRutasActivas,
-  tieneVehiculosActivos,
   tieneAnticiposPendientes,
   tieneRutasActivasPorVehiculo,
   tieneVehiculosActivosPorPropietario,

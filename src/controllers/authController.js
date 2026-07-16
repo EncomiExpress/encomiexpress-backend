@@ -65,10 +65,9 @@ const getConductorProfile = async (req, res, next) => {
 const recuperarPassword = async (req, res, next) => {
   try {
     const { email } = req.body;
-    const { tempPassword } = await authService.recuperarPassword(email);
-    const { sendPasswordRecoveryEmail } = require('../config/email');
-    await sendPasswordRecoveryEmail(email, tempPassword);
-    res.json({ success: true, message: 'Se ha enviado una contraseña temporal a tu email' });
+    await authService.recuperarPassword(email);
+    // Mismo mensaje exista o no el correo — ver nota en authService.recuperarPassword.
+    res.json({ success: true, message: 'Si el correo está registrado, recibirás una contraseña temporal en tu email' });
   } catch (error) {
     next(error);
   }

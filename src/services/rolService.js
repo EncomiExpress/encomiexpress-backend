@@ -28,7 +28,7 @@ const getAll = async ({ habilitado, q, page = 1, limit = 50, sortBy } = {}) => {
     include: [{ model: Permiso, as: 'permisos', through: { attributes: [] } }],
     limit: Number(limit),
     offset,
-    order: order.length > 0 ? order : [['idRol', 'ASC']],
+    order: order.length > 0 ? order : [['idRol', 'DESC']],
     distinct: true,
   });
   const data = rows.map(rol => ({
@@ -165,9 +165,11 @@ const toggleHabilitado = async (id, idRolActual, idUsuarioActual) => {
   await rol.update({ habilitado: !rol.habilitado });
 
   if (inhabilitando) {
+    // El admin id=1 nunca se inhabilita, ni siquiera en cascada al inhabilitar su rol
+    // (misma garantía que usuarioService.toggleHabilitado aplica al inhabilitar de uno en uno).
     await Usuario.update(
       { habilitado: false },
-      { where: { idRol: id, idUsuario: { [Op.ne]: idUsuarioActual } } }
+      { where: { idRol: id, idUsuario: { [Op.notIn]: [idUsuarioActual, 1] } } }
     );
   } else {
     // Al habilitar el rol, re-habilitar todos los usuarios de ese rol

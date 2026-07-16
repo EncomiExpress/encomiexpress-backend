@@ -3,8 +3,8 @@ const router = express.Router();
 const authController = require('../controllers/authController');
 const { authenticate } = require('../middlewares/auth');
 const { validate } = require('../middlewares/validation');
-const { loginValidation, registerValidation, recoverPasswordValidation } = require('../validators/authValidator');
-const { authLimiter } = require('../middlewares/rateLimiter');
+const { loginValidation, registerValidation, recoverPasswordValidation, cambiarPasswordValidation } = require('../validators/authValidator');
+const { authLimiter, loginLimiter } = require('../middlewares/rateLimiter');
 
 /**
  * @swagger
@@ -40,7 +40,7 @@ const { authLimiter } = require('../middlewares/rateLimiter');
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.post('/login', authLimiter, loginValidation, validate, authController.login);
+router.post('/login', loginLimiter, loginValidation, validate, authController.login);
 
 /**
  * @swagger
@@ -123,13 +123,10 @@ router.post('/refresh', authLimiter, authController.refresh);
  *                 format: email
  *     responses:
  *       200:
- *         description: Contraseña temporal generada (requiere SMTP configurado)
- *       404:
- *         description: No existe usuario con ese email
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
+ *         description: >
+ *           Mismo mensaje exista o no el correo (evita revelar qué correos están
+ *           registrados). Si existe, se manda una contraseña temporal por email
+ *           — requiere SMTP configurado (EMAIL_HOST/EMAIL_USER/EMAIL_PASS).
  */
 router.post('/recuperar-password', authLimiter, recoverPasswordValidation, validate, authController.recuperarPassword);
 
@@ -161,7 +158,7 @@ router.post('/recuperar-password', authLimiter, recoverPasswordValidation, valid
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.post('/cambiar-password', authenticate, authLimiter, authController.cambiarPassword);
+router.post('/cambiar-password', authenticate, authLimiter, cambiarPasswordValidation, validate, authController.cambiarPassword);
 
 /**
  * @swagger

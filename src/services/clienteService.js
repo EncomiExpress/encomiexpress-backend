@@ -14,7 +14,7 @@ const buildOrder = (sortBy) => {
     habilitado: 'habilitado',
   };
   const parts = sortBy.split('.');
-  const field = allowedFields[parts[0]] || 'nombre';
+  const field = allowedFields[parts[0]] || 'idCliente';
   const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
   return [[field, direction]];
 };
@@ -23,18 +23,30 @@ const getAll = async ({ habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
   const where = {};
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
   if (q) {
-    const query = `%${q.trim()}%`;
+    const trimmed = q.trim();
+    const query = `%${trimmed}%`;
     const numericId = Number(q);
     const conditions = [
       { nombre: { [Op.iLike]: query } },
       { apellido: { [Op.iLike]: query } },
       { email: { [Op.iLike]: query } },
+      { telefono: { [Op.iLike]: query } },
       { direccion: { [Op.iLike]: query } },
       { tipoIdentificacion: { [Op.iLike]: query } },
       { numeroIdentificacion: { [Op.iLike]: query } },
     ];
     if (!Number.isNaN(numericId)) {
       conditions.unshift({ idCliente: numericId });
+    }
+    // "Maria Garcia" no coincide con nombre NI apellido por separado — se
+    // prueban las dos combinaciones para que el nombre completo también
+    // encuentre resultado.
+    const partes = trimmed.split(/\s+/).filter(Boolean);
+    if (partes.length > 1) {
+      const primero = `%${partes[0]}%`;
+      const resto = `%${partes.slice(1).join(' ')}%`;
+      conditions.push({ [Op.and]: [{ nombre: { [Op.iLike]: primero } }, { apellido: { [Op.iLike]: resto } }] });
+      conditions.push({ [Op.and]: [{ apellido: { [Op.iLike]: primero } }, { nombre: { [Op.iLike]: resto } }] });
     }
     where[Op.or] = conditions;
   }
@@ -45,7 +57,7 @@ const getAll = async ({ habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
     where,
     limit,
     offset,
-    order: order.length > 0 ? order : [['nombre', 'ASC']],
+    order: order.length > 0 ? order : [['idCliente', 'DESC']],
     distinct: true,
   });
   return { data, total: count };

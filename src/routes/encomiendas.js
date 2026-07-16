@@ -7,8 +7,7 @@ const {
   createValidation,
   updateValidation,
   cambiarEstadoValidation,
-  agregarPaqueteValidation,
-  agregarDestinatarioValidation
+  cambiarEstadoPagoValidation,
 } = require('../validators/encomiendasValidator');
 
 /**
@@ -75,29 +74,6 @@ router.get('/:id/page-of', encomiendaVentaController.getPageOf);
  *         description: Lista paginada de encomiendas
  */
 router.get('/', encomiendaVentaController.getAll);
-
-/**
- * @swagger
- * /encomiendas/guia/{numeroGuia}:
- *   get:
- *     summary: Buscar encomienda por número de guía
- *     tags: [Encomiendas]
- *     parameters:
- *       - in: path
- *         name: numeroGuia
- *         required: true
- *         schema: { type: string }
- *     responses:
- *       200:
- *         description: Encomienda encontrada
- *       404:
- *         description: Guía no encontrada
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
-router.get('/guia/:numeroGuia', encomiendaVentaController.getByGuia);
 
 /**
  * @swagger
@@ -193,6 +169,34 @@ router.patch('/:id/estado', cambiarEstadoValidation, validate, encomiendaVentaCo
 
 /**
  * @swagger
+ * /encomiendas/{id}/estado-pago:
+ *   patch:
+ *     summary: Confirmar/cambiar el estado de pago de la encomienda (independiente del estado de envío)
+ *     tags: [Encomiendas]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [estadoPago]
+ *             properties:
+ *               estadoPago:
+ *                 type: string
+ *                 enum: [Pendiente, Pagado]
+ *     responses:
+ *       200:
+ *         description: Estado de pago actualizado
+ */
+router.patch('/:id/estado-pago', cambiarEstadoPagoValidation, validate, encomiendaVentaController.cambiarEstadoPago);
+
+/**
+ * @swagger
  * /encomiendas/{id}/toggle-habilitado:
  *   patch:
  *     summary: Habilitar o inhabilitar encomienda
@@ -207,61 +211,5 @@ router.patch('/:id/estado', cambiarEstadoValidation, validate, encomiendaVentaCo
  *         description: Estado cambiado correctamente
  */
 router.patch('/:id/toggle-habilitado', authorizePermission('inhabilitar_venta'), encomiendaVentaController.toggleHabilitado);
-
-/**
- * @swagger
- * /encomiendas/{idEncomiendaVenta}/paquetes:
- *   post:
- *     summary: Agregar paquete a una encomienda existente
- *     tags: [Encomiendas]
- *     parameters:
- *       - in: path
- *         name: idEncomiendaVenta
- *         required: true
- *         schema: { type: integer }
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [descripcion, peso]
- *             properties:
- *               descripcion: { type: string }
- *               peso:        { type: number, example: 2.5 }
- *               valorDeclarado: { type: number }
- *     responses:
- *       201:
- *         description: Paquete agregado
- */
-router.post('/:idEncomiendaVenta/paquetes', agregarPaqueteValidation, validate, encomiendaVentaController.agregarPaquete);
-
-/**
- * @swagger
- * /encomiendas/{idEncomiendaVenta}/destinatario:
- *   post:
- *     summary: Agregar destinatario a una encomienda
- *     tags: [Encomiendas]
- *     parameters:
- *       - in: path
- *         name: idEncomiendaVenta
- *         required: true
- *         schema: { type: integer }
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [nombre, telefono]
- *             properties:
- *               nombre:    { type: string }
- *               telefono:  { type: string }
- *               direccion: { type: string }
- *     responses:
- *       201:
- *         description: Destinatario registrado
- */
-router.post('/:idEncomiendaVenta/destinatario', agregarDestinatarioValidation, validate, encomiendaVentaController.agregarDestinatario);
 
 module.exports = router;
