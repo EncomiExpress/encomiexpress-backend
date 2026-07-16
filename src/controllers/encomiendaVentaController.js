@@ -10,8 +10,6 @@ exports.getAll = async (req, res, next) => {
       estado: req.query.estado,
       idCliente: req.query.idCliente,
       idRuta: req.query.idRuta,
-      fechaInicio: req.query.fechaInicio,
-      fechaFin: req.query.fechaFin,
       habilitado: req.query.habilitado,
       estadoPago: req.query.estadoPago,
       metodoPago: req.query.metodoPago,
@@ -31,16 +29,6 @@ exports.getById = async (req, res, next) => {
   try {
     const { id } = req.params;
     const encomienda = await encomiendaService.getById(id);
-    res.json({ success: true, data: encomienda });
-  } catch (error) {
-    next(error);
-  }
-};
-
-exports.getByGuia = async (req, res, next) => {
-  try {
-    const { numeroGuia } = req.params;
-    const encomienda = await encomiendaService.getByGuia(numeroGuia);
     res.json({ success: true, data: encomienda });
   } catch (error) {
     next(error);
@@ -86,11 +74,11 @@ exports.cambiarEstado = async (req, res, next) => {
   }
 };
 
-exports.agregarPaquete = async (req, res, next) => {
+exports.cambiarEstadoPago = async (req, res, next) => {
   try {
-    const { idEncomiendaVenta } = req.params;
-    const paquete = await encomiendaService.agregarPaquete(idEncomiendaVenta, req.body);
-    res.status(201).json({ success: true, message: 'Paquete agregado exitosamente', data: paquete });
+    const { id } = req.params;
+    const encomienda = await encomiendaService.cambiarEstadoPago(id, req.body.estadoPago);
+    res.json({ success: true, message: 'Estado de pago actualizado exitosamente', data: encomienda });
   } catch (error) {
     next(error);
   }
@@ -105,16 +93,6 @@ exports.toggleHabilitado = async (req, res, next) => {
       message: `Encomienda ${encomienda.habilitado ? 'habilitada' : 'inhabilitada'} exitosamente`,
       data: encomienda
     });
-  } catch (error) {
-    next(error);
-  }
-};
-
-exports.agregarDestinatario = async (req, res, next) => {
-  try {
-    const { idEncomiendaVenta } = req.params;
-    const destinatario = await encomiendaService.agregarDestinatario(idEncomiendaVenta, req.body);
-    res.status(201).json({ success: true, message: 'Destinatario agregado exitosamente', data: destinatario });
   } catch (error) {
     next(error);
   }

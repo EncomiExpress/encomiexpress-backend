@@ -3,7 +3,7 @@ const router = express.Router();
 const { validate } = require('../middlewares/validation');
 const usuarioController = require('../controllers/usuarioController');
 const { authenticate, authorizePermission } = require('../middlewares/auth');
-const { createValidation, updateValidation, changePasswordValidation } = require('../validators/usuariosValidator');
+const { createValidation, updateValidation } = require('../validators/usuariosValidator');
 
 router.use(authenticate);
 
@@ -175,38 +175,5 @@ router.patch('/:id/toggle-habilitado', authorizePermission('inhabilitar_usuario'
  *               $ref: '#/components/schemas/Error'
  */
 router.patch('/:id/ignorar-registro', authorizePermission('inhabilitar_usuario'), usuarioController.ignorarRegistro);
-
-/**
- * @swagger
- * /usuarios/{id}/change-password:
- *   post:
- *     summary: Cambiar contraseña de un usuario específico
- *     tags: [Usuarios]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema: { type: integer }
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [currentPassword, newPassword]
- *             properties:
- *               currentPassword: { type: string }
- *               newPassword:     { type: string }
- *     responses:
- *       200:
- *         description: Contraseña actualizada
- *       400:
- *         description: Contraseña actual incorrecta
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
-router.post('/:id/change-password', authorizePermission('actualizar_usuario'), changePasswordValidation, validate, usuarioController.changePassword);
 
 module.exports = router;

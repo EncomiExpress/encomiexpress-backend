@@ -11,9 +11,10 @@ const createValidation = [
   r.telefono.optional(),
   r.email.required(),
   r.password.required(),
-  body('categoriaLicencia').optional().notEmpty().withMessage('Categoría de licencia es requerida'),
   body('numeroLicencia').optional().notEmpty().withMessage('Número de licencia es requerido'),
-  body('vencimientoLicencia').optional().isDate().withMessage('Fecha de vencimiento inválida'),
+  body('categoriasLicencia').isArray({ min: 1 }).withMessage('Debe registrar al menos una categoría de licencia'),
+  body('categoriasLicencia.*.categoria').notEmpty().withMessage('La categoría es obligatoria'),
+  body('categoriasLicencia.*.vencimiento').isDate().withMessage('Fecha de vencimiento inválida'),
 ];
 
 const updateValidation = [
@@ -21,9 +22,11 @@ const updateValidation = [
   r.apellido.optional(),
   r.telefono.optional(),
   r.email.optional(),
-  body('categoriaLicencia').optional(),
+  r.password.optional(),
   body('numeroLicencia').optional(),
-  body('vencimientoLicencia').optional().isDate().withMessage('Fecha de vencimiento inválida'),
+  body('categoriasLicencia').optional().isArray({ min: 1 }).withMessage('Debe registrar al menos una categoría de licencia'),
+  body('categoriasLicencia.*.categoria').notEmpty().withMessage('La categoría es obligatoria'),
+  body('categoriasLicencia.*.vencimiento').isDate().withMessage('Fecha de vencimiento inválida'),
 ];
 
 const cambiarEstadoValidation = [

@@ -1,4 +1,5 @@
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { Usuario, Rol, Permiso, Conductor } = require('../models');
 const { generateToken, generateRefreshToken, verifyRefreshToken } = require('../middlewares/auth');
 const AppError = require('../errors/appError');
@@ -17,8 +18,10 @@ const login = async (email, password) => {
     }]
   });
 
+  // Mensaje genérico a propósito: no revela si el correo existe o no (evita
+  // enumeración de correos registrados vía este endpoint público).
   if (!usuario) {
-    throw new AppError('El correo electrónico no está registrado', 401);
+    throw new AppError('Correo o contraseña incorrectos', 401);
   }
 
   if (!usuario.habilitado) {
@@ -31,7 +34,7 @@ const login = async (email, password) => {
 
   const isPasswordValid = await bcrypt.compare(password, usuario.password);
   if (!isPasswordValid) {
-    throw new AppError('La contraseña es incorrecta', 401);
+    throw new AppError('Correo o contraseña incorrectos', 401);
   }
 
   const permisos = usuario.rol?.permisos?.map(p => p.nombre) ?? [];
@@ -58,9 +61,8 @@ const login = async (email, password) => {
     if (conductor) {
       conductorData = {
         idConductor: conductor.idConductor,
-        categoriaLicencia: conductor.categoriaLicencia,
+        categoriasLicencia: conductor.categoriasLicencia,
         numeroLicencia: conductor.numeroLicencia,
-        vencimientoLicencia: conductor.vencimientoLicencia,
         estado: conductor.estado,
         habilitado: conductor.habilitado
       };
@@ -218,9 +220,8 @@ const getConductorProfile = async (idUsuario, rolNombre) => {
     tipoIdentificacion: conductor.usuario.tipoIdentificacion,
     numeroIdentificacion: conductor.usuario.numeroIdentificacion,
     idConductor: conductor.idConductor,
-    categoriaLicencia: conductor.categoriaLicencia,
+    categoriasLicencia: conductor.categoriasLicencia,
     numeroLicencia: conductor.numeroLicencia,
-    vencimientoLicencia: conductor.vencimientoLicencia,
     estado: conductor.estado,
     habilitado: conductor.habilitado,
     rol: conductor.usuario.rol?.nombre
@@ -234,16 +235,25 @@ const recuperarPassword = async (email) => {
 
   const usuario = await Usuario.findOne({ where: { email } });
 
+  // No revelamos si el email existe o no en el sistema (evita que alguien use
+  // este endpoint público para averiguar qué correos están registrados).
+  // Si no existe, simplemente no hacemos nada más — la respuesta al cliente
+  // es la misma en ambos casos.
   if (!usuario) {
-    throw new AppError('No existe usuario con ese email', 404);
+    return;
   }
 
-  const tempPassword = Math.random().toString(36).slice(-8);
+  // Aleatoriedad criptográficamente segura (Math.random no lo es).
+  const tempPassword = crypto.randomBytes(6).toString('hex');
+
+  // El correo se manda ANTES de tocar la contraseña real. Si el envío falla
+  // (ej. credenciales SMTP mal configuradas), la cuenta se queda intacta en
+  // vez de quedar con una contraseña nueva que nadie llegó a recibir.
+  const { sendPasswordRecoveryEmail } = require('../config/email');
+  await sendPasswordRecoveryEmail(email, tempPassword);
+
   const hashedPassword = await bcrypt.hash(tempPassword, 10);
-
   await usuario.update({ password: hashedPassword });
-
-  return { tempPassword };
 };
 
 const cambiarPassword = async (email, passwordActual, passwordNueva) => {

@@ -1,4 +1,4 @@
-const { Vehiculo, PropietarioVehiculo, Ruta, Conductor, Usuario, Destino } = require('../models');
+const { Vehiculo, PropietarioVehiculo } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { verificarDependenciasVehiculo } = require('../middlewares/validateDependencies');
@@ -12,14 +12,15 @@ const buildOrder = (sortBy) => {
   return [[field, direction]];
 };
 
-const getAll = async ({ estado, tipo, habilitado, q, idConductor, idPropietario, page = 1, limit = 10, sortBy } = {}) => {
+const getAll = async ({ estado, tipo, habilitado, q, idPropietario, page = 1, limit = 10, sortBy } = {}) => {
   const where = {};
   if (estado) where.estado = estado;
   if (tipo) where.tipo = tipo;
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
   if (idPropietario) where.idPropietario = parseInt(idPropietario);
   if (q) {
-    const query = `%${q.trim()}%`;
+    const trimmed = q.trim();
+    const query = `%${trimmed}%`;
     const numericId = Number(q);
     const conditions = [
       { placa: { [Op.iLike]: query } },
@@ -27,9 +28,20 @@ const getAll = async ({ estado, tipo, habilitado, q, idConductor, idPropietario,
       { modelo: { [Op.iLike]: query } },
       { tipo: { [Op.iLike]: query } },
       { '$propietario.nombre$': { [Op.iLike]: query } },
+      { '$propietario.apellido$': { [Op.iLike]: query } },
     ];
     if (!Number.isNaN(numericId)) {
       conditions.unshift({ idVehiculo: numericId });
+    }
+    // "Carlos Rodríguez" no coincide con nombre NI apellido por separado —
+    // se prueban las dos combinaciones (nombre+apellido y al revés) para que
+    // el nombre completo del propietario también encuentre resultado.
+    const partes = trimmed.split(/\s+/).filter(Boolean);
+    if (partes.length > 1) {
+      const primero = `%${partes[0]}%`;
+      const resto = `%${partes.slice(1).join(' ')}%`;
+      conditions.push({ [Op.and]: [{ '$propietario.nombre$': { [Op.iLike]: primero } }, { '$propietario.apellido$': { [Op.iLike]: resto } }] });
+      conditions.push({ [Op.and]: [{ '$propietario.apellido$': { [Op.iLike]: primero } }, { '$propietario.nombre$': { [Op.iLike]: resto } }] });
     }
     where[Op.or] = conditions;
   }
@@ -45,7 +57,7 @@ const getAll = async ({ estado, tipo, habilitado, q, idConductor, idPropietario,
     include,
     limit,
     offset,
-    order: order.length > 0 ? order : [['idVehiculo', 'ASC']],
+    order: order.length > 0 ? order : [['idVehiculo', 'DESC']],
     distinct: true,
   });
 
@@ -179,22 +191,6 @@ const update = async (id, data) => {
 };
 
 
-const getRutas = async (id) => {
-  const vehiculo = await Vehiculo.findByPk(id);
-  if (!vehiculo) {
-    throw new AppError('Vehículo no encontrado', 404);
-  }
-
-  const rutas = await Ruta.findAll({
-    where: { idVehiculo: id },
-    include: [
-      { model: Conductor, as: 'conductor' },
-      { model: Destino, as: 'destino' }
-    ]
-  });
-
-  return rutas;
-};
 
 const cambiarEstado = async (id, estado) => {
   const ESTADOS_VALIDOS = ['Disponible', 'Mantenimiento'];
@@ -229,7 +225,7 @@ const cambiarEstado = async (id, estado) => {
 };
 
 const toggleHabilitado = async (id) => {
-  const vehiculo = await Vehiculo.findByPk(id);
+  const vehiculo = await Vehiculo.findByPk(id, { include: [{ model: PropietarioVehiculo, as: 'propietario' }] });
   if (!vehiculo) throw new AppError('Vehículo no encontrado', 404);
   if (vehiculo.habilitado === true) {
     const { bloqueado, dependencias } = await verificarDependenciasVehiculo(id);
@@ -269,7 +265,6 @@ module.exports = {
   getById,
   create,
   update,
-  getRutas,
   cambiarEstado,
   toggleHabilitado,
   getPageOf,

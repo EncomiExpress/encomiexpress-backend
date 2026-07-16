@@ -6,8 +6,8 @@ exports.getAll = async (req, res, next) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const sortBy = req.query.sortBy;
-    const { idConductor, idRuta, estado, habilitado, q } = req.query;
-    const result = await anticipoService.getAll({ idConductor, idRuta, estado, habilitado, q, page, limit, sortBy });
+    const { idConductor, idRuta, estado, habilitado, anio, mes, q } = req.query;
+    const result = await anticipoService.getAll({ idConductor, idRuta, estado, habilitado, anio, mes, q, page, limit, sortBy });
     res.json({ success: true, data: result.data, total: result.total });
   } catch (error) {
     next(error);
@@ -58,17 +58,6 @@ exports.cambiarEstado = async (req, res, next) => {
   }
 };
 
-exports.liquidar = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const { valorGastado, soporte } = req.body;
-    const anticipo = await anticipoService.liquidar(id, { valorGastado, soporte });
-    res.json({ success: true, message: 'Anticipo liquidado exitosamente', data: anticipo });
-  } catch (error) {
-    next(error);
-  }
-};
-
 exports.entregarExcedente = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -80,15 +69,9 @@ exports.entregarExcedente = async (req, res, next) => {
   }
 };
 
-exports.delete = async (req, res, next) => {
-  // Método obsoleto: use PATCH /anticipos/:id/toggle-habilitado
-  res.status(405).json({ success: false, message: 'Método obsoleto. Use PATCH /anticipos/:id/toggle-habilitado para inhabilitar/restaurar.' });
-};
-
 exports.createMisAnticipo = async (req, res, next) => {
   try {
-    const data = { ...req.body, idUsuario: req.usuario.idUsuario };
-    const anticipo = await anticipoService.createMisAnticipo(data);
+    const anticipo = await anticipoService.createMisAnticipo(req.usuario.idUsuario, req.usuario.rol?.nombre, req.body);
     res.status(201).json({ success: true, message: 'Anticipo creado exitosamente', data: anticipo });
   } catch (error) {
     next(error);
@@ -122,6 +105,15 @@ exports.toggleHabilitado = async (req, res, next) => {
     next(error);
   }
 };
+exports.getAniosDisponibles = async (req, res, next) => {
+  try {
+    const anios = await anticipoService.getAniosDisponibles();
+    res.json({ success: true, data: anios });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.getPageOf = async (req, res, next) => {
   try {
     const { id } = req.params;

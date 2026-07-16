@@ -1,8 +1,6 @@
-﻿const { EncomiendaVenta, Destinatario, Paquete, Cliente, Ruta, Vehiculo, Conductor, Destino, sequelize } = require('../models');
-const { Usuario } = require('../models');
+﻿const { EncomiendaVenta, Destinatario, Paquete, Cliente, Ruta, Vehiculo, Conductor, Destino, Usuario, sequelize } = require('../models');
 const AppError = require('../errors/appError');
 const crypto = require('crypto');
-const { sendTrackingEmail } = require('../config/email');
 
 const ESTADOS_VALIDOS = [
   'Programada',
@@ -51,7 +49,7 @@ const buildOrder = (sortBy) => {
   return [[field, direction]];
 };
 
-const getAll = async ({ estado, idCliente, idRuta, fechaInicio, fechaFin, habilitado, estadoPago, metodoPago, q, page = 1, limit = 10, sortBy } = {}) => {
+const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, metodoPago, q, page = 1, limit = 10, sortBy } = {}) => {
   const where = {};
   if (estado) where.estado = estado;
   if (idCliente) where.idCliente = idCliente;
@@ -59,21 +57,26 @@ const getAll = async ({ estado, idCliente, idRuta, fechaInicio, fechaFin, habili
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
   if (estadoPago) where.estadoPago = estadoPago;
   if (metodoPago) where.metodoPago = metodoPago;
-  if (fechaInicio && fechaFin) {
-    where.fechaRegistro = {
-      [sequelize.Sequelize.Op.between]: [fechaInicio, fechaFin],
-    };
-  }
 
   if (q) {
-    where[sequelize.Sequelize.Op.or] = [
-      { numeroGuia: { [sequelize.Sequelize.Op.iLike]: `%${q}%` } },
-      { estado: { [sequelize.Sequelize.Op.iLike]: `%${q}%` } },
-      { estadoPago: { [sequelize.Sequelize.Op.iLike]: `%${q}%` } },
-      { '$cliente.nombre$': { [sequelize.Sequelize.Op.iLike]: `%${q}%` } },
-      { '$cliente.apellido$': { [sequelize.Sequelize.Op.iLike]: `%${q}%` } },
-      { '$ruta.nombreRuta$': { [sequelize.Sequelize.Op.iLike]: `%${q}%` } },
+    const { Op } = sequelize.Sequelize;
+    const trimmed = q.trim();
+    const conditions = [
+      { numeroGuia: { [Op.iLike]: `%${trimmed}%` } },
+      { estado: { [Op.iLike]: `%${trimmed}%` } },
+      { estadoPago: { [Op.iLike]: `%${trimmed}%` } },
+      { '$cliente.nombre$': { [Op.iLike]: `%${trimmed}%` } },
+      { '$cliente.apellido$': { [Op.iLike]: `%${trimmed}%` } },
+      { '$ruta.nombre_ruta$': { [Op.iLike]: `%${trimmed}%` } },
     ];
+    const partes = trimmed.split(/\s+/).filter(Boolean);
+    if (partes.length > 1) {
+      const primero = `%${partes[0]}%`;
+      const resto = `%${partes.slice(1).join(' ')}%`;
+      conditions.push({ [Op.and]: [{ '$cliente.nombre$': { [Op.iLike]: primero } }, { '$cliente.apellido$': { [Op.iLike]: resto } }] });
+      conditions.push({ [Op.and]: [{ '$cliente.apellido$': { [Op.iLike]: primero } }, { '$cliente.nombre$': { [Op.iLike]: resto } }] });
+    }
+    where[Op.or] = conditions;
   }
 
   const offset = (page - 1) * limit;
@@ -89,6 +92,12 @@ const getAll = async ({ estado, idCliente, idRuta, fechaInicio, fechaFin, habili
         required: false,
         include: [
           { model: Vehiculo, as: 'vehiculo', required: false },
+          {
+            model: Conductor,
+            as: 'conductor',
+            required: false,
+            include: [{ model: Usuario, as: 'usuario', required: false }],
+          },
           { model: Destino, as: 'destino', required: false },
         ],
       },
@@ -136,33 +145,9 @@ const getById = async (id) => {
   return encomienda;
 };
 
-const getByGuia = async (numeroGuia) => {
-  const encomienda = await EncomiendaVenta.findOne({
-    where: { numeroGuia },
-    include: [
-      { model: Cliente, as: 'cliente' },
-      {
-        model: Ruta,
-        as: 'ruta',
-        required: false,
-        include: [
-          { model: Vehiculo, as: 'vehiculo', required: false },
-          { model: Destino, as: 'destino', required: false },
-        ],
-      },
-      { model: Destinatario, as: 'destinatarios' },
-      { model: Paquete, as: 'paquetes' },
-    ],
-  });
-
-  if (!encomienda) {
-    throw new AppError('Encomienda no encontrada', 404);
-  }
-
-  return encomienda;
-};
-
-// ΓÜá∩╕Å FIX: funci├│n movida ANTES de module.exports para que sea accesible al exportar
+// Backend listo para seguimiento público por link (token en la URL, sin login) — pendiente
+// de decidir si se implementa: falta construir la página /seguimiento en el frontend que
+// consuma este endpoint. Ver nota en CLAUDE.md.
 const getPublicByToken = async (token) => {
   const encomienda = await EncomiendaVenta.findOne({
     where: { tokenSeguimiento: token, habilitado: true },
@@ -201,6 +186,49 @@ const getPublicByToken = async (token) => {
   };
 };
 
+// Suma el peso de los paquetes de todas las ventas ya asignadas a una ruta (sin contar
+// las canceladas ni, si se indica, la propia venta que se está editando) — usado para
+// saber cuánta capacidad del vehículo ya está ocupada antes de aceptar una venta nueva.
+const getPesoUsadoEnRuta = async (idRuta, excluirIdEncomienda, transaction) => {
+  const where = { idRuta, estado: { [sequelize.Sequelize.Op.ne]: 'Cancelada' } };
+  if (excluirIdEncomienda) {
+    where.idEncomiendaVenta = { [sequelize.Sequelize.Op.ne]: excluirIdEncomienda };
+  }
+  const ventas = await EncomiendaVenta.findAll({
+    where,
+    include: [{ model: Paquete, as: 'paquetes', attributes: ['peso'] }],
+    transaction,
+  });
+  return ventas.reduce(
+    (total, venta) => total + venta.paquetes.reduce((sum, p) => sum + parseFloat(p.peso || 0), 0),
+    0
+  );
+};
+
+const validarCapacidadRuta = async (idRuta, paquetesNuevos, transaction, excluirIdEncomienda) => {
+  const ruta = await Ruta.findByPk(idRuta, {
+    include: [{ model: Vehiculo, as: 'vehiculo' }],
+    transaction,
+  });
+
+  if (!ruta || !ruta.vehiculo || !ruta.vehiculo.capacidad) return;
+
+  const pesoNuevo = (paquetesNuevos || []).reduce((sum, p) => sum + parseFloat(p.peso || 0), 0);
+  const pesoUsado = await getPesoUsadoEnRuta(idRuta, excluirIdEncomienda, transaction);
+  const capacidad = parseFloat(ruta.vehiculo.capacidad);
+  const disponible = capacidad - pesoUsado;
+
+  if (pesoNuevo > disponible) {
+    // No hacemos rollback aquí — el try/catch de create()/update() ya lo hace al
+    // capturar este error. Llamarlo dos veces revienta con "Transaction cannot be
+    // rolled back because it has been finished with state: rollback".
+    throw new AppError(
+      `Esta ruta ya no tiene espacio suficiente. Quedan ${disponible.toFixed(2)} kg disponibles y este envío pesa ${pesoNuevo.toFixed(2)} kg.`,
+      400
+    );
+  }
+};
+
 const create = async (data) => {
   const transaction = await sequelize.transaction();
 
@@ -220,32 +248,30 @@ const create = async (data) => {
 
     const cliente = await Cliente.findByPk(idCliente);
     if (!cliente) {
-      await transaction.rollback();
       throw new AppError('Cliente no encontrado', 400);
     }
 
-    if (idRuta) {
-      const ruta = await Ruta.findByPk(idRuta);
-      if (!ruta) {
-        await transaction.rollback();
-        throw new AppError('Ruta no encontrada', 400);
-      }
+    if (!idRuta) {
+      throw new AppError('La ruta es obligatoria', 400);
     }
+    const ruta = await Ruta.findByPk(idRuta);
+    if (!ruta) {
+      throw new AppError('Ruta no encontrada', 400);
+    }
+    await validarCapacidadRuta(idRuta, paquetes, transaction);
 
     if (
       metodoPago &&
       !METODOS_PAGO_VALIDOS.some((v) => v.toLowerCase() === metodoPago.toLowerCase())
     ) {
-      await transaction.rollback();
-      throw new AppError(`M├⌐todo de pago inv├ílido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`, 400);
+      throw new AppError(`Método de pago inválido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`, 400);
     }
 
     if (
       estadoPago &&
       !ESTADOS_PAGO_VALIDOS.includes(estadoPago)
     ) {
-      await transaction.rollback();
-      throw new AppError(`Estado de pago inv├ílido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
+      throw new AppError(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
     }
 
     const numeroGuia = await generarNumeroGuia(transaction);
@@ -257,7 +283,7 @@ const create = async (data) => {
     const encomienda = await EncomiendaVenta.create(
       {
         idCliente,
-        idRuta: idRuta || null,
+        idRuta,
         tokenSeguimiento,
         numeroGuia,
         fechaEstimadaEntrega: fechaEstimadaEntrega || null,
@@ -312,14 +338,8 @@ const create = async (data) => {
       ],
     });
 
-    try {
-      const clienteEmail = cliente.email || null;
-      if (clienteEmail) {
-        await sendTrackingEmail(clienteEmail, numeroGuia, tokenSeguimiento);
-      }
-    } catch (e) {
-      console.error('Error enviando correo de seguimiento:', e.message || e);
-    }
+    // Envío de correo de seguimiento desactivado a propósito: la página /rastreo del
+    // frontend todavía no existe. Ver sendTrackingEmail en config/email.js.
 
     return encomiendaCompleta;
   } catch (error) {
@@ -348,22 +368,25 @@ const update = async (id, data) => {
     const encomienda = await EncomiendaVenta.findByPk(id);
 
     if (!encomienda) {
-      await transaction.rollback();
       throw new AppError('Encomienda no encontrada', 404);
+    }
+
+    if (encomienda.estado !== 'Programada') {
+      throw new AppError(`Esta venta ya está en estado "${encomienda.estado}": no se puede editar`, 400);
     }
 
     if (
       metodoPago &&
       !METODOS_PAGO_VALIDOS.some((v) => v.toLowerCase() === metodoPago.toLowerCase())
     ) {
-      throw new AppError(`M├⌐todo de pago inv├ílido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`, 400);
+      throw new AppError(`Método de pago inválido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`, 400);
     }
 
     if (
       estadoPago &&
       !ESTADOS_PAGO_VALIDOS.includes(estadoPago)
     ) {
-      throw new AppError(`Estado de pago inv├ílido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
+      throw new AppError(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
     }
 
     const parseDecimal = (value) => {
@@ -379,14 +402,28 @@ const update = async (id, data) => {
         : parseDecimal(encomienda.valorServicio);
     const nuevoTotal = nuevoImpuestos + nuevoValorServicio;
 
+    // La ruta es obligatoria siempre — una venta nunca puede quedar sin ruta.
+    // Si se manda idRuta en la petición tiene que ser un id válido; si no se
+    // manda, se deja la que ya tenía.
     let nuevoIdRuta = encomienda.idRuta;
     if (idRuta !== undefined) {
       if (idRuta && !isNaN(parseInt(idRuta)) && parseInt(idRuta) > 0) {
         nuevoIdRuta = parseInt(idRuta);
       } else {
-        nuevoIdRuta = null;
+        throw new AppError('La ruta es obligatoria', 400);
       }
     }
+
+    const rutaNueva = await Ruta.findByPk(nuevoIdRuta, { transaction });
+    if (!rutaNueva) {
+      throw new AppError('Ruta no encontrada', 400);
+    }
+    // Si esta venta no manda paquetes nuevos, se valida con los que ya tenía
+    // (no están cambiando, pero igual cuentan para el peso de la ruta).
+    const paquetesParaValidar = paquetes && paquetes.length > 0
+      ? paquetes
+      : await Paquete.findAll({ where: { idEncomiendaVenta: id }, attributes: ['peso'], transaction });
+    await validarCapacidadRuta(nuevoIdRuta, paquetesParaValidar, transaction, parseInt(id));
 
     await encomienda.update(
       {
@@ -487,6 +524,30 @@ const cambiarEstado = async (id, estado) => {
   return encomienda;
 };
 
+const cambiarEstadoPago = async (id, estadoPago) => {
+  const encomienda = await EncomiendaVenta.findByPk(id);
+
+  if (!encomienda) {
+    throw new AppError('Encomienda no encontrada', 404);
+  }
+
+  if (!ESTADOS_PAGO_VALIDOS.includes(estadoPago)) {
+    throw new AppError(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
+  }
+
+  if (encomienda.estado === 'Cancelada') {
+    throw new AppError('Esta venta fue cancelada: no se puede cambiar el estado de pago', 400);
+  }
+
+  if (estadoPago === 'Pagado' && encomienda.metodoPago === 'Contraentrega' && encomienda.estado !== 'Entregada') {
+    throw new AppError('Esta venta es Contraentrega: el pago solo se puede confirmar cuando ya fue entregada', 400);
+  }
+
+  await encomienda.update({ estadoPago });
+
+  return encomienda;
+};
+
 const toggleHabilitado = async (id) => {
   const encomienda = await EncomiendaVenta.findByPk(id);
 
@@ -514,52 +575,25 @@ const toggleHabilitado = async (id) => {
       { model: Cliente, as: 'cliente' },
       { model: Destinatario, as: 'destinatarios' },
       { model: Paquete, as: 'paquetes' },
-      { model: Ruta, as: 'ruta', required: false },
+      {
+        model: Ruta,
+        as: 'ruta',
+        required: false,
+        include: [
+          { model: Vehiculo, as: 'vehiculo', required: false },
+          {
+            model: Conductor,
+            as: 'conductor',
+            required: false,
+            include: [{ model: Usuario, as: 'usuario', required: false }],
+          },
+          { model: Destino, as: 'destino', required: false },
+        ],
+      },
     ],
   });
 
   return encomiendaActualizada;
-};
-
-const agregarPaquete = async (idEncomiendaVenta, data) => {
-  const { descripcionContenido, peso, alto, ancho, profundidad, valorDeclarado } = data;
-
-  const encomienda = await EncomiendaVenta.findByPk(idEncomiendaVenta);
-
-  if (!encomienda) {
-    throw new AppError('Encomienda no encontrada', 404);
-  }
-
-  const paquete = await Paquete.create({
-    idEncomiendaVenta,
-    descripcionContenido: descripcionContenido || null,
-    peso: peso || null,
-    alto: alto || null,
-    ancho: ancho || null,
-    profundidad: profundidad || null,
-    valorDeclarado: valorDeclarado || null,
-  });
-
-  return paquete;
-};
-
-const agregarDestinatario = async (idEncomiendaVenta, data) => {
-  const { nombreDestinatario, telefonoDestinatario, direccionDestinatario } = data;
-
-  const encomienda = await EncomiendaVenta.findByPk(idEncomiendaVenta);
-
-  if (!encomienda) {
-    throw new AppError('Encomienda no encontrada', 404);
-  }
-
-  const destinatario = await Destinatario.create({
-    idEncomiendaVenta,
-    nombreDestinatario,
-    telefonoDestinatario: telefonoDestinatario || null,
-    direccionDestinatario: direccionDestinatario || null,
-  });
-
-  return destinatario;
 };
 
 const getPageOf = async (id, { limit = 10 } = {}) => {
@@ -578,16 +612,13 @@ const getPageOf = async (id, { limit = 10 } = {}) => {
 };
 
 module.exports = {
-  generarNumeroGuia,
   getAll,
   getById,
-  getByGuia,
-  getPublicByToken, // ΓÜá∩╕Å FIX: ahora s├¡ se exporta correctamente
+  getPublicByToken,
   create,
   update,
   cambiarEstado,
+  cambiarEstadoPago,
   toggleHabilitado,
-  agregarPaquete,
-  agregarDestinatario,
   getPageOf,
 };

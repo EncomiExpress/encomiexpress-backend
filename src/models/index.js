@@ -20,6 +20,7 @@ const AnticipoExcedente = require('./anticipoExcedente');
 const EncomiendaVenta = require('./encomiendaVenta');
 const Destinatario = require('./destinatario');
 const Paquete = require('./paquete');
+const Configuracion = require('./configuracion');
 
 // ============================================
 // RELACIONES
@@ -109,5 +110,6 @@ module.exports = {
   AnticipoExcedente,
   EncomiendaVenta,
   Destinatario,
-  Paquete
+  Paquete,
+  Configuracion
 };

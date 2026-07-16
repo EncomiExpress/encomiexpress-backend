@@ -1,4 +1,3 @@
-const { sequelize } = require('../models');
 const destinoService = require('../services/destinoService');
 
 exports.getAll = async (req, res, next) => {
@@ -45,21 +44,6 @@ exports.update = async (req, res, next) => {
     const { id } = req.params;
     const destino = await destinoService.update(id, req.body);
     res.json({ success: true, message: 'Destino actualizado exitosamente', data: destino });
-  } catch (error) {
-    next(error);
-  }
-};
-
-exports.delete = async (req, res, next) => {
-  // Método obsoleto: use PATCH /destinos/:id/toggle-habilitado
-  res.status(405).json({ success: false, message: 'Método obsoleto. Use PATCH /destinos/:id/toggle-habilitado para inhabilitar/restaurar.' });
-};
-
-exports.getRutas = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const rutas = await destinoService.getRutas(id);
-    res.json({ success: true, data: rutas });
   } catch (error) {
     next(error);
   }

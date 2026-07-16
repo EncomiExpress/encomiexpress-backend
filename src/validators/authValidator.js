@@ -1,5 +1,6 @@
 const { body } = require('express-validator');
 const r = require('./commonRules');
+const { PASSWORD_REGEX, PASSWORD_MESSAGE } = r;
 
 const loginValidation = [
   r.email.required(),
@@ -21,8 +22,14 @@ const recoverPasswordValidation = [
   r.email.required(),
 ];
 
+const cambiarPasswordValidation = [
+  body('passwordActual').notEmpty().withMessage('La contraseña actual es requerida'),
+  body('passwordNueva').matches(PASSWORD_REGEX).withMessage(PASSWORD_MESSAGE),
+];
+
 module.exports = {
   loginValidation,
   registerValidation,
   recoverPasswordValidation,
+  cambiarPasswordValidation,
 };

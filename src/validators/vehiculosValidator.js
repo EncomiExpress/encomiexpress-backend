@@ -9,7 +9,7 @@ const createValidation = [
   body('anio').optional().isInt({ min: 1900, max: 2100 }).withMessage('Año inválido'),
   body('color').optional().notEmpty().withMessage('Color es requerido'),
   body('tipo').optional().notEmpty().withMessage('Tipo es requerido'),
-  body('capacidad').optional().isFloat({ min: 0 }).withMessage('Capacidad debe ser un número positivo'),
+  body('capacidad').notEmpty().withMessage('La capacidad es obligatoria').isFloat({ min: 0.01 }).withMessage('Capacidad debe ser un número positivo'),
   body('vencimientoSOAT').notEmpty().withMessage('La fecha de vencimiento del SOAT es requerida').isDate().withMessage('Fecha de SOAT inválida'),
   body('vencimientoRevisionTecnica').notEmpty().withMessage('La fecha de vencimiento de la Revisión Técnica es requerida').isDate().withMessage('Fecha de Revisión Técnica inválida'),
   body('vencimientoSeguroTerceros').notEmpty().withMessage('La fecha de vencimiento del Seguro de Terceros es requerida').isDate().withMessage('Fecha de Seguro de Terceros inválida'),
@@ -24,7 +24,7 @@ const updateValidation = [
   body('anio').optional().isInt({ min: 1900, max: 2100 }).withMessage('Año inválido'),
   body('color').optional(),
   body('tipo').optional(),
-  body('capacidad').optional().isFloat({ min: 0 }).withMessage('Capacidad debe ser un número positivo')
+  body('capacidad').optional().notEmpty().withMessage('La capacidad es obligatoria').isFloat({ min: 0.01 }).withMessage('Capacidad debe ser un número positivo')
 ];
 
 const cambiarEstadoValidation = [

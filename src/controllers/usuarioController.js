@@ -37,23 +37,8 @@ exports.create = async (req, res, next) => {
 exports.update = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const usuario = await usuarioService.update(id, req.body);
+    const usuario = await usuarioService.update(id, req.body, req.usuario.idUsuario);
     res.json({ success: true, message: 'Usuario actualizado exitosamente', data: { idUsuario: usuario.idUsuario, email: usuario.email, nombre: usuario.nombre } });
-  } catch (error) {
-    next(error);
-  }
-};
-
-exports.delete = async (req, res, next) => {
-  // Método obsoleto: use PATCH /usuarios/:id/toggle-habilitado
-  res.status(405).json({ success: false, message: 'Método obsoleto. Use PATCH /usuarios/:id/toggle-habilitado para inhabilitar/restaurar.' });
-};
-
-exports.changePassword = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    await usuarioService.changePassword(id, req.body);
-    res.json({ success: true, message: 'Password actualizado exitosamente' });
   } catch (error) {
     next(error);
   }

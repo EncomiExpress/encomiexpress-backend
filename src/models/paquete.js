@@ -17,7 +17,7 @@ const Paquete = sequelize.define('Paquete', {
   },
   peso: {
     type: DataTypes.DECIMAL(8, 2),
-    allowNull: true
+    allowNull: false
   },
   alto: {
     type: DataTypes.DECIMAL(8, 2),

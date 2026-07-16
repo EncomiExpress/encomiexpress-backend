@@ -3,7 +3,7 @@ const router = express.Router();
 const { validate } = require('../middlewares/validation');
 const rutaController = require('../controllers/rutaController');
 const { authenticate, authorizePermission } = require('../middlewares/auth');
-const { createValidation } = require('../validators/rutasValidator');
+const { createValidation, updateValidation } = require('../validators/rutasValidator');
 
 router.use(authenticate);
 
@@ -41,15 +41,15 @@ router.get('/', authorizePermission('listar_ruta'), rutaController.getAll);
 
 /**
  * @swagger
- * /rutas/available:
+ * /rutas/anios-disponibles:
  *   get:
- *     summary: Listar rutas disponibles (sin encomiendas activas asignadas)
+ *     summary: Años distintos en que hay rutas registradas (para el filtro de Año en el listado)
  *     tags: [Rutas]
  *     responses:
  *       200:
- *         description: Lista de rutas disponibles para asignar encomiendas
+ *         description: Lista de años, descendente
  */
-router.get('/available', authorizePermission('listar_ruta'), rutaController.getAvailable);
+router.get('/anios-disponibles', authorizePermission('listar_ruta'), rutaController.getAniosDisponibles);
 
 /**
  * @swagger
@@ -120,7 +120,7 @@ router.post('/', authorizePermission('registrar_ruta'), createValidation, valida
  *       200:
  *         description: Ruta actualizada
  */
-router.put('/:id', authorizePermission('actualizar_ruta'), rutaController.update);
+router.put('/:id', authorizePermission('actualizar_ruta'), updateValidation, validate, rutaController.update);
 
 /**
  * @swagger
