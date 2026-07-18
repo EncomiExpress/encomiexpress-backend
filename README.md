@@ -4,6 +4,33 @@ API REST para la gestión operativa de EncomiExpress en OsvaldoC Mensajería y L
 
 ---
 
+## Integrantes del Equipo
+
+- Santiago Suárez Durán
+- Sebastian Valencia Peréz
+- Valeria Paz Arana
+- Yeferson Andres Moreno Granda
+
+---
+
+## Índice
+
+- [Características Implementadas](#características-implementadas)
+- [Stack Tecnológico](#stack-tecnológico)
+- [Arquitectura Limpia](#arquitectura-limpia)
+- [Entidades](#entidades)
+- [Seguridad](#seguridad)
+- [Decisiones de Diseño](#decisiones-de-diseño)
+- [Requisitos del Sistema](#requisitos-del-sistema)
+- [Variables de Entorno](#variables-de-entorno)
+- [Instalación](#instalación)
+- [Ejecutar en Entorno Local](#ejecutar-en-entorno-local)
+- [Documentación de la API](#documentación-de-la-api)
+- [Repositorios relacionados](#repositorios-relacionados)
+- [Licencia](#licencia)
+
+---
+
 ## Características Implementadas
 
 | Rol | Funcionalidades |
