@@ -1,4 +1,4 @@
-const { Conductor, Usuario, AnticipoExcedente, Ruta, Vehiculo } = require('../models');
+const { Conductor, Usuario, AnticipoExcedente, Ruta, Vehiculo, Destino } = require('../models');
 const { Op } = require('sequelize');
 const bcrypt = require('bcryptjs');
 const sequelize = require('../config/database');
@@ -318,19 +318,17 @@ const actualizarMiPerfil = async (idUsuario, rolNombre, data) => {
     throw new AppError('Conductor no encontrado', 404);
   }
 
-  const { nombre, telefono, email, numeroIdentificacion, direccion, categoriasLicencia, numeroLicencia } = data;
+  // Tipo de identificación y licencia (categoriasLicencia/numeroLicencia) son
+  // datos de verificación que solo el admin gestiona desde el módulo de
+  // Conductores en la web — el propio conductor no los puede autoeditar.
+  const { nombre, apellido, telefono, email, numeroIdentificacion, direccion } = data;
 
   const t = await sequelize.transaction();
 
   try {
     await Usuario.update(
-      { ...(nombre && { nombre }), ...(telefono && { telefono }), ...(email && { email }), ...(numeroIdentificacion && { numeroIdentificacion }), ...(direccion && { direccion }) },
+      { ...(nombre && { nombre }), ...(apellido && { apellido }), ...(telefono && { telefono }), ...(email && { email }), ...(numeroIdentificacion && { numeroIdentificacion }), ...(direccion && { direccion }) },
       { where: { idUsuario }, transaction: t }
-    );
-
-    await conductor.update(
-      { ...(categoriasLicencia !== undefined && { categoriasLicencia }), ...(numeroLicencia !== undefined && { numeroLicencia }) },
-      { transaction: t }
     );
 
     await t.commit();
@@ -353,9 +351,18 @@ const getMisAnticipos = async (idUsuario, rolNombre) => {
     throw new AppError('Conductor no encontrado', 404);
   }
 
+  // Mismo include anidado que anticipoService.ANTICIPO_INCLUDE — sin Destino
+  // adentro de Ruta, la app del conductor se queda sin poder mostrarlo.
   const anticipos = await AnticipoExcedente.findAll({
     where: { idConductor: conductor.idConductor },
-    include: [{ model: Ruta, as: 'ruta' }]
+    include: [{
+      model: Ruta,
+      as: 'ruta',
+      include: [
+        { model: Vehiculo, as: 'vehiculo' },
+        { model: Destino, as: 'destino' }
+      ]
+    }]
   });
 
   return anticipos;

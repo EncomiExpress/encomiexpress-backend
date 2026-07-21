@@ -135,7 +135,7 @@ CREATE TABLE anticipo_excedente (
   valor_gastado           DECIMAL(12,2) DEFAULT 0,
   excedente               DECIMAL(12,2) DEFAULT 0,
   estado                  VARCHAR(30) NOT NULL DEFAULT 'pendiente',
-  soporte                 VARCHAR(500),
+  soporte                 JSONB NOT NULL DEFAULT '[]',
   fecha_entrega           DATE,
   fecha_legalizacion      DATE,
   fecha_entrega_excedente DATE,
@@ -187,7 +187,7 @@ CREATE TABLE paquete (
 COMMENT ON COLUMN permiso.nombre IS 'ej: listar_usuario, registrar_cliente, actualizar_encomienda';
 COMMENT ON COLUMN usuario.password IS 'hash bcrypt';
 COMMENT ON COLUMN vehiculo.placa IS 'Colombia: 6 chars';
-COMMENT ON COLUMN anticipo_excedente.soporte IS 'URL Cloudinary';
+COMMENT ON COLUMN anticipo_excedente.soporte IS 'Array JSONB de URLs de Cloudinary — uno o varios comprobantes';
 COMMENT ON COLUMN ruta.estado IS 'Programada | En Curso | Completada | Cancelada';
 COMMENT ON COLUMN encomienda_venta.estado IS 'pendiente de recogida | en recogida | programada | en tránsito | entregado | devuelto';
 COMMENT ON COLUMN encomienda_venta.token_seguimiento IS 'Token único para seguimiento público vía enlace';

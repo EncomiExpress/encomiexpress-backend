@@ -81,12 +81,15 @@ exports.createMisAnticipo = async (req, res, next) => {
 exports.updateSoporte = async (req, res, next) => {
   try {
     const { id } = req.params;
-    if (!req.file) {
+    if (!req.files || req.files.length === 0) {
       return next(new AppError('No se subió ningún archivo', 400));
     }
-    const fileUrl = req.file.path;
-    const result = await anticipoService.updateSoporte(id, fileUrl);
-    res.json({ success: true, message: 'Soporte subido exitosamente', data: { soporte: fileUrl } });
+    // El resultado que entrega Cloudinary no trae ningún campo `.path` (eso es
+    // convención de multer.diskStorage) — la URL real de la imagen es
+    // `secure_url`. Con `.path` cada URL guardada quedaba `undefined`.
+    const fileUrls = req.files.map(f => f.secure_url);
+    const result = await anticipoService.updateSoporte(id, fileUrls);
+    res.json({ success: true, message: 'Soporte subido exitosamente', data: result });
   } catch (error) {
     next(error);
   }

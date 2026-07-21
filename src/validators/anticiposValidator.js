@@ -6,7 +6,7 @@ const createValidation = [
   body('idConductor').optional().isInt().withMessage('ID de conductor debe ser un número entero'),
   body('idRuta').notEmpty().withMessage('ID de ruta es requerido').isInt().withMessage('ID de ruta debe ser un número entero'),
   body('observaciones').optional().isString().withMessage('Observaciones debe ser un texto'),
-  body('soporte').optional().isString().withMessage('Soporte debe ser una URL válida')
+  body('soporte').optional().isArray().withMessage('Soporte debe ser un array de URLs')
 ];
 
 const updateValidation = [
@@ -14,7 +14,7 @@ const updateValidation = [
   body('idConductor').optional().isInt().withMessage('ID de conductor debe ser un número entero'),
   body('idRuta').optional().isInt().withMessage('ID de ruta debe ser un número entero'),
   body('observaciones').optional(),
-  body('soporte').optional().isString().withMessage('Soporte debe ser una URL válida')
+  body('soporte').optional().isArray().withMessage('Soporte debe ser un array de URLs')
 ];
 
 module.exports = {

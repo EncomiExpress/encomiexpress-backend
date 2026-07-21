@@ -50,7 +50,8 @@ const getAll = async ({ idConductor, idRuta, estado, habilitado, anio, mes, q, p
       const numericId = Number(q);
       const conditions = [
         { estado: { [Op.iLike]: query } },
-        { soporte: { [Op.iLike]: query } },
+        // `soporte` ya no es un texto plano (es un array JSONB de URLs), así
+        // que no aplica un ILIKE de texto — se sacó de la búsqueda.
         { '$conductor.usuario.nombre$': { [Op.iLike]: query } },
         { '$conductor.usuario.apellido$': { [Op.iLike]: query } },
         { '$ruta.nombre_ruta$': { [Op.iLike]: query } },
@@ -294,7 +295,9 @@ const entregarExcedente = async (id, { soporte }) => {
 
   await anticipo.update({
     estado: 'Completado',
-    soporte: soporte || anticipo.soporte,
+    // `soporte` es un array — si llega uno nuevo se agrega a los que ya
+    // había, no los reemplaza.
+    soporte: soporte ? [...(anticipo.soporte || []), soporte] : anticipo.soporte,
     fechaEntregaExcedente: new Date()
   });
 
@@ -374,15 +377,18 @@ const cambiarEstado = async (id, estado) => {
   return getAnticipoCompleto(id);
 };
 
-const updateSoporte = async (id, fileUrl) => {
+// fileUrls: array de URLs recién subidas a Cloudinary — se agregan a las que
+// ya tenía el anticipo (nunca se pisan las anteriores).
+const updateSoporte = async (id, fileUrls) => {
   const anticipo = await AnticipoExcedente.findByPk(id);
   if (!anticipo) {
     throw new AppError('Anticipo no encontrado', 404);
   }
 
-  await anticipo.update({ soporte: fileUrl });
+  const soporte = [...(anticipo.soporte || []), ...fileUrls];
+  await anticipo.update({ soporte });
 
-  return { soporte: fileUrl };
+  return { soporte };
 };
 
 const toggleHabilitado = async (id) => {

@@ -31,9 +31,12 @@ const AnticipoExcedente = sequelize.define('AnticipoExcedente', {
     type: DataTypes.STRING(30),
     defaultValue: 'Entregado'
   },
+  // Array de URLs de Cloudinary — un anticipo puede tener varios comprobantes
+  // (mismo patrón que Conductor.categoriasLicencia).
   soporte: {
-    type: DataTypes.STRING(500),
-    allowNull: true
+    type: DataTypes.JSONB,
+    allowNull: false,
+    defaultValue: []
   },
   habilitado: {
     type: DataTypes.BOOLEAN,

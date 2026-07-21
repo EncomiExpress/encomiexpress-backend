@@ -106,6 +106,14 @@ const create = async (data) => {
 const update = async (id, data) => {
   const { nombre, descripcion, habilitado, permisos } = data;
 
+  // El rol admin (id=1) no se toca ni siquiera por otro admin — así se creó
+  // el bug real de "Admin" con mayúscula: alguien lo editó a mano desde este
+  // mismo formulario y el login por rol (comparación exacta a 'admin' en
+  // middlewares/auth.js) empezó a fallar en silencio.
+  if (parseInt(id) === 1) {
+    throw new AppError('El rol de administrador no se puede modificar', 403);
+  }
+
   const rol = await Rol.findByPk(id);
   if (!rol) {
     throw new AppError('Rol no encontrado', 404);

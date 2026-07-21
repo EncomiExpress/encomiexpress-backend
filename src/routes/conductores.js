@@ -46,18 +46,14 @@ router.get('/perfil', conductorController.getPerfil);
  *             type: object
  *             properties:
  *               nombre:              { type: string }
+ *               apellido:            { type: string }
  *               telefono:            { type: string }
  *               email:               { type: string, format: email }
- *               categoriasLicencia:  { type: array, items: { type: object, properties: { categoria: { type: string }, vencimiento: { type: string, format: date } } } }
- *               numeroLicencia:      { type: string }
- *               placa:               { type: string }
- *               marca:               { type: string }
- *               modelo:              { type: string }
- *               anio:                { type: integer }
- *               color:               { type: string }
+ *               numeroIdentificacion: { type: string }
+ *               direccion:           { type: string }
  *     responses:
  *       200:
- *         description: Perfil actualizado exitosamente (usuario + conductor + vehículo en transacción)
+ *         description: Perfil actualizado exitosamente
  */
 router.put('/perfil', conductorController.actualizarPerfil);
 

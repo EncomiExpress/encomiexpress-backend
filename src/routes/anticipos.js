@@ -122,7 +122,7 @@ router.put('/:id', authenticate, authorize('admin', 'conductor'), updateValidati
  * @swagger
  * /anticipos/{id}/soporte:
  *   post:
- *     summary: Subir comprobante/soporte del anticipo a Cloudinary
+ *     summary: Subir uno o varios comprobantes/soportes del anticipo a Cloudinary (se agregan a los que ya tenía)
  *     tags: [Anticipos]
  *     parameters:
  *       - in: path
@@ -137,14 +137,14 @@ router.put('/:id', authenticate, authorize('admin', 'conductor'), updateValidati
  *             type: object
  *             properties:
  *               soporte:
- *                 type: string
- *                 format: binary
+ *                 type: array
+ *                 items: { type: string, format: binary }
  *     responses:
  *       200:
- *         description: Soporte subido y URL guardada
+ *         description: Soportes subidos y agregados al array existente
  */
 router.post('/:id/soporte', authenticate, authorize('admin', 'conductor'),
-  upload.single('soporte'),
+  upload.array('soporte', 5),
   anticipoController.updateSoporte
 );
 
