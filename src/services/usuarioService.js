@@ -24,7 +24,6 @@ const getAll = async ({ habilitado, idRol, q, page = 1, limit = 10, sortBy } = {
   if (q) {
     const trimmed = q.trim();
     const query = `%${trimmed}%`;
-    const numericId = Number(q);
     const conditions = [
       { nombre: { [Op.iLike]: query } },
       { apellido: { [Op.iLike]: query } },
@@ -33,9 +32,6 @@ const getAll = async ({ habilitado, idRol, q, page = 1, limit = 10, sortBy } = {
       { numeroIdentificacion: { [Op.iLike]: query } },
       { '$rol.nombre$': { [Op.iLike]: query } },
     ];
-    if (!Number.isNaN(numericId)) {
-      conditions.unshift({ idUsuario: numericId });
-    }
     const partes = trimmed.split(/\s+/).filter(Boolean);
     if (partes.length > 1) {
       const primero = `%${partes[0]}%`;

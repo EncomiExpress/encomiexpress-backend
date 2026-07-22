@@ -28,7 +28,6 @@ const getAll = async ({ habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
   if (q) {
     const trimmed = q.trim();
     const query = `%${trimmed}%`;
-    const numericId = Number(q);
     const conditions = [
       { nombre: { [Op.iLike]: query } },
       { apellido: { [Op.iLike]: query } },
@@ -38,9 +37,6 @@ const getAll = async ({ habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
       { tipoIdentificacion: { [Op.iLike]: query } },
       { numeroIdentificacion: { [Op.iLike]: query } },
     ];
-    if (!Number.isNaN(numericId)) {
-      conditions.unshift({ idCliente: numericId });
-    }
     // "Maria Garcia" no coincide con nombre NI apellido por separado — se
     // prueban las dos combinaciones para que el nombre completo también
     // encuentre resultado.

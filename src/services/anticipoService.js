@@ -47,7 +47,6 @@ const getAll = async ({ idConductor, idRuta, estado, habilitado, anio, mes, q, p
     if (q) {
       const trimmed = q.trim();
       const query = `%${trimmed}%`;
-      const numericId = Number(q);
       const conditions = [
         { estado: { [Op.iLike]: query } },
         // `soporte` ya no es un texto plano (es un array JSONB de URLs), así
@@ -56,9 +55,6 @@ const getAll = async ({ idConductor, idRuta, estado, habilitado, anio, mes, q, p
         { '$conductor.usuario.apellido$': { [Op.iLike]: query } },
         { '$ruta.nombre_ruta$': { [Op.iLike]: query } },
       ];
-      if (!Number.isNaN(numericId)) {
-        conditions.unshift({ idAnticipoExcedente: numericId });
-      }
       const partes = trimmed.split(/\s+/).filter(Boolean);
       if (partes.length > 1) {
         const primero = `%${partes[0]}%`;

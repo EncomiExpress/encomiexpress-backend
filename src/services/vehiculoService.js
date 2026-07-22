@@ -24,7 +24,6 @@ const getAll = async ({ estado, tipo, habilitado, q, idPropietario, page = 1, li
   if (q) {
     const trimmed = q.trim();
     const query = `%${trimmed}%`;
-    const numericId = Number(q);
     const conditions = [
       { placa: { [Op.iLike]: query } },
       { marca: { [Op.iLike]: query } },
@@ -33,9 +32,6 @@ const getAll = async ({ estado, tipo, habilitado, q, idPropietario, page = 1, li
       { '$propietario.nombre$': { [Op.iLike]: query } },
       { '$propietario.apellido$': { [Op.iLike]: query } },
     ];
-    if (!Number.isNaN(numericId)) {
-      conditions.unshift({ idVehiculo: numericId });
-    }
     // "Carlos Rodríguez" no coincide con nombre NI apellido por separado —
     // se prueban las dos combinaciones (nombre+apellido y al revés) para que
     // el nombre completo del propietario también encuentre resultado.

@@ -28,7 +28,6 @@ const getAll = async ({ estado, habilitado, q, page = 1, limit = 10, sortBy } = 
   if (q) {
     const trimmed = q.trim();
     const query = `%${trimmed}%`;
-    const numericId = Number(q);
     const conditions = [
       { '$usuario.nombre$': { [Op.iLike]: query } },
       { '$usuario.apellido$': { [Op.iLike]: query } },
@@ -38,9 +37,6 @@ const getAll = async ({ estado, habilitado, q, page = 1, limit = 10, sortBy } = 
       { '$usuario.numero_identificacion$': { [Op.iLike]: query } },
       { numeroLicencia: { [Op.iLike]: query } },
     ];
-    if (!Number.isNaN(numericId)) {
-      conditions.unshift({ idConductor: numericId });
-    }
     const partes = trimmed.split(/\s+/).filter(Boolean);
     if (partes.length > 1) {
       const primero = `%${partes[0]}%`;
