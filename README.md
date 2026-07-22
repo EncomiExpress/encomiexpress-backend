@@ -6,10 +6,10 @@ API REST para la gestión operativa de EncomiExpress en OsvaldoC Mensajería y L
 
 ## Integrantes del Equipo
 
-- Santiago Suárez Durán
-- Sebastian Valencia Peréz
 - Valeria Paz Arana
-- Yeferson Andres Moreno Granda
+- Santiago Suárez Durán
+- Sebastián Valencia Pérez
+- Yeferson Andrés Moreno Granda
 
 ---
 
