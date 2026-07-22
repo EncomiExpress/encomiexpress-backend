@@ -17,31 +17,6 @@ const {
  *   description: Gestión de encomiendas y ventas de servicio
  */
 
-/**
- * @swagger
- * /encomiendas/public/{token}:
- *   get:
- *     summary: Seguimiento público de encomienda por token (sin autenticación)
- *     tags: [Encomiendas]
- *     security: []
- *     parameters:
- *       - in: path
- *         name: token
- *         required: true
- *         description: Token de seguimiento entregado al cliente
- *         schema: { type: string }
- *     responses:
- *       200:
- *         description: Estado y datos básicos de la encomienda
- *       404:
- *         description: Encomienda no encontrada
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
-router.get('/public/:token', encomiendaVentaController.getPublicByToken);
-
 router.use(authenticate);
 
 router.get('/:id/page-of', encomiendaVentaController.getPageOf);

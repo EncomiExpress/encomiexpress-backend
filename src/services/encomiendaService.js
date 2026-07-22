@@ -40,11 +40,6 @@ const generarNumeroGuia = async (transaction) => {
   throw new AppError('No se pudo generar un número de guía único, intenta de nuevo.', 500);
 };
 
-// Ya no se deriva de numeroGuia (la venta no tiene uno único cuando hay varios
-// paquetes) — un token aleatorio es además más seguro que hashear un número
-// de guía secuencial y por tanto parcialmente adivinable.
-const generarTokenSeguimiento = () => crypto.randomBytes(16).toString('hex');
-
 // "numeroGuia" ya no es columna de encomienda_venta (vive en paquete, uno por paquete) —
 // para poder seguir ordenando el listado por ese criterio, se ordena por la guía del
 // paquete más antiguo de cada venta (el "paquete 1"), vía subquery correlacionada.
@@ -180,44 +175,6 @@ const getById = async (id) => {
   return encomienda;
 };
 
-// Backend listo para seguimiento público por link (token en la URL, sin login) — pendiente
-// de decidir si se implementa: falta construir la página /seguimiento en el frontend que
-// consuma este endpoint. Ver nota en CLAUDE.md.
-const getPublicByToken = async (token) => {
-  const encomienda = await EncomiendaVenta.findOne({
-    where: { tokenSeguimiento: token, habilitado: true },
-    include: [
-      { model: Cliente, as: 'cliente', attributes: ['nombre', 'apellido'] },
-      {
-        model: Ruta,
-        as: 'ruta',
-        required: false,
-        attributes: ['idRuta'],
-        include: [
-          { model: Destino, as: 'destino', required: false, attributes: ['ciudad', 'departamento'] },
-        ],
-      },
-      { model: Destinatario, as: 'destinatario' },
-      { model: Paquete, as: 'paquetes', limit: 1 },
-    ],
-  });
-
-  if (!encomienda) throw new AppError('Encomienda no encontrada', 404);
-
-  return {
-    numeroGuia: encomienda.paquetes?.[0]?.numeroGuia || null,
-    estado: encomienda.estado,
-    fechaRegistro: encomienda.fechaRegistro,
-    fechaEstimadaEntrega: encomienda.fechaEstimadaEntrega,
-    remitente: `${encomienda.cliente?.nombre || ''} ${encomienda.cliente?.apellido || ''}`.trim(),
-    destinatario: encomienda.destinatario?.nombreDestinatario || null,
-    destino:
-      encomienda.ruta && encomienda.ruta.destino
-        ? `${encomienda.ruta.destino.ciudad} - ${encomienda.ruta.destino.departamento}`
-        : null,
-  };
-};
-
 // Suma el peso de los paquetes de todas las ventas ya asignadas a una ruta (sin contar
 // las canceladas ni, si se indica, la propia venta que se está editando) — usado para
 // saber cuánta capacidad del vehículo ya está ocupada antes de aceptar una venta nueva.
@@ -308,13 +265,11 @@ const create = async (data) => {
 
     const valorImpuestos = impuestos || 0;
     const total = (valorServicio || 0) + valorImpuestos;
-    const tokenSeguimiento = generarTokenSeguimiento();
 
     const encomienda = await EncomiendaVenta.create(
       {
         idCliente,
         idRuta,
-        tokenSeguimiento,
         fechaEstimadaEntrega: fechaEstimadaEntrega || null,
         observaciones: observaciones || null,
         valorServicio: valorServicio || 0,
@@ -367,9 +322,6 @@ const create = async (data) => {
         { model: Paquete, as: 'paquetes' },
       ],
     });
-
-    // Envío de correo de seguimiento desactivado a propósito: la página /rastreo del
-    // frontend todavía no existe. Ver sendTrackingEmail en config/email.js.
 
     return encomiendaCompleta;
   } catch (error) {
@@ -665,7 +617,6 @@ const getPageOf = async (id, { limit = 10 } = {}) => {
 module.exports = {
   getAll,
   getById,
-  getPublicByToken,
   create,
   update,
   cambiarEstado,

@@ -156,8 +156,7 @@ CREATE TABLE encomienda_venta (
   total                  DECIMAL(12,2) NOT NULL DEFAULT 0,
   metodo_pago            VARCHAR(30),
   estado_pago            VARCHAR(20) NOT NULL DEFAULT 'pendiente',
-  habilitado             BOOLEAN NOT NULL DEFAULT true,
-  token_seguimiento      VARCHAR(64) UNIQUE
+  habilitado             BOOLEAN NOT NULL DEFAULT true
 );
 
 CREATE TABLE destinatario (
@@ -190,7 +189,6 @@ COMMENT ON COLUMN vehiculo.placa IS 'Colombia: 6 chars';
 COMMENT ON COLUMN anticipo_excedente.soporte IS 'Array JSONB de URLs de Cloudinary — uno o varios comprobantes';
 COMMENT ON COLUMN ruta.estado IS 'Programada | En Curso | Completada | Cancelada';
 COMMENT ON COLUMN encomienda_venta.estado IS 'pendiente de recogida | en recogida | programada | en tránsito | entregado | devuelto';
-COMMENT ON COLUMN encomienda_venta.token_seguimiento IS 'Token único para seguimiento público vía enlace';
 
 -- ============================================
 -- LLAVES FORÁNEAS

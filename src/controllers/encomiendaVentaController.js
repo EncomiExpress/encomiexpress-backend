@@ -35,16 +35,6 @@ exports.getById = async (req, res, next) => {
   }
 };
 
-exports.getPublicByToken = async (req, res, next) => {
-  try {
-    const { token } = req.params;
-    const encomienda = await encomiendaService.getPublicByToken(token);
-    res.json({ success: true, data: encomienda });
-  } catch (error) {
-    next(error);
-  }
-};
-
 exports.create = async (req, res, next) => {
   try {
     const encomienda = await encomiendaService.create(req.body, req.file?.path);
