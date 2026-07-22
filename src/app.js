@@ -51,6 +51,31 @@ app.get('/', (req, res) => {
   res.json({ success: true, message: 'EncomiExpress API' });
 });
 
+// Info general de la API en la URL base — igual que arriba, no la consume el
+// frontend, pero da un punto de entrada legible para quien explore /api directo.
+app.get('/api', (req, res) => {
+  res.json({
+    success: true,
+    message: 'EncomiExpress API',
+    endpoints: [
+      '/api/auth',
+      '/api/usuarios',
+      '/api/conductores',
+      '/api/permisos',
+      '/api/propietarios',
+      '/api/vehiculos',
+      '/api/destinos',
+      '/api/rutas',
+      '/api/anticipos',
+      '/api/clientes',
+      '/api/encomiendas',
+      '/api/roles',
+      '/api/configuracion',
+      '/api/health',
+    ],
+  });
+});
+
 // Documentación Swagger (solo en desarrollo)
 if (process.env.NODE_ENV !== 'production') {
   app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
