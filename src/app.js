@@ -51,28 +51,12 @@ app.get('/', (req, res) => {
   res.json({ success: true, message: 'EncomiExpress API' });
 });
 
-// Info general de la API en la URL base — igual que arriba, no la consume el
-// frontend, pero da un punto de entrada legible para quien explore /api directo.
 app.get('/api', (req, res) => {
   res.json({
     success: true,
     message: 'EncomiExpress API',
-    endpoints: [
-      '/api/auth',
-      '/api/usuarios',
-      '/api/conductores',
-      '/api/permisos',
-      '/api/propietarios',
-      '/api/vehiculos',
-      '/api/destinos',
-      '/api/rutas',
-      '/api/anticipos',
-      '/api/clientes',
-      '/api/encomiendas',
-      '/api/roles',
-      '/api/configuracion',
-      '/api/health',
-    ],
+    version: process.env.npm_package_version || '1.0.0',
+    status: 'OK',
   });
 });
 
@@ -179,8 +163,12 @@ app.post('/api/seed', async (req, res, next) => {
 });
 
 // Middleware para rutas no encontradas (404)
-app.all('*', (req, res, next) => {
-  next(new AppError(`No se pudo encontrar la ruta ${req.originalUrl} en el servidor`, 404));
+app.all('*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'El recurso solicitado no fue encontrado.',
+    status: 404,
+  });
 });
 
 // Middleware global de manejo de errores

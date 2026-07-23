@@ -2,12 +2,18 @@ const jwt = require('jsonwebtoken');
 const { Usuario, Rol, Permiso } = require('../models');
 const AppError = require('../errors/appError');
 
+const sendAuthRequired = (res) => res.status(401).json({
+  success: false,
+  message: 'Se requiere autenticación para acceder a este recurso.',
+  status: 401,
+});
+
 const authenticate = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return next(new AppError('No se proporcionó token de autenticación', 401));
+      return sendAuthRequired(res);
     }
 
     const token = authHeader.split(' ')[1];
@@ -21,21 +27,18 @@ const authenticate = async (req, res, next) => {
     });
 
     if (!usuario) {
-      return next(new AppError('Usuario no encontrado', 401));
+      return sendAuthRequired(res);
     }
 
     if (!usuario.habilitado) {
-      return next(new AppError('Usuario deshabilitado', 401));
+      return sendAuthRequired(res);
     }
 
     req.usuario = usuario;
     next();
   } catch (error) {
-  if (error.name === 'JsonWebTokenError') {
-    return next(new AppError('Token inválido', 401));
-  }
-  if (error.name === 'TokenExpiredError') {
-    return next(new AppError('Token expirado', 401));
+  if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+    return sendAuthRequired(res);
   }
   next(error);
 }
@@ -44,10 +47,7 @@ const authenticate = async (req, res, next) => {
 const authorize = (...roles) => {
   return (req, res, next) => {
     if (!req.usuario) {
-      return res.status(401).json({
-        success: false,
-        message: 'No autenticado'
-      });
+      return sendAuthRequired(res);
     }
 
     if (!roles.includes(req.usuario.rol?.nombre)) {
@@ -64,10 +64,7 @@ const authorize = (...roles) => {
 const authorizePermission = (permiso) => {
   return (req, res, next) => {
     if (!req.usuario) {
-      return res.status(401).json({
-        success: false,
-        message: 'No autenticado'
-      });
+      return sendAuthRequired(res);
     }
 
     const permisos = req.usuario.rol?.permisos?.map(p => p.nombre);
