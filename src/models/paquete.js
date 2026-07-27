@@ -11,6 +11,10 @@ const Paquete = sequelize.define('Paquete', {
     type: DataTypes.INTEGER,
     allowNull: false
   },
+  idRutaVehiculoConductor: {
+    type: DataTypes.INTEGER,
+    allowNull: false
+  },
   numeroGuia: {
     type: DataTypes.STRING(50),
     allowNull: false,

@@ -1,8 +1,9 @@
 const { body } = require('express-validator');
 
 const createValidation = [
-  body('idVehiculo').notEmpty().withMessage('Vehículo es requerido'),
-  body('idConductor').notEmpty().withMessage('Conductor es requerido'),
+  body('pares').isArray({ min: 1, max: 10 }).withMessage('Debes asignar entre 1 y 10 vehículos con su conductor'),
+  body('pares.*.idVehiculo').notEmpty().isInt().withMessage('Vehículo es requerido en cada par'),
+  body('pares.*.idConductor').notEmpty().isInt().withMessage('Conductor es requerido en cada par'),
   body('idDestino').notEmpty().withMessage('Destino es requerido'),
   body('fechaSalida').optional().isDate().withMessage('Fecha de salida inválida'),
   body('fechaLlegada').optional().isDate().withMessage('Fecha de llegada inválida'),
@@ -10,8 +11,9 @@ const createValidation = [
 ];
 
 const updateValidation = [
-  body('idVehiculo').optional().isInt().withMessage('ID de vehículo debe ser un número entero'),
-  body('idConductor').optional().isInt().withMessage('ID de conductor debe ser un número entero'),
+  body('pares').optional().isArray({ min: 1, max: 10 }).withMessage('Debes asignar entre 1 y 10 vehículos con su conductor'),
+  body('pares.*.idVehiculo').optional().isInt().withMessage('ID de vehículo debe ser un número entero'),
+  body('pares.*.idConductor').optional().isInt().withMessage('ID de conductor debe ser un número entero'),
   body('idDestino').optional().isInt().withMessage('ID de destino debe ser un número entero'),
   body('fechaSalida').optional().isDate().withMessage('Fecha de salida inválida'),
   body('fechaLlegada').optional().isDate().withMessage('Fecha de llegada inválida'),

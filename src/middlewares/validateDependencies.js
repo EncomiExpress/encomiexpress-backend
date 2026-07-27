@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { Ruta, EncomiendaVenta, Vehiculo, Destino, AnticipoExcedente, Paquete } = require('../models');
+const { Ruta, RutaVehiculoConductor, EncomiendaVenta, Vehiculo, Destino, AnticipoExcedente, Paquete } = require('../models');
 
 // ─── Funciones detalladas (devuelven { bloqueado, dependencias[] }) ────────────
 
@@ -18,12 +18,11 @@ const verificarDependenciasPropietario = async (propietarioId) => {
 
 const verificarDependenciasVehiculo = async (vehiculoId) => {
   const rutas = await Ruta.findAll({
-    where: {
-      idVehiculo: vehiculoId,
-      habilitado: true,
-      estado: 'En Curso'
-    },
-    include: [{ model: Destino, as: 'destino', attributes: ['ciudad', 'departamento'] }],
+    where: { habilitado: true, estado: 'En Curso' },
+    include: [
+      { model: RutaVehiculoConductor, as: 'paresVehiculoConductor', where: { idVehiculo: vehiculoId, habilitado: true }, required: true, attributes: [] },
+      { model: Destino, as: 'destino', attributes: ['ciudad', 'departamento'] },
+    ],
     attributes: ['idRuta', 'nombreRuta', 'estado', 'fechaSalida']
   });
   const dependencias = rutas.map(r => ({
@@ -38,8 +37,11 @@ const verificarDependenciasConductor = async (conductorId) => {
   const dependencias = [];
 
   const rutasEnCurso = await Ruta.findAll({
-    where: { idConductor: conductorId, habilitado: true, estado: 'En Curso' },
-    include: [{ model: Destino, as: 'destino', attributes: ['ciudad'] }],
+    where: { habilitado: true, estado: 'En Curso' },
+    include: [
+      { model: RutaVehiculoConductor, as: 'paresVehiculoConductor', where: { idConductor: conductorId, habilitado: true }, required: true, attributes: [] },
+      { model: Destino, as: 'destino', attributes: ['ciudad'] },
+    ],
     attributes: ['idRuta', 'nombreRuta', 'fechaSalida']
   });
   rutasEnCurso.forEach(r => dependencias.push({
@@ -130,7 +132,10 @@ const verificarDependenciasAnticipo = async (anticipoId) => {
 // ─── Aliases booleanos (compatibilidad con código existente) ──────────────────
 
 const tieneRutasActivas = async (conductorId) => {
-  const count = await Ruta.count({ where: { idConductor: conductorId, habilitado: true, estado: 'En Curso' } });
+  const count = await Ruta.count({
+    where: { habilitado: true, estado: 'En Curso' },
+    include: [{ model: RutaVehiculoConductor, as: 'paresVehiculoConductor', where: { idConductor: conductorId, habilitado: true }, required: true, attributes: [] }],
+  });
   return count > 0;
 };
 

@@ -1,8 +1,23 @@
-const { Ruta, Vehiculo, Conductor, Destino, EncomiendaVenta, Usuario, AnticipoExcedente, Paquete, sequelize } = require('../models');
+const { Ruta, RutaVehiculoConductor, Vehiculo, Conductor, Destino, EncomiendaVenta, Usuario, AnticipoExcedente, Paquete, sequelize } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { verificarDependenciasRuta } = require('../middlewares/validateDependencies');
 const { tieneLicenciaVigente } = require('../utils/licenciaHelper');
+
+// Máximo de pares vehículo+conductor por ruta — igual que MAX_PAQUETES en Ventas,
+// un tope razonable para no dejar el array crecer sin límite en el formulario.
+const MAX_PARES_RUTA = 10;
+
+const INCLUDE_PARES = {
+  model: RutaVehiculoConductor,
+  as: 'paresVehiculoConductor',
+  where: { habilitado: true },
+  required: false,
+  include: [
+    { model: Vehiculo, as: 'vehiculo' },
+    { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
+  ],
+};
 
 const buildOrder = (sortBy) => {
   if (!sortBy) return [];
@@ -20,9 +35,23 @@ const buildRutaWhere = ({ habilitado, estado, anio, mes, q, idConductor, idVehic
   const where = {};
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
   if (estado) where.estado = estado;
-  if (idConductor) where.idConductor = parseInt(idConductor);
-  if (idVehiculo) where.idVehiculo = parseInt(idVehiculo);
   if (idDestino) where.idDestino = parseInt(idDestino);
+
+  // idVehiculo/idConductor ya no son columnas directas de "ruta" — se resuelven vía
+  // subquery contra la tabla intermedia (usado por los links "highlight" desde las
+  // páginas de Vehículo/Conductor).
+  if (idConductor) {
+    where.idRuta = { [Op.in]: sequelize.literal(
+      `(SELECT id_ruta FROM ruta_vehiculo_conductor WHERE id_conductor = ${parseInt(idConductor)} AND habilitado = true)`
+    ) };
+  }
+  if (idVehiculo) {
+    const condicion = { [Op.in]: sequelize.literal(
+      `(SELECT id_ruta FROM ruta_vehiculo_conductor WHERE id_vehiculo = ${parseInt(idVehiculo)} AND habilitado = true)`
+    ) };
+    where.idRuta = where.idRuta ? { [Op.and]: [where.idRuta, condicion] } : condicion;
+  }
+
   if (anio) {
     // fecha_salida es tipo DATE en Postgres — LIKE no aplica sobre fechas, hay que
     // comparar por rango (>= inicio del período, < inicio del siguiente).
@@ -37,19 +66,20 @@ const buildRutaWhere = ({ habilitado, estado, anio, mes, q, idConductor, idVehic
   }
   if (q) {
     const trimmed = q.trim();
+    const escapado = sequelize.escape(`%${trimmed}%`);
     const conditions = [
       { nombreRuta: { [Op.iLike]: `%${trimmed}%` } },
-      { '$vehiculo.placa$': { [Op.iLike]: `%${trimmed}%` } },
-      { '$conductor.usuario.nombre$': { [Op.iLike]: `%${trimmed}%` } },
-      { '$conductor.usuario.apellido$': { [Op.iLike]: `%${trimmed}%` } },
+      sequelize.literal(
+        `EXISTS (SELECT 1 FROM ruta_vehiculo_conductor rvc JOIN vehiculo v ON v.id_vehiculo = rvc.id_vehiculo ` +
+        `WHERE rvc.id_ruta = "Ruta"."id_ruta" AND rvc.habilitado = true AND v.placa ILIKE ${escapado})`
+      ),
+      sequelize.literal(
+        `EXISTS (SELECT 1 FROM ruta_vehiculo_conductor rvc JOIN conductor c ON c.id_conductor = rvc.id_conductor ` +
+        `JOIN usuario u ON u.id_usuario = c.id_usuario ` +
+        `WHERE rvc.id_ruta = "Ruta"."id_ruta" AND rvc.habilitado = true ` +
+        `AND (u.nombre ILIKE ${escapado} OR u.apellido ILIKE ${escapado}))`
+      ),
     ];
-    const partes = trimmed.split(/\s+/).filter(Boolean);
-    if (partes.length > 1) {
-      const primero = `%${partes[0]}%`;
-      const resto = `%${partes.slice(1).join(' ')}%`;
-      conditions.push({ [Op.and]: [{ '$conductor.usuario.nombre$': { [Op.iLike]: primero } }, { '$conductor.usuario.apellido$': { [Op.iLike]: resto } }] });
-      conditions.push({ [Op.and]: [{ '$conductor.usuario.apellido$': { [Op.iLike]: primero } }, { '$conductor.usuario.nombre$': { [Op.iLike]: resto } }] });
-    }
     where[Op.or] = conditions;
   }
   return where;
@@ -61,11 +91,7 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
   const offset = (page - 1) * limit;
   const order = buildOrder(sortBy);
 
-  const include = [
-    { model: Vehiculo, as: 'vehiculo' },
-    { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
-    { model: Destino, as: 'destino' },
-  ];
+  const include = [INCLUDE_PARES, { model: Destino, as: 'destino' }];
 
   const { count, rows: data } = await Ruta.findAndCountAll({
     where,
@@ -87,21 +113,25 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
     data.forEach(r => { r.dataValues.pendienteLegalizacion = pendientesSet.has(r.idRuta); });
   }
 
-  // pesoUsado: kg ya ocupados en cada ruta por ventas activas (no canceladas) — usado por
-  // el selector de ruta en Ventas para mostrar cuánta capacidad le queda a cada una.
-  const rutaIds = data.map(r => r.idRuta);
-  if (rutaIds.length > 0) {
-    const ventasConPeso = await EncomiendaVenta.findAll({
-      where: { idRuta: { [Op.in]: rutaIds }, estado: { [Op.ne]: 'Cancelada' } },
-      attributes: ['idRuta'],
-      include: [{ model: Paquete, as: 'paquetes', attributes: ['peso'] }],
+  // pesoUsado: kg ya ocupados en CADA PAR vehículo+conductor (no en la ruta completa)
+  // por ventas activas (no canceladas) — usado por el selector de vehículo en Ventas
+  // para mostrar cuánta capacidad le queda a cada camión de la ruta.
+  const parIds = data.flatMap(r => (r.paresVehiculoConductor || []).map(p => p.idRutaVehiculoConductor));
+  if (parIds.length > 0) {
+    const paquetesConPeso = await Paquete.findAll({
+      where: { idRutaVehiculoConductor: { [Op.in]: parIds } },
+      attributes: ['idRutaVehiculoConductor', 'peso'],
+      include: [{ model: EncomiendaVenta, as: 'encomienda', attributes: [], required: true, where: { estado: { [Op.ne]: 'Cancelada' } } }],
     });
-    const pesoPorRuta = {};
-    ventasConPeso.forEach(v => {
-      const suma = v.paquetes.reduce((s, p) => s + parseFloat(p.peso || 0), 0);
-      pesoPorRuta[v.idRuta] = (pesoPorRuta[v.idRuta] || 0) + suma;
+    const pesoPorPar = {};
+    paquetesConPeso.forEach(p => {
+      pesoPorPar[p.idRutaVehiculoConductor] = (pesoPorPar[p.idRutaVehiculoConductor] || 0) + parseFloat(p.peso || 0);
     });
-    data.forEach(r => { r.dataValues.pesoUsado = pesoPorRuta[r.idRuta] || 0; });
+    data.forEach(r => {
+      (r.paresVehiculoConductor || []).forEach(par => {
+        par.dataValues.pesoUsado = pesoPorPar[par.idRutaVehiculoConductor] || 0;
+      });
+    });
   }
 
   return { data, total: count };
@@ -109,11 +139,7 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
 
 const getById = async (id) => {
   const ruta = await Ruta.findByPk(id, {
-    include: [
-      { model: Vehiculo, as: 'vehiculo' },
-      { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
-      { model: Destino, as: 'destino' }
-    ]
+    include: [INCLUDE_PARES, { model: Destino, as: 'destino' }]
   });
 
   if (!ruta) {
@@ -133,45 +159,145 @@ const validarDocumentosVehiculo = (vehiculo) => {
   for (const { campo, nombre } of docs) {
     if (campo) {
       const venc = new Date(campo); venc.setHours(0, 0, 0, 0);
-      if (venc < hoy) throw new AppError(`El vehículo tiene el ${nombre} vencido y no puede ser asignado a una ruta`, 400);
+      if (venc < hoy) throw new AppError(`El vehículo ${vehiculo.placa || ''} tiene el ${nombre} vencido y no puede ser asignado a una ruta`, 400);
     }
   }
 };
 
-const create = async (data) => {
-  const { idVehiculo, idConductor, idDestino, nombreRuta, fechaSalida, horaSalida, horaLlegadaEstimada, estado, observaciones } = data;
+// Ventana de "enfriamiento" de COOLDOWN_DIAS después de la salida de cualquier otra
+// ruta (Programada o En Curso) del mismo vehículo o conductor — ver validarEnfriamiento
+// más abajo. El conflicto "el conductor todavía anda de viaje" (más allá de esta
+// ventana) sigue resolviéndose aparte con Conductor.estado/Vehiculo.estado='En Ruta' +
+// el chequeo que ya existe al pasar una ruta a 'En Curso' (ver updateEstado, códigos
+// VEHICLE_IN_USE/CONDUCTOR_IN_USE).
+// Un vehículo o conductor que ya tiene otra ruta (Programada/En Curso) necesita
+// COOLDOWN_DIAS de margen antes Y después de esa salida — no se puede asumir que ya
+// volvió (la duración real de un viaje depende del destino, no se puede adivinar), y
+// tampoco importa en qué orden se programen las rutas: una ruta que sale el día D
+// bloquea [D-COOLDOWN_DIAS, D+COOLDOWN_DIAS] para ese mismo vehículo/conductor. Cada
+// ruta existente arma su propia ventana independiente — no se acumulan ni se fusionan
+// entre rutas separadas por más días que el margen (ej. una ruta el día 5 y otra el día
+// 20 del mismo conductor no bloquean nada entre medio). El choque exacto (misma fecha)
+// queda cubierto como caso particular (distancia 0).
+const COOLDOWN_DIAS = 2;
 
-  const vehiculo = await Vehiculo.findByPk(idVehiculo);
-  if (!vehiculo) throw new AppError('Vehículo no encontrado', 404);
-  validarDocumentosVehiculo(vehiculo);
+const sumarDias = (fechaStr, dias) => {
+  const d = new Date(`${fechaStr}T00:00:00`);
+  d.setDate(d.getDate() + dias);
+  return d.toISOString().slice(0, 10);
+};
 
-  const conductor = await Conductor.findByPk(idConductor);
-  if (!conductor) throw new AppError('Conductor no encontrado', 404);
+const validarEnfriamiento = async ({ idVehiculo, idConductor, fechaSalida, idRutaExcluir }) => {
+  if (!fechaSalida) return;
 
-  if (!tieneLicenciaVigente(conductor.categoriasLicencia)) {
-    throw new AppError('El conductor tiene la licencia de conducción vencida y no puede ser asignado a una ruta', 400);
+  // Ventana simétrica: cualquier otra ruta del mismo vehículo/conductor a menos de
+  // COOLDOWN_DIAS de distancia (antes o después) de la fecha candidata choca — así no
+  // importa el orden en que se programen (crear primero la más tardía y después una más
+  // temprana muy pegada a esa no se escapa de la validación).
+  const desde = sumarDias(fechaSalida, -COOLDOWN_DIAS);
+  const hasta = sumarDias(fechaSalida, COOLDOWN_DIAS);
+  const conflicto = await RutaVehiculoConductor.findOne({
+    where: {
+      habilitado: true,
+      [Op.or]: [{ idVehiculo }, { idConductor }],
+      ...(idRutaExcluir ? { idRuta: { [Op.ne]: idRutaExcluir } } : {}),
+    },
+    include: [{
+      model: Ruta,
+      as: 'ruta',
+      required: true,
+      where: {
+        estado: { [Op.in]: ['Programada', 'En Curso'] },
+        fechaSalida: { [Op.between]: [desde, hasta] },
+      },
+    }],
+  });
+
+  if (conflicto) {
+    const rangoDesde = sumarDias(conflicto.ruta.fechaSalida, -COOLDOWN_DIAS);
+    const rangoHasta = sumarDias(conflicto.ruta.fechaSalida, COOLDOWN_DIAS);
+    throw new AppError(
+      `Este vehículo o conductor ya tiene otra ruta (#${conflicto.idRuta}) programada el ${conflicto.ruta.fechaSalida} y necesita ${COOLDOWN_DIAS} días de margen. No se puede programar otra entre el ${rangoDesde} y el ${rangoHasta}.`,
+      409,
+      [{
+        tipo: 'Enfriamiento de vehículo/conductor',
+        id: conflicto.idRuta,
+        descripcion: `La Ruta #${conflicto.idRuta} ya tiene este vehículo/conductor asignado, con salida el ${conflicto.ruta.fechaSalida}`
+      }],
+      'COOLDOWN_CONFLICT'
+    );
   }
+};
+
+const validarPares = (pares) => {
+  if (!Array.isArray(pares) || pares.length === 0) {
+    throw new AppError('Debes asignar al menos un vehículo con su conductor', 400);
+  }
+  if (pares.length > MAX_PARES_RUTA) {
+    throw new AppError(`No puedes asignar más de ${MAX_PARES_RUTA} vehículos a una misma ruta`, 400);
+  }
+  const vehiculosIds = pares.map(p => p.idVehiculo);
+  const conductoresIds = pares.map(p => p.idConductor);
+  if (new Set(vehiculosIds).size !== vehiculosIds.length) {
+    throw new AppError('No puedes asignar el mismo vehículo dos veces en la misma ruta', 400);
+  }
+  if (new Set(conductoresIds).size !== conductoresIds.length) {
+    throw new AppError('No puedes asignar el mismo conductor dos veces en la misma ruta', 400);
+  }
+};
+
+const create = async (data) => {
+  const { idDestino, nombreRuta, fechaSalida, horaSalida, horaLlegadaEstimada, estado, observaciones, pares } = data;
+
+  validarPares(pares);
 
   const destino = await Destino.findByPk(idDestino);
   if (!destino) throw new AppError('Destino no encontrado', 404);
 
-  const ruta = await Ruta.create({
-    nombreRuta: nombreRuta || null,
-    idVehiculo,
-    idConductor,
-    idDestino,
-    fechaSalida: fechaSalida || null,
-    horaSalida: horaSalida || null,
-    horaLlegadaEstimada: horaLlegadaEstimada || null,
-    estado: estado || 'Programada',
-    observaciones: observaciones || null
-  });
+  for (const par of pares) {
+    const vehiculo = await Vehiculo.findByPk(par.idVehiculo);
+    if (!vehiculo) throw new AppError('Vehículo no encontrado', 404);
+    validarDocumentosVehiculo(vehiculo);
 
-  return ruta;
+    const conductor = await Conductor.findByPk(par.idConductor);
+    if (!conductor) throw new AppError('Conductor no encontrado', 404);
+    if (!tieneLicenciaVigente(conductor.categoriasLicencia)) {
+      throw new AppError('El conductor tiene la licencia de conducción vencida y no puede ser asignado a una ruta', 400);
+    }
+
+    await validarEnfriamiento({ idVehiculo: par.idVehiculo, idConductor: par.idConductor, fechaSalida });
+  }
+
+  const transaction = await sequelize.transaction();
+  let idRutaCreada;
+  try {
+    const ruta = await Ruta.create({
+      nombreRuta: nombreRuta || null,
+      idDestino,
+      fechaSalida: fechaSalida || null,
+      horaSalida: horaSalida || null,
+      horaLlegadaEstimada: horaLlegadaEstimada || null,
+      estado: estado || 'Programada',
+      observaciones: observaciones || null
+    }, { transaction });
+    idRutaCreada = ruta.idRuta;
+
+    await RutaVehiculoConductor.bulkCreate(
+      pares.map(p => ({ idRuta: ruta.idRuta, idVehiculo: p.idVehiculo, idConductor: p.idConductor })),
+      { transaction }
+    );
+
+    await transaction.commit();
+  } catch (error) {
+    await transaction.rollback();
+    throw error;
+  }
+
+  return getById(idRutaCreada);
 };
 
 const update = async (id, data) => {
-  const { idVehiculo, idConductor, idDestino, nombreRuta, fechaSalida, horaSalida, horaLlegadaEstimada, estado, observaciones, habilitado } = data;
+  const { nombreRuta, idDestino, fechaSalida, horaSalida, horaLlegadaEstimada, estado, observaciones, habilitado, pares } = data;
 
   const ruta = await Ruta.findByPk(id);
   if (!ruta) throw new AppError('Ruta no encontrada', 404);
@@ -184,34 +310,101 @@ const update = async (id, data) => {
     throw new AppError(`No se puede editar una ruta en estado "${ruta.estado}". Solo se puede editar cuando está Programada o Cancelada.`, 400);
   }
 
-  if (idVehiculo !== undefined) {
-    const vehiculoNuevo = await Vehiculo.findByPk(idVehiculo);
-    if (!vehiculoNuevo) throw new AppError('Vehículo no encontrado', 404);
-    validarDocumentosVehiculo(vehiculoNuevo);
+  if (idDestino !== undefined) {
+    const destinoNuevo = await Destino.findByPk(idDestino);
+    if (!destinoNuevo) throw new AppError('Destino no encontrado', 404);
   }
 
-  if (idConductor !== undefined) {
-    const conductorNuevo = await Conductor.findByPk(idConductor);
-    if (!conductorNuevo) throw new AppError('Conductor no encontrado', 404);
-    if (!tieneLicenciaVigente(conductorNuevo.categoriasLicencia)) {
-      throw new AppError('El conductor tiene la licencia de conducción vencida y no puede ser asignado a una ruta', 400);
+  const nuevaFechaSalida = fechaSalida !== undefined ? fechaSalida : ruta.fechaSalida;
+  const nuevaHoraSalida = horaSalida !== undefined ? horaSalida : ruta.horaSalida;
+  const fechaHoraCambio = fechaSalida !== undefined || horaSalida !== undefined;
+
+  if (pares !== undefined) validarPares(pares);
+
+  const transaction = await sequelize.transaction();
+  try {
+    if (pares !== undefined) {
+      const paresActuales = await RutaVehiculoConductor.findAll({ where: { idRuta: id, habilitado: true }, transaction });
+      const paresActualesPorId = new Map(paresActuales.map(p => [p.idRutaVehiculoConductor, p]));
+      const idsConservados = new Set();
+
+      for (const par of pares) {
+        const parActual = par.idRutaVehiculoConductor ? paresActualesPorId.get(par.idRutaVehiculoConductor) : null;
+        const esNuevo = !parActual;
+        const cambioVehiculo = esNuevo || parActual.idVehiculo !== par.idVehiculo;
+        const cambioConductor = esNuevo || parActual.idConductor !== par.idConductor;
+
+        if (cambioVehiculo) {
+          const vehiculo = await Vehiculo.findByPk(par.idVehiculo, { transaction });
+          if (!vehiculo) throw new AppError('Vehículo no encontrado', 404);
+          validarDocumentosVehiculo(vehiculo);
+        }
+        if (cambioConductor) {
+          const conductor = await Conductor.findByPk(par.idConductor, { transaction });
+          if (!conductor) throw new AppError('Conductor no encontrado', 404);
+          if (!tieneLicenciaVigente(conductor.categoriasLicencia)) {
+            throw new AppError('El conductor tiene la licencia de conducción vencida y no puede ser asignado a una ruta', 400);
+          }
+        }
+        if (esNuevo || cambioVehiculo || cambioConductor || fechaHoraCambio) {
+          await validarEnfriamiento({
+            idVehiculo: par.idVehiculo, idConductor: par.idConductor,
+            fechaSalida: nuevaFechaSalida, idRutaExcluir: parseInt(id),
+          });
+        }
+
+        if (esNuevo) {
+          const nuevo = await RutaVehiculoConductor.create(
+            { idRuta: id, idVehiculo: par.idVehiculo, idConductor: par.idConductor },
+            { transaction }
+          );
+          idsConservados.add(nuevo.idRutaVehiculoConductor);
+        } else {
+          idsConservados.add(parActual.idRutaVehiculoConductor);
+          if (cambioVehiculo || cambioConductor) {
+            await parActual.update({ idVehiculo: par.idVehiculo, idConductor: par.idConductor }, { transaction });
+          }
+        }
+      }
+
+      const paresAQuitar = paresActuales.filter(p => !idsConservados.has(p.idRutaVehiculoConductor));
+      for (const par of paresAQuitar) {
+        const tienePaquetes = await Paquete.count({ where: { idRutaVehiculoConductor: par.idRutaVehiculoConductor }, transaction });
+        if (tienePaquetes > 0) {
+          throw new AppError('No puedes quitar un vehículo de la ruta si ya tiene paquetes asignados en esta ruta.', 400);
+        }
+        await par.update({ habilitado: false }, { transaction });
+      }
+    } else if (fechaHoraCambio) {
+      // No vino un array de pares nuevo, pero sí cambió la fecha/hora de salida —
+      // revalidar el choque contra los pares que ya tenía la ruta.
+      const paresActuales = await RutaVehiculoConductor.findAll({ where: { idRuta: id, habilitado: true }, transaction });
+      for (const par of paresActuales) {
+        await validarEnfriamiento({
+          idVehiculo: par.idVehiculo, idConductor: par.idConductor,
+          fechaSalida: nuevaFechaSalida, idRutaExcluir: parseInt(id),
+        });
+      }
     }
+
+    await ruta.update({
+      nombreRuta:            nombreRuta            !== undefined ? nombreRuta            : ruta.nombreRuta,
+      idDestino:             idDestino             !== undefined ? idDestino             : ruta.idDestino,
+      fechaSalida:           nuevaFechaSalida,
+      horaSalida:            nuevaHoraSalida,
+      horaLlegadaEstimada:   horaLlegadaEstimada   !== undefined ? horaLlegadaEstimada   : ruta.horaLlegadaEstimada,
+      estado:                estado                !== undefined ? estado                : ruta.estado,
+      observaciones:         observaciones         !== undefined ? observaciones         : ruta.observaciones,
+      habilitado:            habilitado            !== undefined ? habilitado            : ruta.habilitado
+    }, { transaction });
+
+    await transaction.commit();
+  } catch (error) {
+    await transaction.rollback();
+    throw error;
   }
 
-  await ruta.update({
-    nombreRuta:            nombreRuta            !== undefined ? nombreRuta            : ruta.nombreRuta,
-    idVehiculo:            idVehiculo            !== undefined ? idVehiculo            : ruta.idVehiculo,
-    idConductor:           idConductor           !== undefined ? idConductor           : ruta.idConductor,
-    idDestino:             idDestino             !== undefined ? idDestino             : ruta.idDestino,
-    fechaSalida:           fechaSalida           !== undefined ? fechaSalida           : ruta.fechaSalida,
-    horaSalida:            horaSalida            !== undefined ? horaSalida            : ruta.horaSalida,
-    horaLlegadaEstimada:   horaLlegadaEstimada   !== undefined ? horaLlegadaEstimada   : ruta.horaLlegadaEstimada,
-    estado:                estado                !== undefined ? estado                : ruta.estado,
-    observaciones:         observaciones         !== undefined ? observaciones         : ruta.observaciones,
-    habilitado:            habilitado            !== undefined ? habilitado            : ruta.habilitado
-  });
-
-  return ruta;
+  return getById(id);
 };
 
 const updateEstado = async (id, estado) => {
@@ -220,12 +413,7 @@ const updateEstado = async (id, estado) => {
     throw new AppError(`Estado inválido. Debe ser uno de: ${estadosValidos.join(', ')}`, 400);
   }
 
-  const ruta = await Ruta.findByPk(id, {
-    include: [
-      { model: Vehiculo, as: 'vehiculo', attributes: ['idVehiculo', 'placa', 'marca', 'modelo'] },
-      { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario', attributes: ['nombre', 'apellido'] }] }
-    ]
-  });
+  const ruta = await Ruta.findByPk(id, { include: [INCLUDE_PARES] });
   if (!ruta) throw new AppError('Ruta no encontrada', 404);
 
   if (ruta.estado === 'Completada') {
@@ -240,39 +428,57 @@ const updateEstado = async (id, estado) => {
     throw new AppError('No se puede cancelar una ruta que aún no ha iniciado. Edítala o inhabilítala en su lugar.', 400);
   }
 
-  if (estado === 'En Curso') {
-    const rutaEnCursoVehiculo = await Ruta.findOne({
-      where: { idVehiculo: ruta.idVehiculo, estado: 'En Curso', idRuta: { [Op.ne]: id }, habilitado: true }
-    });
-    if (rutaEnCursoVehiculo) {
-      const v = ruta.vehiculo;
-      throw new AppError(
-        `El vehículo ${v?.placa || ''} ya está en curso en otra ruta (Ruta #${rutaEnCursoVehiculo.idRuta})`,
-        409,
-        [{
-          tipo: 'Conflicto de vehículo',
-          id: rutaEnCursoVehiculo.idRuta,
-          descripcion: `${v?.placa || 'Vehículo'} ya está asignado a la Ruta #${rutaEnCursoVehiculo.idRuta} que se encuentra En Curso`
-        }],
-        'VEHICLE_IN_USE'
-      );
-    }
+  const pares = ruta.paresVehiculoConductor || [];
 
-    const rutaEnCursoConductor = await Ruta.findOne({
-      where: { idConductor: ruta.idConductor, estado: 'En Curso', idRuta: { [Op.ne]: id }, habilitado: true }
-    });
-    if (rutaEnCursoConductor) {
-      const u = ruta.conductor?.usuario;
-      throw new AppError(
-        `El conductor ${u ? `${u.nombre} ${u.apellido}` : ''} ya está en curso en otra ruta (Ruta #${rutaEnCursoConductor.idRuta})`,
-        409,
-        [{
-          tipo: 'Conflicto de conductor',
-          id: rutaEnCursoConductor.idRuta,
-          descripcion: `${u ? `${u.nombre} ${u.apellido}` : 'El conductor'} ya está asignado a la Ruta #${rutaEnCursoConductor.idRuta} que se encuentra En Curso`
-        }],
-        'CONDUCTOR_IN_USE'
-      );
+  if (estado === 'En Curso') {
+    for (const par of pares) {
+      const conflictoVehiculo = await RutaVehiculoConductor.findOne({
+        where: { idVehiculo: par.idVehiculo, habilitado: true, idRuta: { [Op.ne]: id } },
+        include: [{ model: Ruta, as: 'ruta', required: true, where: { estado: 'En Curso' } }],
+      });
+      if (conflictoVehiculo) {
+        throw new AppError(
+          `El vehículo ${par.vehiculo?.placa || ''} ya está en curso en otra ruta (Ruta #${conflictoVehiculo.idRuta})`,
+          409,
+          [{
+            tipo: 'Conflicto de vehículo',
+            id: conflictoVehiculo.idRuta,
+            descripcion: `${par.vehiculo?.placa || 'Vehículo'} ya está asignado a la Ruta #${conflictoVehiculo.idRuta} que se encuentra En Curso`
+          }],
+          'VEHICLE_IN_USE'
+        );
+      }
+
+      const conflictoConductor = await RutaVehiculoConductor.findOne({
+        where: { idConductor: par.idConductor, habilitado: true, idRuta: { [Op.ne]: id } },
+        include: [{ model: Ruta, as: 'ruta', required: true, where: { estado: 'En Curso' } }],
+      });
+      if (conflictoConductor) {
+        const u = par.conductor?.usuario;
+        throw new AppError(
+          `El conductor ${u ? `${u.nombre} ${u.apellido}` : ''} ya está en curso en otra ruta (Ruta #${conflictoConductor.idRuta})`,
+          409,
+          [{
+            tipo: 'Conflicto de conductor',
+            id: conflictoConductor.idRuta,
+            descripcion: `${u ? `${u.nombre} ${u.apellido}` : 'El conductor'} ya está asignado a la Ruta #${conflictoConductor.idRuta} que se encuentra En Curso`
+          }],
+          'CONDUCTOR_IN_USE'
+        );
+      }
+
+      // Revalidación de documentos/licencia justo al iniciar — antes solo se
+      // validaba al crear/asignar el par, nunca al pasar a "En Curso". Si un
+      // documento vence mientras la ruta seguía Programada, esto lo atrapa aquí,
+      // en el momento exacto en que realmente importa.
+      if (par.vehiculo) validarDocumentosVehiculo(par.vehiculo);
+      if (par.conductor && !tieneLicenciaVigente(par.conductor.categoriasLicencia)) {
+        const u = par.conductor.usuario;
+        throw new AppError(
+          `El conductor ${u ? `${u.nombre} ${u.apellido}` : ''} tiene la licencia de conducción vencida y no puede iniciar la ruta`,
+          400
+        );
+      }
     }
 
     const encomiendaCount = await EncomiendaVenta.count({
@@ -282,8 +488,10 @@ const updateEstado = async (id, estado) => {
       throw new AppError('No se puede iniciar la ruta sin encomiendas asignadas. Registra al menos una encomienda antes de poner la ruta En Curso.', 400);
     }
 
-    await Vehiculo.update({ estado: 'En Ruta' }, { where: { idVehiculo: ruta.idVehiculo } });
-    await Conductor.update({ estado: 'En Ruta' }, { where: { idConductor: ruta.idConductor } });
+    for (const par of pares) {
+      await Vehiculo.update({ estado: 'En Ruta' }, { where: { idVehiculo: par.idVehiculo } });
+      await Conductor.update({ estado: 'En Ruta' }, { where: { idConductor: par.idConductor } });
+    }
     await AnticipoExcedente.update(
       { estado: 'En Legalización' },
       { where: { idRuta: ruta.idRuta, habilitado: true, estado: 'Entregado' } }
@@ -305,8 +513,10 @@ const updateEstado = async (id, estado) => {
   }
 
   if ((estado === 'Completada' || estado === 'Cancelada') && ruta.estado === 'En Curso') {
-    await Vehiculo.update({ estado: 'Disponible' }, { where: { idVehiculo: ruta.idVehiculo } });
-    await Conductor.update({ estado: 'Disponible' }, { where: { idConductor: ruta.idConductor } });
+    for (const par of pares) {
+      await Vehiculo.update({ estado: 'Disponible' }, { where: { idVehiculo: par.idVehiculo } });
+      await Conductor.update({ estado: 'Disponible' }, { where: { idConductor: par.idConductor } });
+    }
   }
 
   if (estado === 'Completada') {
@@ -339,16 +549,12 @@ const updateEstado = async (id, estado) => {
 
   ruta.estado = estado;
   await ruta.save();
-  return ruta;
+  return getById(id);
 };
 
 const toggleHabilitado = async (id) => {
   const ruta = await Ruta.findByPk(id, {
-    include: [
-      { model: Vehiculo, as: 'vehiculo' },
-      { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
-      { model: Destino, as: 'destino' },
-    ],
+    include: [INCLUDE_PARES, { model: Destino, as: 'destino' }],
   });
   if (!ruta) throw new AppError('Ruta no encontrada', 404);
 
@@ -401,6 +607,55 @@ const getPageOf = async (id, { limit = 10 } = {}) => {
   return { page, row };
 };
 
+// Devuelve, para la lista de vehículos/conductores dada, todas las rutas activas
+// (Programada/En Curso) que ya los tienen asignados — es la materia prima que usa el
+// frontend para pintar el calendario de disponibilidad al registrar/editar una ruta
+// (un día cae "ocupado" si está a ≤COOLDOWN_DIAS de alguna de estas fechas; ver
+// validarEnfriamiento más arriba, misma regla, calculada en el cliente para poder
+// mostrarla antes de que el usuario intente guardar). idRutaExcluir se usa al editar,
+// para no chocar contra la propia ruta que se está editando.
+const getDisponibilidad = async ({ idVehiculos = [], idConductores = [], idRutaExcluir } = {}) => {
+  if (idVehiculos.length === 0 && idConductores.length === 0) return [];
+
+  const or = [];
+  if (idVehiculos.length) or.push({ idVehiculo: { [Op.in]: idVehiculos } });
+  if (idConductores.length) or.push({ idConductor: { [Op.in]: idConductores } });
+
+  const pares = await RutaVehiculoConductor.findAll({
+    where: {
+      habilitado: true,
+      [Op.or]: or,
+      ...(idRutaExcluir ? { idRuta: { [Op.ne]: idRutaExcluir } } : {}),
+    },
+    include: [
+      {
+        model: Ruta,
+        as: 'ruta',
+        required: true,
+        where: { estado: { [Op.in]: ['Programada', 'En Curso'] } },
+        attributes: ['idRuta', 'nombreRuta', 'fechaSalida'],
+      },
+      { model: Vehiculo, as: 'vehiculo', attributes: ['idVehiculo', 'placa'] },
+      {
+        model: Conductor,
+        as: 'conductor',
+        attributes: ['idConductor'],
+        include: [{ model: Usuario, as: 'usuario', attributes: ['nombre', 'apellido'] }],
+      },
+    ],
+  });
+
+  return pares.map((p) => ({
+    idRuta: p.ruta.idRuta,
+    nombreRuta: p.ruta.nombreRuta,
+    fechaSalida: p.ruta.fechaSalida,
+    idVehiculo: p.idVehiculo,
+    placa: p.vehiculo?.placa || null,
+    idConductor: p.idConductor,
+    conductorNombre: p.conductor?.usuario ? `${p.conductor.usuario.nombre} ${p.conductor.usuario.apellido}` : null,
+  }));
+};
+
 module.exports = {
   getAll,
   getById,
@@ -410,4 +665,5 @@ module.exports = {
   toggleHabilitado,
   getPageOf,
   getAniosDisponibles,
+  getDisponibilidad,
 };

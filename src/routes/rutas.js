@@ -53,6 +53,33 @@ router.get('/anios-disponibles', authorizePermission('listar_ruta'), rutaControl
 
 /**
  * @swagger
+ * /rutas/disponibilidad:
+ *   get:
+ *     summary: Rutas activas que ya tienen asignado alguno de los vehículos/conductores dados
+ *     description: |
+ *       Usado por el calendario de Registrar/Actualizar Ruta para pintar los días
+ *       ocupados (ventana de enfriamiento) antes de intentar guardar.
+ *     tags: [Rutas]
+ *     parameters:
+ *       - in: query
+ *         name: idVehiculos
+ *         schema: { type: string }
+ *         description: IDs separados por coma
+ *       - in: query
+ *         name: idConductores
+ *         schema: { type: string }
+ *         description: IDs separados por coma
+ *       - in: query
+ *         name: idRutaExcluir
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Lista de rutas/pares ocupados
+ */
+router.get('/disponibilidad', authorizePermission('listar_ruta'), rutaController.getDisponibilidad);
+
+/**
+ * @swagger
  * /rutas/{id}:
  *   get:
  *     summary: Obtener ruta por ID

@@ -96,3 +96,23 @@ exports.getPageOf = async (req, res, next) => {
     next(error);
   }
 };
+
+// Query params: idVehiculos/idConductores como listas separadas por coma (ej.
+// "1,2,3"), idRutaExcluir opcional (para editar sin chocar contra la propia ruta).
+const parseIdsCsv = (value) =>
+  (value || '')
+    .split(',')
+    .map((v) => parseInt(v.trim()))
+    .filter((v) => !isNaN(v));
+
+exports.getDisponibilidad = async (req, res, next) => {
+  try {
+    const idVehiculos = parseIdsCsv(req.query.idVehiculos);
+    const idConductores = parseIdsCsv(req.query.idConductores);
+    const idRutaExcluir = req.query.idRutaExcluir ? parseInt(req.query.idRutaExcluir) : undefined;
+    const data = await rutaService.getDisponibilidad({ idVehiculos, idConductores, idRutaExcluir });
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};

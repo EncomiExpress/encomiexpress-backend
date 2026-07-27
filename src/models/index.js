@@ -16,6 +16,7 @@ const PropietarioVehiculo = require('./propietarioVehiculo');
 const Vehiculo = require('./vehiculo');
 const Destino = require('./destino');
 const Ruta = require('./ruta');
+const RutaVehiculoConductor = require('./rutaVehiculoConductor');
 const AnticipoExcedente = require('./anticipoExcedente');
 const EncomiendaVenta = require('./encomiendaVenta');
 const Destinatario = require('./destinatario');
@@ -56,13 +57,24 @@ Conductor.belongsTo(Usuario, { foreignKey: 'idUsuario', as: 'usuario' });
 PropietarioVehiculo.hasMany(Vehiculo, { foreignKey: 'idPropietario', as: 'vehiculos' });
 Vehiculo.belongsTo(PropietarioVehiculo, { foreignKey: 'idPropietario', as: 'propietario' });
 
-// Vehiculo - Ruta (1:N)
-Vehiculo.hasMany(Ruta, { foreignKey: 'idVehiculo', as: 'rutas' });
-Ruta.belongsTo(Vehiculo, { foreignKey: 'idVehiculo', as: 'vehiculo' });
+// Ruta - RutaVehiculoConductor (1:N) — una ruta puede repartirse entre varios
+// vehículos, cada uno con su conductor (ver comentario en la tabla, init.sql).
+Ruta.hasMany(RutaVehiculoConductor, { foreignKey: 'idRuta', as: 'paresVehiculoConductor' });
+RutaVehiculoConductor.belongsTo(Ruta, { foreignKey: 'idRuta', as: 'ruta' });
 
-// Conductor - Ruta (1:N)
-Conductor.hasMany(Ruta, { foreignKey: 'idConductor', as: 'rutas' });
-Ruta.belongsTo(Conductor, { foreignKey: 'idConductor', as: 'conductor' });
+// Vehiculo - RutaVehiculoConductor (1:N)
+Vehiculo.hasMany(RutaVehiculoConductor, { foreignKey: 'idVehiculo', as: 'asignacionesRuta' });
+RutaVehiculoConductor.belongsTo(Vehiculo, { foreignKey: 'idVehiculo', as: 'vehiculo' });
+
+// Conductor - RutaVehiculoConductor (1:N)
+Conductor.hasMany(RutaVehiculoConductor, { foreignKey: 'idConductor', as: 'asignacionesRuta' });
+RutaVehiculoConductor.belongsTo(Conductor, { foreignKey: 'idConductor', as: 'conductor' });
+
+// RutaVehiculoConductor - Paquete (1:N) — cada paquete va asignado a un par
+// vehículo+conductor específico de la ruta (no todos los paquetes de una venta
+// van forzosamente al mismo vehículo).
+RutaVehiculoConductor.hasMany(Paquete, { foreignKey: 'idRutaVehiculoConductor', as: 'paquetes' });
+Paquete.belongsTo(RutaVehiculoConductor, { foreignKey: 'idRutaVehiculoConductor', as: 'asignacion' });
 
 // Destino - Ruta (1:N)
 Destino.hasMany(Ruta, { foreignKey: 'idDestino', as: 'rutas' });
@@ -107,6 +119,7 @@ module.exports = {
   Vehiculo,
   Destino,
   Ruta,
+  RutaVehiculoConductor,
   AnticipoExcedente,
   EncomiendaVenta,
   Destinatario,

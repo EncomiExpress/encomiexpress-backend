@@ -15,8 +15,8 @@ const createValidation = [
   body('idCliente').isInt().withMessage('ID de cliente debe ser un número entero'),
   body('idRuta').notEmpty().withMessage('La ruta es obligatoria'),
   body('idRuta').isInt().withMessage('ID de ruta debe ser un número entero'),
-  body('fechaEstimadaEntrega').optional().isDate().withMessage('Fecha estimada de entrega inválida'),
-  body('observaciones').optional().isString().withMessage('Observaciones debe ser un texto'),
+  body('fechaEstimadaEntrega').optional({ nullable: true }).isDate().withMessage('Fecha estimada de entrega inválida'),
+  body('observaciones').optional({ nullable: true }).isString().withMessage('Observaciones debe ser un texto'),
   body('valorServicio').optional().isFloat({ min: 0 }).withMessage('Valor del servicio debe ser un número positivo'),
   body('impuestos').optional().isFloat({ min: 0 }).withMessage('Impuestos debe ser un número positivo'),
   body('metodoPago')
@@ -35,12 +35,15 @@ const createValidation = [
   body('paquetes.*.peso')
     .notEmpty().withMessage('El peso del paquete es obligatorio')
     .isFloat({ min: 0.01 }).withMessage('El peso del paquete debe ser mayor a 0'),
+  body('paquetes.*.idRutaVehiculoConductor')
+    .notEmpty().withMessage('Cada paquete debe tener un vehículo asignado')
+    .isInt().withMessage('ID de vehículo/conductor de ruta debe ser un número entero'),
 ];
 
 const updateValidation = [
   body('idRuta').optional().isInt().withMessage('ID de ruta debe ser un número entero'),
-  body('fechaEstimadaEntrega').optional().isDate().withMessage('Fecha estimada de entrega inválida'),
-  body('observaciones').optional(),
+  body('fechaEstimadaEntrega').optional({ nullable: true }).isDate().withMessage('Fecha estimada de entrega inválida'),
+  body('observaciones').optional({ nullable: true }).isString().withMessage('Observaciones debe ser un texto'),
   body('valorServicio').optional().isFloat({ min: 0 }).withMessage('Valor del servicio debe ser un número positivo'),
   body('impuestos').optional().isFloat({ min: 0 }).withMessage('Impuestos debe ser un número positivo'),
   body('metodoPago')
@@ -60,6 +63,9 @@ const updateValidation = [
   body('paquetes.*.peso')
     .notEmpty().withMessage('El peso del paquete es obligatorio')
     .isFloat({ min: 0.01 }).withMessage('El peso del paquete debe ser mayor a 0'),
+  body('paquetes.*.idRutaVehiculoConductor')
+    .notEmpty().withMessage('Cada paquete debe tener un vehículo asignado')
+    .isInt().withMessage('ID de vehículo/conductor de ruta debe ser un número entero'),
 ];
 
 const cambiarEstadoValidation = [

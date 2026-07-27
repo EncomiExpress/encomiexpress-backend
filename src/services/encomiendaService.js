@@ -1,4 +1,4 @@
-﻿const { EncomiendaVenta, Destinatario, Paquete, Cliente, Ruta, Vehiculo, Conductor, Destino, Usuario, sequelize } = require('../models');
+const { EncomiendaVenta, Destinatario, Paquete, Cliente, Ruta, RutaVehiculoConductor, Vehiculo, Conductor, Destino, Usuario, sequelize } = require('../models');
 const AppError = require('../errors/appError');
 const crypto = require('crypto');
 
@@ -10,6 +10,47 @@ const ESTADOS_VALIDOS = [
 ];
 const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia', 'Nequi'];
 const ESTADOS_PAGO_VALIDOS = ['Pendiente', 'Pagado'];
+
+// Una ruta ahora puede tener varios pares vehículo+conductor (convoy) — este include
+// se reutiliza en todas las consultas que devuelven una venta con su ruta, para que el
+// frontend pueda mostrar el vehículo/conductor correcto de cada paquete (ya no hay uno
+// solo por ruta). Mismo patrón que INCLUDE_PARES en rutaService.js.
+const INCLUDE_PARES = {
+  model: RutaVehiculoConductor,
+  as: 'paresVehiculoConductor',
+  where: { habilitado: true },
+  required: false,
+  include: [
+    { model: Vehiculo, as: 'vehiculo' },
+    { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
+  ],
+};
+
+const RUTA_INCLUDE = {
+  model: Ruta,
+  as: 'ruta',
+  required: false,
+  include: [INCLUDE_PARES, { model: Destino, as: 'destino', required: false }],
+};
+
+// Vehículo/conductor específico de CADA paquete (una venta puede repartir sus paquetes
+// entre varios vehículos de la misma ruta) — usado por la guía PDF y por el detalle de venta.
+const paqueteIncludeConAsignacion = (extra = {}) => ({
+  model: Paquete,
+  as: 'paquetes',
+  include: [
+    {
+      model: RutaVehiculoConductor,
+      as: 'asignacion',
+      required: false,
+      include: [
+        { model: Vehiculo, as: 'vehiculo', required: false },
+        { model: Conductor, as: 'conductor', required: false, include: [{ model: Usuario, as: 'usuario', required: false }] },
+      ],
+    },
+  ],
+  ...extra,
+});
 
 // Genera numeroGuia por año (EE-2026-483920), uno POR PAQUETE (no por venta) — cada
 // paquete físico necesita su propio número de guía/código de barras único, porque en la
@@ -116,23 +157,9 @@ const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, metod
     where,
     include: [
       { model: Cliente, as: 'cliente' },
-      {
-        model: Ruta,
-        as: 'ruta',
-        required: false,
-        include: [
-          { model: Vehiculo, as: 'vehiculo', required: false },
-          {
-            model: Conductor,
-            as: 'conductor',
-            required: false,
-            include: [{ model: Usuario, as: 'usuario', required: false }],
-          },
-          { model: Destino, as: 'destino', required: false },
-        ],
-      },
+      RUTA_INCLUDE,
       { model: Destinatario, as: 'destinatario' },
-      { model: Paquete, as: 'paquetes', separate: true },
+      paqueteIncludeConAsignacion({ separate: true }),
     ],
     limit,
     offset,
@@ -148,23 +175,9 @@ const getById = async (id) => {
   const encomienda = await EncomiendaVenta.findByPk(id, {
     include: [
       { model: Cliente, as: 'cliente' },
-      {
-        model: Ruta,
-        as: 'ruta',
-        required: false,
-        include: [
-          { model: Vehiculo, as: 'vehiculo', required: false },
-          {
-            model: Conductor,
-            as: 'conductor',
-            required: false,
-            include: [{ model: Usuario, as: 'usuario', required: false }],
-          },
-          { model: Destino, as: 'destino', required: false },
-        ],
-      },
+      RUTA_INCLUDE,
       { model: Destinatario, as: 'destinatario' },
-      { model: Paquete, as: 'paquetes' },
+      paqueteIncludeConAsignacion(),
     ],
   });
 
@@ -175,46 +188,62 @@ const getById = async (id) => {
   return encomienda;
 };
 
-// Suma el peso de los paquetes de todas las ventas ya asignadas a una ruta (sin contar
-// las canceladas ni, si se indica, la propia venta que se está editando) — usado para
-// saber cuánta capacidad del vehículo ya está ocupada antes de aceptar una venta nueva.
-const getPesoUsadoEnRuta = async (idRuta, excluirIdEncomienda, transaction) => {
-  const where = { idRuta, estado: { [sequelize.Sequelize.Op.ne]: 'Cancelada' } };
+// Suma el peso de los paquetes ya asignados a un par vehículo+conductor específico (sin
+// contar ventas canceladas ni, si se indica, la propia venta que se está editando) — usado
+// para saber cuánta capacidad de ESE vehículo ya está ocupada antes de aceptar un paquete nuevo.
+// A diferencia del modelo anterior (capacidad por ruta completa), ahora cada vehículo del
+// convoy tiene su propio cupo independiente.
+const getPesoUsadoEnPar = async (idRutaVehiculoConductor, excluirIdEncomienda, transaction) => {
+  const { Op } = sequelize.Sequelize;
+  const ventaWhere = { estado: { [Op.ne]: 'Cancelada' } };
   if (excluirIdEncomienda) {
-    where.idEncomiendaVenta = { [sequelize.Sequelize.Op.ne]: excluirIdEncomienda };
+    ventaWhere.idEncomiendaVenta = { [Op.ne]: excluirIdEncomienda };
   }
-  const ventas = await EncomiendaVenta.findAll({
-    where,
-    include: [{ model: Paquete, as: 'paquetes', attributes: ['peso'] }],
+  const paquetes = await Paquete.findAll({
+    where: { idRutaVehiculoConductor },
+    include: [{ model: EncomiendaVenta, as: 'encomienda', where: ventaWhere, attributes: [] }],
+    attributes: ['peso'],
     transaction,
   });
-  return ventas.reduce(
-    (total, venta) => total + venta.paquetes.reduce((sum, p) => sum + parseFloat(p.peso || 0), 0),
-    0
-  );
+  return paquetes.reduce((sum, p) => sum + parseFloat(p.peso || 0), 0);
 };
 
-const validarCapacidadRuta = async (idRuta, paquetesNuevos, transaction, excluirIdEncomienda) => {
-  const ruta = await Ruta.findByPk(idRuta, {
-    include: [{ model: Vehiculo, as: 'vehiculo' }],
-    transaction,
-  });
+// Valida la capacidad de cada vehículo usado por los paquetes de la venta, no la ruta
+// completa: cada paquete trae su propio idRutaVehiculoConductor (a cuál vehículo del
+// convoy va), se agrupan por ese campo y se valida cada uno contra la capacidad de SU
+// vehículo. También confirma que el par elegido de verdad pertenezca a la ruta indicada.
+const validarCapacidadPares = async (idRuta, paquetes, transaction, excluirIdEncomienda) => {
+  const pesoNuevoPorPar = new Map();
+  for (const pkg of (paquetes || [])) {
+    const idPar = pkg.idRutaVehiculoConductor;
+    if (!idPar) continue;
+    pesoNuevoPorPar.set(idPar, (pesoNuevoPorPar.get(idPar) || 0) + parseFloat(pkg.peso || 0));
+  }
 
-  if (!ruta || !ruta.vehiculo || !ruta.vehiculo.capacidad) return;
+  for (const [idRutaVehiculoConductor, pesoNuevo] of pesoNuevoPorPar) {
+    const par = await RutaVehiculoConductor.findOne({
+      where: { idRutaVehiculoConductor, habilitado: true },
+      include: [{ model: Vehiculo, as: 'vehiculo' }],
+      transaction,
+    });
+    if (!par || par.idRuta !== idRuta) {
+      throw new AppError('El vehículo/conductor elegido no pertenece a esta ruta', 400);
+    }
+    if (!par.vehiculo || !par.vehiculo.capacidad) continue;
 
-  const pesoNuevo = (paquetesNuevos || []).reduce((sum, p) => sum + parseFloat(p.peso || 0), 0);
-  const pesoUsado = await getPesoUsadoEnRuta(idRuta, excluirIdEncomienda, transaction);
-  const capacidad = parseFloat(ruta.vehiculo.capacidad);
-  const disponible = capacidad - pesoUsado;
+    const pesoUsado = await getPesoUsadoEnPar(idRutaVehiculoConductor, excluirIdEncomienda, transaction);
+    const capacidad = parseFloat(par.vehiculo.capacidad);
+    const disponible = capacidad - pesoUsado;
 
-  if (pesoNuevo > disponible) {
-    // No hacemos rollback aquí — el try/catch de create()/update() ya lo hace al
-    // capturar este error. Llamarlo dos veces revienta con "Transaction cannot be
-    // rolled back because it has been finished with state: rollback".
-    throw new AppError(
-      `Esta ruta ya no tiene espacio suficiente. Quedan ${disponible.toFixed(2)} kg disponibles y este envío pesa ${pesoNuevo.toFixed(2)} kg.`,
-      400
-    );
+    if (pesoNuevo > disponible) {
+      // No hacemos rollback aquí — el try/catch de create()/update() ya lo hace al
+      // capturar este error. Llamarlo dos veces revienta con "Transaction cannot be
+      // rolled back because it has been finished with state: rollback".
+      throw new AppError(
+        `El vehículo ${par.vehiculo.placa} ya no tiene espacio suficiente en esta ruta. Quedan ${disponible.toFixed(2)} kg disponibles y estos paquetes pesan ${pesoNuevo.toFixed(2)} kg.`,
+        400
+      );
+    }
   }
 };
 
@@ -247,7 +276,15 @@ const create = async (data) => {
     if (!ruta) {
       throw new AppError('Ruta no encontrada', 400);
     }
-    await validarCapacidadRuta(idRuta, paquetes, transaction);
+
+    if (paquetes && paquetes.length > 0) {
+      for (const pkg of paquetes) {
+        if (!pkg.idRutaVehiculoConductor) {
+          throw new AppError('Cada paquete debe tener un vehículo asignado', 400);
+        }
+      }
+    }
+    await validarCapacidadPares(idRuta, paquetes, transaction);
 
     if (
       metodoPago &&
@@ -299,6 +336,7 @@ const create = async (data) => {
         await Paquete.create(
           {
             idEncomiendaVenta: encomienda.idEncomiendaVenta,
+            idRutaVehiculoConductor: pkg.idRutaVehiculoConductor,
             numeroGuia: await generarNumeroGuia(transaction),
             descripcionContenido: pkg.descripcionContenido || null,
             peso: pkg.peso || null,
@@ -317,9 +355,9 @@ const create = async (data) => {
     const encomiendaCompleta = await EncomiendaVenta.findByPk(encomienda.idEncomiendaVenta, {
       include: [
         { model: Cliente, as: 'cliente' },
-        { model: Ruta, as: 'ruta', required: false },
+        RUTA_INCLUDE,
         { model: Destinatario, as: 'destinatario' },
-        { model: Paquete, as: 'paquetes' },
+        paqueteIncludeConAsignacion(),
       ],
     });
 
@@ -400,12 +438,20 @@ const update = async (id, data) => {
     if (!rutaNueva) {
       throw new AppError('Ruta no encontrada', 400);
     }
+
+    if (paquetes && paquetes.length > 0) {
+      for (const pkg of paquetes) {
+        if (!pkg.idRutaVehiculoConductor) {
+          throw new AppError('Cada paquete debe tener un vehículo asignado', 400);
+        }
+      }
+    }
     // Si esta venta no manda paquetes nuevos, se valida con los que ya tenía
-    // (no están cambiando, pero igual cuentan para el peso de la ruta).
+    // (no están cambiando, pero igual cuentan para el peso de su vehículo).
     const paquetesParaValidar = paquetes && paquetes.length > 0
       ? paquetes
-      : await Paquete.findAll({ where: { idEncomiendaVenta: id }, attributes: ['peso'], transaction });
-    await validarCapacidadRuta(nuevoIdRuta, paquetesParaValidar, transaction, parseInt(id));
+      : await Paquete.findAll({ where: { idEncomiendaVenta: id }, attributes: ['peso', 'idRutaVehiculoConductor'], transaction });
+    await validarCapacidadPares(nuevoIdRuta, paquetesParaValidar, transaction, parseInt(id));
 
     await encomienda.update(
       {
@@ -458,14 +504,16 @@ const update = async (id, data) => {
       // guía/código de barras físico, así que editar la venta (o incluso editar OTRO
       // paquete) nunca debe reasignarle un número nuevo a uno que no cambió. Solo se
       // crea guía nueva para paquetes realmente nuevos (sin idPaquete); los que ya
-      // existían se actualizan en el mismo registro, y los que ya no vienen en el
-      // payload (se quitaron en el formulario) se eliminan.
+      // existían se actualizan en el mismo registro (incluyendo si se reasignaron a
+      // otro vehículo del convoy), y los que ya no vienen en el payload (se quitaron
+      // en el formulario) se eliminan.
       const existentes = await Paquete.findAll({ where: { idEncomiendaVenta: id }, transaction });
       const existentesPorId = new Map(existentes.map((p) => [p.idPaquete, p]));
       const idsConservados = new Set();
 
       for (const pkg of paquetes) {
         const datos = {
+          idRutaVehiculoConductor: pkg.idRutaVehiculoConductor,
           descripcionContenido: pkg.descripcionContenido || null,
           peso: pkg.peso || null,
           alto: pkg.alto || null,
@@ -498,9 +546,9 @@ const update = async (id, data) => {
     const encomiendaActualizada = await EncomiendaVenta.findByPk(id, {
       include: [
         { model: Cliente, as: 'cliente' },
-        { model: Ruta, as: 'ruta', required: false },
+        RUTA_INCLUDE,
         { model: Destinatario, as: 'destinatario' },
-        { model: Paquete, as: 'paquetes' },
+        paqueteIncludeConAsignacion(),
       ],
     });
 
@@ -577,22 +625,8 @@ const toggleHabilitado = async (id) => {
     include: [
       { model: Cliente, as: 'cliente' },
       { model: Destinatario, as: 'destinatario' },
-      { model: Paquete, as: 'paquetes' },
-      {
-        model: Ruta,
-        as: 'ruta',
-        required: false,
-        include: [
-          { model: Vehiculo, as: 'vehiculo', required: false },
-          {
-            model: Conductor,
-            as: 'conductor',
-            required: false,
-            include: [{ model: Usuario, as: 'usuario', required: false }],
-          },
-          { model: Destino, as: 'destino', required: false },
-        ],
-      },
+      paqueteIncludeConAsignacion(),
+      RUTA_INCLUDE,
     ],
   });
 

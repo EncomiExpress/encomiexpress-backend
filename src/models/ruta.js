@@ -11,14 +11,6 @@ const Ruta = sequelize.define('Ruta', {
     type: DataTypes.STRING(150),
     allowNull: true
   },
-  idVehiculo: {
-    type: DataTypes.INTEGER,
-    allowNull: false
-  },
-  idConductor: {
-    type: DataTypes.INTEGER,
-    allowNull: false
-  },
   idDestino: {
     type: DataTypes.INTEGER,
     allowNull: false

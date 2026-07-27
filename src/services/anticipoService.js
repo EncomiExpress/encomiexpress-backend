@@ -1,4 +1,4 @@
-const { AnticipoExcedente, Conductor, Ruta, Vehiculo, Destino, Usuario, sequelize } = require('../models');
+const { AnticipoExcedente, Conductor, Ruta, RutaVehiculoConductor, Vehiculo, Destino, Usuario, sequelize } = require('../models');
 const AppError = require('../errors/appError');
 const { Op } = require('sequelize');
 const { tieneLicenciaVigente } = require('../utils/licenciaHelper');
@@ -75,10 +75,7 @@ const getAll = async ({ idConductor, idRuta, estado, habilitado, anio, mes, q, p
         {
           model: Ruta,
           as: 'ruta',
-          include: [
-            { model: Vehiculo, as: 'vehiculo' },
-            { model: Destino, as: 'destino' }
-          ]
+          include: [{ model: Destino, as: 'destino' }]
         }
       ],
       limit,
@@ -86,6 +83,8 @@ const getAll = async ({ idConductor, idRuta, estado, habilitado, anio, mes, q, p
       order: order.length > 0 ? order : [['idAnticipoExcedente', 'DESC']],
       distinct: true,
     });
+
+    await Promise.all(data.map(attachVehiculo));
 
     return { data, total: count };
   } catch (error) {
@@ -98,15 +97,29 @@ const ANTICIPO_INCLUDE = [
   {
     model: Ruta,
     as: 'ruta',
-    include: [
-      { model: Vehiculo, as: 'vehiculo' },
-      { model: Destino, as: 'destino' }
-    ]
+    include: [{ model: Destino, as: 'destino' }]
   }
 ];
 
-const getAnticipoCompleto = (id) =>
-  AnticipoExcedente.findByPk(id, { include: ANTICIPO_INCLUDE });
+// El vehículo de un anticipo es el que le tocó a SU conductor en esa ruta (una ruta
+// puede repartirse entre varios vehículos+conductor) — ya no hay una asociación
+// directa Ruta→Vehiculo, así que se resuelve aparte contra la tabla intermedia y se
+// anexa en ruta.vehiculo para no romper la forma que ya esperaba el frontend.
+const attachVehiculo = async (anticipo) => {
+  if (anticipo?.ruta) {
+    const par = await RutaVehiculoConductor.findOne({
+      where: { idRuta: anticipo.idRuta, idConductor: anticipo.idConductor, habilitado: true },
+      include: [{ model: Vehiculo, as: 'vehiculo' }],
+    });
+    anticipo.ruta.dataValues.vehiculo = par?.vehiculo || null;
+  }
+  return anticipo;
+};
+
+const getAnticipoCompleto = async (id) => {
+  const anticipo = await AnticipoExcedente.findByPk(id, { include: ANTICIPO_INCLUDE });
+  return attachVehiculo(anticipo);
+};
 
 const getById = async (id) => {
   const anticipo = await getAnticipoCompleto(id);
@@ -119,7 +132,28 @@ const getById = async (id) => {
 };
 
 const create = async (data) => {
-  const { idConductor, idRuta, valorAnticipo, soporte, fechaEntrega } = data;
+  const { idRuta, idRutaVehiculoConductor, valorAnticipo, soporte, fechaEntrega } = data;
+
+  if (!idRuta) {
+    throw new AppError('La ruta es obligatoria', 400);
+  }
+  if (!idRutaVehiculoConductor) {
+    throw new AppError('Debes seleccionar el vehículo y conductor de la ruta', 400);
+  }
+
+  const ruta = await Ruta.findByPk(idRuta);
+  if (!ruta) {
+    throw new AppError('Ruta no encontrada', 404);
+  }
+
+  // Una ruta ahora puede tener varios pares vehículo+conductor — hay que confirmar
+  // que el par elegido de verdad pertenece a esta ruta, y de ahí sale el conductor
+  // (ya no se selecciona aparte, así nunca queda desincronizado).
+  const par = await RutaVehiculoConductor.findOne({ where: { idRutaVehiculoConductor, habilitado: true } });
+  if (!par || par.idRuta !== ruta.idRuta) {
+    throw new AppError('El vehículo/conductor elegido no pertenece a esta ruta', 400);
+  }
+  const idConductor = par.idConductor;
 
   const conductor = await Conductor.findByPk(idConductor);
   if (!conductor) {
@@ -130,19 +164,14 @@ const create = async (data) => {
     throw new AppError('El conductor tiene la licencia de conducción vencida y no puede recibir anticipos', 400);
   }
 
-  let idRutaFinal = idRuta;
-  if (idRuta) {
-    const ruta = await Ruta.findByPk(idRuta);
-    if (!ruta) {
-      throw new AppError('Ruta no encontrada', 404);
-    }
-    const anticipoExistente = await AnticipoExcedente.findOne({
-      where: { idRuta: parseInt(idRuta), habilitado: true, estado: { [Op.in]: ['Entregado', 'En Legalización'] } }
-    });
-    if (anticipoExistente) {
-      throw new AppError('Esta ruta ya tiene un anticipo activo. Solo puede existir un anticipo por ruta a la vez.', 409);
-    }
-    idRutaFinal = ruta.idRuta;
+  // La regla pasa de "un anticipo activo por ruta" a "un anticipo activo por
+  // conductor dentro de la ruta" — con varios conductores por ruta, cada uno
+  // puede tener el suyo sin chocar entre sí.
+  const anticipoExistente = await AnticipoExcedente.findOne({
+    where: { idRuta: ruta.idRuta, idConductor, habilitado: true, estado: { [Op.in]: ['Entregado', 'En Legalización'] } }
+  });
+  if (anticipoExistente) {
+    throw new AppError('Este conductor ya tiene un anticipo activo en esta ruta.', 409);
   }
 
   const cleanDate = (value) => {
@@ -154,7 +183,7 @@ const create = async (data) => {
 
   const anticipo = await AnticipoExcedente.create({
     idConductor,
-    idRuta: idRutaFinal,
+    idRuta: ruta.idRuta,
     valorAnticipo: valorAnticipo || 0,
     valorGastado: 0,
     excedente: 0,
@@ -172,8 +201,8 @@ const create = async (data) => {
 //   Excedente pendiente/Completado → nada (avanza con "Confirmar devolución", ver entregarExcedente)
 const update = async (id, data) => {
   const {
-    idConductor,
     idRuta,
+    idRutaVehiculoConductor,
     valorAnticipo,
     valorGastado,
     estado,
@@ -196,8 +225,8 @@ const update = async (id, data) => {
   const enLegalizacion = anticipo.estado === 'En Legalización';
 
   if (enLegalizacion) {
-    if (idRuta !== undefined || idConductor !== undefined || valorAnticipo !== undefined || fechaEntrega !== undefined) {
-      throw new AppError('La ruta, el conductor, el valor del anticipo y la fecha de entrega ya no se pueden modificar: la ruta ya está en curso.', 400);
+    if (idRuta !== undefined || idRutaVehiculoConductor !== undefined || valorAnticipo !== undefined || fechaEntrega !== undefined) {
+      throw new AppError('La ruta, el vehículo/conductor, el valor del anticipo y la fecha de entrega ya no se pueden modificar: la ruta ya está en curso.', 400);
     }
     if (valorGastado === undefined) {
       throw new AppError('Debes registrar el valor gastado para legalizar este anticipo.', 400);
@@ -210,30 +239,39 @@ const update = async (id, data) => {
 
   let idRutaFinal;
   let idConductorFinal;
-  if (idRuta !== undefined) {
+  if (idRuta !== undefined || idRutaVehiculoConductor !== undefined) {
+    if (!idRuta || !idRutaVehiculoConductor) {
+      throw new AppError('Debes indicar la ruta y el vehículo/conductor', 400);
+    }
     const ruta = await Ruta.findByPk(idRuta);
     if (!ruta) {
       throw new AppError('Ruta no encontrada', 404);
     }
+    // El conductor del anticipo siempre sigue al del par vehículo+conductor elegido
+    // (una ruta puede tener varios) — no se selecciona aparte, para que nunca
+    // queden desincronizados.
+    const par = await RutaVehiculoConductor.findOne({ where: { idRutaVehiculoConductor, habilitado: true } });
+    if (!par || par.idRuta !== ruta.idRuta) {
+      throw new AppError('El vehículo/conductor elegido no pertenece a esta ruta', 400);
+    }
     const anticipoExistente = await AnticipoExcedente.findOne({
       where: {
-        idRuta: parseInt(idRuta),
+        idRuta: ruta.idRuta,
+        idConductor: par.idConductor,
         habilitado: true,
         estado: { [Op.in]: ['Entregado', 'En Legalización'] },
         idAnticipoExcedente: { [Op.ne]: id },
       }
     });
     if (anticipoExistente) {
-      throw new AppError('Esta ruta ya tiene un anticipo activo. Solo puede existir un anticipo por ruta a la vez.', 409);
+      throw new AppError('Este conductor ya tiene un anticipo activo en esta ruta.', 409);
     }
-    // El conductor del anticipo siempre sigue al de la ruta — no se selecciona
-    // aparte, para que nunca queden desincronizados.
-    const conductorDeRuta = await Conductor.findByPk(ruta.idConductor);
+    const conductorDeRuta = await Conductor.findByPk(par.idConductor);
     if (conductorDeRuta && !tieneLicenciaVigente(conductorDeRuta.categoriasLicencia)) {
       throw new AppError('El conductor de esta ruta tiene la licencia de conducción vencida y no puede recibir anticipos', 400);
     }
     idRutaFinal = ruta.idRuta;
-    idConductorFinal = ruta.idConductor;
+    idConductorFinal = par.idConductor;
   }
 
   const cleanDate = (value) => {
@@ -300,57 +338,6 @@ const entregarExcedente = async (id, { soporte }) => {
   return getAnticipoCompleto(id);
 };
 
-
-const createMisAnticipo = async (idUsuario, rolNombre, data) => {
-  if (rolNombre !== 'conductor') {
-    throw new AppError('Solo los conductores pueden crear anticipos', 403);
-  }
-
-  const conductor = await Conductor.findOne({
-    where: { idUsuario }
-  });
-
-  if (!conductor) {
-    throw new AppError('Conductor no encontrado', 404);
-  }
-
-  const { idRuta, valorAnticipo, soporte, fechaEntrega } = data;
-
-  let idRutaFinal = idRuta;
-  if (idRuta) {
-    const ruta = await Ruta.findByPk(idRuta);
-    if (!ruta) {
-      throw new AppError('Ruta no encontrada', 404);
-    }
-    const anticipoExistente = await AnticipoExcedente.findOne({
-      where: { idRuta: parseInt(idRuta), habilitado: true, estado: { [Op.in]: ['Entregado', 'En Legalización'] } }
-    });
-    if (anticipoExistente) {
-      throw new AppError('Esta ruta ya tiene un anticipo activo. Solo puede existir un anticipo por ruta a la vez.', 409);
-    }
-    idRutaFinal = ruta.idRuta;
-  }
-
-  const cleanDate = (value) => {
-    if (value === null || value === '' || value === 'Invalid date') {
-      return null;
-    }
-    return value;
-  };
-
-  const anticipo = await AnticipoExcedente.create({
-    idConductor: conductor.idConductor,
-    idRuta: idRutaFinal,
-    valorAnticipo: valorAnticipo || 0,
-    valorGastado: 0,
-    excedente: 0,
-    estado: 'Entregado',
-    soporte,
-    fechaEntrega: cleanDate(fechaEntrega)
-  });
-
-  return getAnticipoCompleto(anticipo.idAnticipoExcedente);
-};
 
 const cambiarEstado = async (id, estado) => {
   const estadosValidos = ['Entregado', 'En Legalización', 'Excedente pendiente', 'Completado'];
@@ -451,7 +438,6 @@ module.exports = {
   create,
   update,
   entregarExcedente,
-  createMisAnticipo,
   updateSoporte,
   cambiarEstado,
   toggleHabilitado,

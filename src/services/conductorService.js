@@ -1,4 +1,4 @@
-const { Conductor, Usuario, AnticipoExcedente, Ruta, Vehiculo, Destino } = require('../models');
+const { Conductor, Usuario, AnticipoExcedente, Ruta, RutaVehiculoConductor, Vehiculo, Destino } = require('../models');
 const { Op } = require('sequelize');
 const bcrypt = require('bcryptjs');
 const sequelize = require('../config/database');
@@ -265,13 +265,6 @@ const getMiPerfil = async (idUsuario, rolNombre) => {
     where: { idUsuario },
     include: [
       { model: Usuario, as: 'usuario', attributes: ['idUsuario', 'nombre', 'apellido', 'telefono', 'email', 'tipoIdentificacion', 'numeroIdentificacion'] },
-      {
-        model: Ruta,
-        as: 'rutas',
-        where: { estado: 'En Curso' },
-        required: false,
-        include: [{ model: Vehiculo, as: 'vehiculo', attributes: ['idVehiculo', 'placa', 'marca', 'modelo', 'color', 'tipo', 'capacidad'] }],
-      },
     ]
   });
 
@@ -280,8 +273,17 @@ const getMiPerfil = async (idUsuario, rolNombre) => {
   }
 
   // No existe una asignación fija conductor→vehículo en el modelo de datos — el vehículo
-  // que se muestra es el de la ruta que el conductor tiene "En Curso" en este momento, si hay una.
-  const vehiculo = conductor.rutas && conductor.rutas.length > 0 ? conductor.rutas[0].vehiculo : null;
+  // que se muestra es el del par vehículo+conductor de la ruta que el conductor tiene
+  // "En Curso" en este momento, si hay una (una ruta puede repartirse entre varios
+  // vehículos; este es específicamente el que le tocó a este conductor).
+  const par = await RutaVehiculoConductor.findOne({
+    where: { idConductor: conductor.idConductor, habilitado: true },
+    include: [
+      { model: Ruta, as: 'ruta', where: { estado: 'En Curso' }, attributes: [], required: true },
+      { model: Vehiculo, as: 'vehiculo', attributes: ['idVehiculo', 'placa', 'marca', 'modelo', 'color', 'tipo', 'capacidad'] },
+    ],
+  });
+  const vehiculo = par?.vehiculo || null;
 
   return {
     id: conductor.usuario.idUsuario,
@@ -354,12 +356,23 @@ const getMisAnticipos = async (idUsuario, rolNombre) => {
     include: [{
       model: Ruta,
       as: 'ruta',
-      include: [
-        { model: Vehiculo, as: 'vehiculo' },
-        { model: Destino, as: 'destino' }
-      ]
+      include: [{ model: Destino, as: 'destino' }]
     }]
   });
+
+  // El vehículo de "mi" anticipo es el que le tocó a este conductor específicamente
+  // en esa ruta (una ruta puede repartirse entre varios vehículos) — ya no hay una
+  // asociación directa Ruta→Vehiculo, así que se resuelve aparte por cada anticipo,
+  // preservando la forma ruta.vehiculo que ya espera la app móvil.
+  for (const anticipo of anticipos) {
+    if (anticipo.ruta) {
+      const par = await RutaVehiculoConductor.findOne({
+        where: { idRuta: anticipo.idRuta, idConductor: conductor.idConductor, habilitado: true },
+        include: [{ model: Vehiculo, as: 'vehiculo' }],
+      });
+      anticipo.ruta.dataValues.vehiculo = par?.vehiculo || null;
+    }
+  }
 
   return anticipos;
 };
