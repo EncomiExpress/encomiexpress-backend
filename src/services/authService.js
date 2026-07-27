@@ -111,65 +111,6 @@ const refresh = async (refreshToken) => {
   return { token };
 };
 
-const register = async (data) => {
-  // Autoregistro público (sin login) — ver nota en authController.js. Se ignora a
-  // propósito cualquier idRol/habilitado que venga en el body: todo autoregistro
-  // queda con rol Administrador pero SIEMPRE inhabilitado y marcado como pendiente,
-  // hasta que un admin ya activo lo habilite desde el módulo de Usuarios (eso limpia
-  // registroPendiente, ver usuarioService.toggleHabilitado). Si se elimina esta
-  // función en el futuro, también revisar authController.js y routes/auth.js.
-  const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, password } = data;
-
-  const existingEmail = await Usuario.findOne({ where: { email } });
-  if (existingEmail) {
-    throw new AppError('El email ya está registrado', 400);
-  }
-
-  const existingDoc = await Usuario.findOne({ where: { numeroIdentificacion } });
-  if (existingDoc) {
-    throw new AppError('El número de identificación ya está registrado', 400);
-  }
-
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const usuario = await Usuario.create({
-    tipoIdentificacion,
-    numeroIdentificacion,
-    nombre,
-    apellido,
-    telefono,
-    email,
-    password: hashedPassword,
-    idRol: 1,
-    habilitado: false,
-    registroPendiente: true,
-  });
-
-  const token = generateToken({
-    idUsuario: usuario.idUsuario,
-    email: usuario.email,
-    idRol: usuario.idRol,
-    rol: 'usuario'
-  });
-
-  const rol = await Rol.findByPk(usuario.idRol, {
-    include: [{ model: Permiso, as: 'permisos' }]
-  });
-  const permisos = rol?.permisos?.map(p => p.nombre) ?? [];
-
-  return {
-    token,
-    usuario: {
-      nombre: usuario.nombre,
-      apellido: usuario.apellido,
-      telefono: usuario.telefono,
-      tipoIdentificacion: usuario.tipoIdentificacion,
-      numeroIdentificacion: usuario.numeroIdentificacion,
-      rol: 'usuario',
-      permisos
-    }
-  };
-};
-
 const getProfile = async (idUsuario) => {
   const usuario = await Usuario.findByPk(idUsuario, {
     include: [{
@@ -307,7 +248,6 @@ const cambiarPassword = async (email, passwordActual, passwordNueva) => {
 
 module.exports = {
   login,
-  register,
   refresh,
   getProfile,
   getConductorProfile,

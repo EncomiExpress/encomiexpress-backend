@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const conductorController = require('../controllers/conductorController');
-const anticipoController = require('../controllers/anticipoExcedenteController');
 const { authenticate, authorize, authorizePermission } = require('../middlewares/auth');
 const { validate } = require('../middlewares/validation');
 const { createValidation, updateValidation, cambiarEstadoValidation } = require('../validators/conductoresValidator');
@@ -74,30 +73,6 @@ router.put('/perfil', conductorController.actualizarPerfil);
  *               $ref: '#/components/schemas/Error'
  */
 router.get('/mis-anticipos', conductorController.getMisAnticipos);
-
-/**
- * @swagger
- * /conductores/mis-anticipos:
- *   post:
- *     summary: Registrar anticipo propio (solo conductores)
- *     tags: [Conductores]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [tipo, monto]
- *             properties:
- *               tipo:        { type: string, enum: [anticipo, excedente] }
- *               monto:       { type: number }
- *               idRuta:      { type: integer }
- *               descripcion: { type: string }
- *     responses:
- *       201:
- *         description: Anticipo registrado (idConductor se toma del token)
- */
-router.post('/mis-anticipos', anticipoController.createMisAnticipo);
 
 /**
  * @swagger

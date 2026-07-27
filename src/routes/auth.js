@@ -3,7 +3,7 @@ const router = express.Router();
 const authController = require('../controllers/authController');
 const { authenticate } = require('../middlewares/auth');
 const { validate } = require('../middlewares/validation');
-const { loginValidation, registerValidation, recoverPasswordValidation, cambiarPasswordValidation, resetPasswordValidation } = require('../validators/authValidator');
+const { loginValidation, recoverPasswordValidation, cambiarPasswordValidation, resetPasswordValidation } = require('../validators/authValidator');
 const { authLimiter, loginLimiter } = require('../middlewares/rateLimiter');
 
 /**
@@ -41,31 +41,6 @@ const { authLimiter, loginLimiter } = require('../middlewares/rateLimiter');
  *               $ref: '#/components/schemas/Error'
  */
 router.post('/login', loginLimiter, loginValidation, validate, authController.login);
-
-/**
- * @swagger
- * /auth/register:
- *   post:
- *     summary: Registrar nuevo usuario (solo en desarrollo)
- *     tags: [Auth]
- *     security: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/UsuarioCreate'
- *     responses:
- *       201:
- *         description: Usuario registrado exitosamente
- *       400:
- *         description: Email o documento ya registrado
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
- */
-router.post('/register', authLimiter, registerValidation, validate, authController.register);
 
 /**
  * @swagger

@@ -1,6 +1,6 @@
 const { body } = require('express-validator');
 
-// Debe coincidir con PASSWORD_REGEX en encomiexpress-frontend/src/features/auth/Register.jsx
+// Debe coincidir con PASSWORD_REGEX en encomiexpress-frontend/src/shared/components/Header.jsx
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^a-zA-Z0-9\s]).{8,64}$/;
 const PASSWORD_MESSAGE = 'La contraseña debe tener 8-64 caracteres, con mayúsculas, minúsculas, números y un carácter especial';
 

@@ -3,7 +3,6 @@ const { sequelize, Usuario, Rol, Conductor, Cliente } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { tieneRutasActivas, tieneAnticiposPendientes, tieneEncomiendasActivasPorCliente } = require('../middlewares/validateDependencies');
-const { sendRegistroResultadoEmail } = require('../config/email');
 
 const buildOrder = (sortBy) => {
   if (!sortBy) return [];
@@ -172,8 +171,8 @@ const toggleHabilitado = async (id, currentUserId) => {
   }
 
   // El admin id=1 (el inicial, creado por init.sql/seed.js) nunca se puede inhabilitar,
-  // sin importar quién lo intente — evita que otro admin (ej. una cuenta autoregistrada
-  // ya habilitada) deje sin acceso al dueño original del sistema.
+  // sin importar quién lo intente — evita que otro admin deje sin acceso al dueño
+  // original del sistema.
   if (parseInt(id) === 1) {
     throw new AppError('Esta cuenta administradora no se puede inhabilitar', 400);
   }
@@ -217,52 +216,8 @@ const toggleHabilitado = async (id, currentUserId) => {
     }
   }
 
-  const nuevoHabilitado = !usuario.habilitado;
-  // Si se está habilitando (aprobando) una cuenta que venía de autoregistro
-  // (POST /auth/register), se limpia la marca de pendiente en el mismo paso.
-  const eraRegistroPendiente = usuario.registroPendiente;
-  if (nuevoHabilitado && usuario.registroPendiente) {
-    usuario.registroPendiente = false;
-  }
-  usuario.habilitado = nuevoHabilitado;
+  usuario.habilitado = !usuario.habilitado;
   await usuario.save();
-
-  // Aviso solo en la transición única pendiente -> habilitado (no en toggles
-  // normales posteriores). Si el correo falla, la aprobación ya quedó guardada.
-  if (nuevoHabilitado && eraRegistroPendiente) {
-    try {
-      await sendRegistroResultadoEmail(usuario.email, usuario.nombre, true);
-    } catch (e) {
-      console.error('Error enviando correo de aprobación de registro:', e.message || e);
-    }
-  }
-
-  return usuario;
-};
-
-// Para cuentas de autoregistro que un admin decide NO habilitar (ej. no es un
-// empleado real): quita la marca de "pendiente de activación" sin habilitar la
-// cuenta — queda como una cuenta inhabilitada normal, indistinguible de cualquier
-// otra que un admin haya inhabilitado por su cuenta.
-const ignorarRegistro = async (id) => {
-  const usuario = await Usuario.findByPk(id);
-
-  if (!usuario) {
-    throw new AppError('Usuario no encontrado', 404);
-  }
-
-  if (!usuario.registroPendiente) {
-    throw new AppError('Este usuario no tiene un registro pendiente por ignorar', 400);
-  }
-
-  usuario.registroPendiente = false;
-  await usuario.save();
-
-  try {
-    await sendRegistroResultadoEmail(usuario.email, usuario.nombre, false);
-  } catch (e) {
-    console.error('Error enviando correo de registro ignorado:', e.message || e);
-  }
 
   return usuario;
 };
@@ -272,6 +227,5 @@ module.exports = {
   getById,
   create,
   update,
-  toggleHabilitado,
-  ignorarRegistro
+  toggleHabilitado
 };

@@ -25,7 +25,7 @@ const loginLimiter = rateLimit({
 });
 
 // ============================================================
-// 2. Límite LAXO para register / recover-password
+// 2. Límite LAXO para recover-password / resetear-password / cambiar-password
 //    → Permite uso normal pero bloquea abuso masivo
 // ============================================================
 const authLimiter = rateLimit({

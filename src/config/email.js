@@ -12,8 +12,6 @@ const transporter = nodemailer.createTransport({
 
 const ICONS = {
   candado: '🔒',
-  check: '✅',
-  equis: '❌',
 };
 
 const buildEmailShell = ({ badgeBg, icon, heading, bodyHtml, extraHtml = '' }) => `
@@ -65,35 +63,4 @@ const sendPasswordRecoveryEmail = async (email, resetUrl) => {
   return transporter.sendMail(mailOptions);
 };
 
-const sendRegistroResultadoEmail = async (email, nombre, aprobado) => {
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to: email,
-    subject: 'Solicitud de registro - EncomiExpress',
-    html: aprobado
-      ? buildEmailShell({
-          badgeBg: '#05966920',
-          icon: ICONS.check,
-          heading: '¡Tu cuenta fue aprobada!',
-          bodyHtml: `
-            Hola ${nombre},<br>
-            Un administrador revisó tu solicitud de registro en <b>EncomiExpress</b> y tu cuenta ya está habilitada.<br>
-            Ya puedes iniciar sesión con el correo y la contraseña que registraste.
-          `,
-        })
-      : buildEmailShell({
-          badgeBg: '#3F3F4618',
-          icon: ICONS.equis,
-          heading: 'Solicitud de registro no aprobada',
-          bodyHtml: `
-            Hola ${nombre},<br>
-            Un administrador revisó tu solicitud de registro en <b>EncomiExpress</b> y decidió no habilitar la cuenta.<br>
-            Si tienes dudas sobre esta decisión, comunícate con la empresa.
-          `,
-        }),
-  };
-
-  return transporter.sendMail(mailOptions);
-};
-
-module.exports = { transporter, sendPasswordRecoveryEmail, sendRegistroResultadoEmail };
+module.exports = { transporter, sendPasswordRecoveryEmail };

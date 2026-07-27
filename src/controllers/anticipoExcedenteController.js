@@ -69,15 +69,6 @@ exports.entregarExcedente = async (req, res, next) => {
   }
 };
 
-exports.createMisAnticipo = async (req, res, next) => {
-  try {
-    const anticipo = await anticipoService.createMisAnticipo(req.usuario.idUsuario, req.usuario.rol?.nombre, req.body);
-    res.status(201).json({ success: true, message: 'Anticipo creado exitosamente', data: anticipo });
-  } catch (error) {
-    next(error);
-  }
-};
-
 exports.updateSoporte = async (req, res, next) => {
   try {
     const { id } = req.params;
