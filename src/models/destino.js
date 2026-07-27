@@ -15,6 +15,12 @@ const Destino = sequelize.define('Destino', {
     type: DataTypes.STRING(60),
     allowNull: false
   },
+  // Dirección de la oficina/punto de entrega en ese destino. Opcional porque no
+  // todos los destinos tienen una oficina física registrada todavía.
+  direccion: {
+    type: DataTypes.STRING(200),
+    allowNull: true
+  },
   tarifaBase: {
     type: DataTypes.DECIMAL(12, 2),
     defaultValue: 0

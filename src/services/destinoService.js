@@ -52,7 +52,7 @@ const getById = async (id) => {
 };
 
 const create = async (data) => {
-  const { departamento, ciudad, tarifaBase } = data;
+  const { departamento, ciudad, direccion, tarifaBase } = data;
 
   const existente = await Destino.findOne({
     where: {
@@ -67,6 +67,7 @@ const create = async (data) => {
   const destino = await Destino.create({
     departamento,
     ciudad,
+    direccion: direccion || null,
     tarifaBase: tarifaBase || 0
   });
 
@@ -74,7 +75,7 @@ const create = async (data) => {
 };
 
 const update = async (id, data) => {
-  const { departamento, ciudad, tarifaBase, habilitado } = data;
+  const { departamento, ciudad, direccion, tarifaBase, habilitado } = data;
 
   const destino = await Destino.findByPk(id);
 
@@ -100,6 +101,7 @@ const update = async (id, data) => {
   await destino.update({
     departamento: departamento || destino.departamento,
     ciudad: ciudad || destino.ciudad,
+    direccion: direccion !== undefined ? direccion : destino.direccion,
     tarifaBase: tarifaBase !== undefined ? tarifaBase : destino.tarifaBase,
     habilitado: habilitado !== undefined ? habilitado : destino.habilitado
   });
