@@ -14,8 +14,8 @@ if (missingEnvVars.length > 0) {
 // No tumba el servidor (el resto de la app funciona sin ella) — solo avisa, porque
 // sin esto el enlace de correo de recuperar contraseña apunta a localhost en
 // silencio, sin ningún error visible.
-if (process.env.NODE_ENV === 'production' && !process.env.FRONTEND_URL) {
-  console.warn('⚠️  FRONTEND_URL no está configurada — el enlace de correo de recuperar contraseña apuntará a localhost y no funcionará para los usuarios.');
+if (process.env.NODE_ENV === 'production' && !process.env.FRONTEND_URLS) {
+  console.warn('⚠️  FRONTEND_URLS no está configurada — el enlace de correo de recuperar contraseña apuntará a localhost y no funcionará para los usuarios.');
 }
 
 const PORT = process.env.PORT || 3000;

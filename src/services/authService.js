@@ -186,7 +186,10 @@ const recuperarPassword = async (email) => {
     idUsuario: usuario.idUsuario,
     sello: usuario.password.slice(-10),
   });
-  const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/resetear-password?token=${resetToken}`;
+  // FRONTEND_URLS puede traer varios dominios separados por coma (misma variable que
+  // usa el CORS en app.js) — el correo solo necesita uno, se toma el primero.
+  const frontendUrl = process.env.FRONTEND_URLS?.split(',')[0]?.trim() || 'http://localhost:5173';
+  const resetUrl = `${frontendUrl}/resetear-password?token=${resetToken}`;
 
   const { sendPasswordRecoveryEmail } = require('../config/email');
   await sendPasswordRecoveryEmail(email, resetUrl);

@@ -14,8 +14,10 @@ const app = express();
 // Middlewares
 app.use(helmet());
 // Orígenes permitidos: localhost siempre (dev), más los que vengan en la env var
-// FRONTEND_URLS (separados por coma) — así se agrega/cambia el dominio de Vercel
-// en producción sin tocar código ni redesplegar el backend.
+// FRONTEND_URLS (uno o varios separados por coma) — así se agrega/cambia el dominio
+// de Vercel en producción sin tocar código ni redesplegar el backend. Misma variable
+// que usa authService.js para armar el link del correo de recuperar contraseña (ahí
+// se toma solo el primero de la lista) — una sola variable, sin duplicar configuración.
 const allowedOrigins = [
   'http://localhost:5173',
   ...(process.env.FRONTEND_URLS ? process.env.FRONTEND_URLS.split(',').map(u => u.trim()) : []),
