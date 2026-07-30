@@ -4,14 +4,13 @@
 const tieneLicenciaVigente = (categoriasLicencia) => {
   if (!categoriasLicencia || categoriasLicencia.length === 0) return true;
 
-  const hoy = new Date();
-  hoy.setHours(0, 0, 0, 0);
+  // "hoy" en hora Colombia explícita, no la del servidor (Render corre en UTC) — ver
+  // el mismo fix y motivo en rutaService.js validarDocumentosVehiculo.
+  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
 
   return categoriasLicencia.some((c) => {
     if (!c.vencimiento) return false;
-    const venc = new Date(c.vencimiento);
-    venc.setHours(0, 0, 0, 0);
-    return venc >= hoy;
+    return String(c.vencimiento) > hoy;
   });
 };
 

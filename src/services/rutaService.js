@@ -150,18 +150,36 @@ const getById = async (id) => {
 };
 
 const validarDocumentosVehiculo = (vehiculo) => {
-  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  // "hoy" se calcula en hora Colombia explícitamente, sin importar en qué zona horaria
+  // corre el servidor (Render corre en UTC) — si no, entre las 7pm y medianoche hora
+  // Colombia el servidor ya "cree" que es el día siguiente y vence documentos varias
+  // horas antes de tiempo. vencimientoSOAT/etc. ya son "YYYY-MM-DD" (DATEONLY), así que
+  // comparar como string contra otro "YYYY-MM-DD" es exacto y evita además cualquier
+  // lío de parseo de Date (mismo tipo de bug ya corregido en el frontend).
+  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
   const docs = [
     { campo: vehiculo.vencimientoSOAT,              nombre: 'SOAT' },
     { campo: vehiculo.vencimientoRevisionTecnica,   nombre: 'Revisión Técnico-Mecánica' },
     { campo: vehiculo.vencimientoSeguroTerceros,    nombre: 'Seguro de Terceros' },
   ];
   for (const { campo, nombre } of docs) {
-    if (campo) {
-      const venc = new Date(campo); venc.setHours(0, 0, 0, 0);
-      if (venc < hoy) throw new AppError(`El vehículo ${vehiculo.placa || ''} tiene el ${nombre} vencido y no puede ser asignado a una ruta`, 400);
+    if (campo && String(campo) <= hoy) {
+      throw new AppError(`El vehículo ${vehiculo.placa || ''} tiene el ${nombre} vencido y no puede ser asignado a una ruta`, 400);
     }
   }
+};
+
+// Suma el peso de los paquetes ya asignados a un par vehículo+conductor (excluyendo
+// ventas Canceladas, igual que encomiendaService.getPesoUsadoEnPar) — usado para saber
+// si un vehículo nuevo puede cargar con lo que ya estaba asignado al anterior.
+const getPesoAsignadoEnPar = async (idRutaVehiculoConductor, transaction) => {
+  const paquetes = await Paquete.findAll({
+    where: { idRutaVehiculoConductor },
+    include: [{ model: EncomiendaVenta, as: 'encomienda', where: { estado: { [Op.ne]: 'Cancelada' } }, attributes: [] }],
+    attributes: ['peso'],
+    transaction,
+  });
+  return paquetes.reduce((sum, p) => sum + parseFloat(p.peso || 0), 0);
 };
 
 // Ventana de "enfriamiento" de COOLDOWN_DIAS después de la salida de cualquier otra
@@ -338,6 +356,22 @@ const update = async (id, data) => {
           const vehiculo = await Vehiculo.findByPk(par.idVehiculo, { transaction });
           if (!vehiculo) throw new AppError('Vehículo no encontrado', 404);
           validarDocumentosVehiculo(vehiculo);
+
+          // Si se está cambiando el vehículo de un par que YA tiene paquetes asignados
+          // (ej. por documentos vencidos), el vehículo nuevo debe poder cargar con lo
+          // que ya estaba asignado al anterior — si no, quedaría sobrecargado sin que
+          // nada lo avise (la capacidad hoy solo se valida al crear/editar una Venta,
+          // nunca al cambiar el vehículo de un par ya existente).
+          if (!esNuevo && vehiculo.capacidad) {
+            const pesoAsignado = await getPesoAsignadoEnPar(parActual.idRutaVehiculoConductor, transaction);
+            const capacidad = parseFloat(vehiculo.capacidad);
+            if (pesoAsignado > capacidad) {
+              throw new AppError(
+                `El vehículo ${vehiculo.placa || ''} tiene capacidad para ${capacidad} kg, pero este par ya tiene ${pesoAsignado.toFixed(2)} kg en paquetes asignados. Elige un vehículo con más capacidad.`,
+                400
+              );
+            }
+          }
         }
         if (cambioConductor) {
           const conductor = await Conductor.findByPk(par.idConductor, { transaction });

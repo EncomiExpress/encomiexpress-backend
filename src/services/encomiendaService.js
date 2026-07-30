@@ -64,7 +64,10 @@ const paqueteIncludeConAsignacion = (extra = {}) => ({
 // año, para que dos paquetes nunca puedan "reservar" el mismo número al mismo tiempo;
 // se libera solo al terminar la transacción completa.
 const generarNumeroGuia = async (transaction) => {
-  const anio = new Date().getFullYear();
+  // Año en hora Colombia, no la del servidor (Render corre en UTC) — sin esto, la
+  // última noche del año (7pm-medianoche hora Colombia) ya generaría guías con el
+  // año siguiente.
+  const anio = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }).slice(0, 4);
 
   await sequelize.query('SELECT pg_advisory_xact_lock(hashtext(:clave))', {
     replacements: { clave: `guia-${anio}` },

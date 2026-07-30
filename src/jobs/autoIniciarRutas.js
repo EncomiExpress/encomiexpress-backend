@@ -4,10 +4,14 @@ const rutaService = require('../services/rutaService');
 const INTERVALO_MS = 60 * 1000; // revisa cada minuto
 const VENTANA_REINTENTO_MS = 60 * 60 * 1000; // deja de reintentar 1 hora después de la salida programada
 
-// Combina fecha_salida (DATEONLY) + hora_salida (TIME) para saber si ya debió salir
+// Combina fecha_salida (DATEONLY) + hora_salida (TIME) para saber si ya debió salir.
+// El "-05:00" es obligatorio: sin él, new Date() interpreta el string como hora LOCAL
+// del servidor (Render corre en UTC), no como hora Colombia — una ruta programada para
+// las 2:00pm terminaba iniciándose a las 9:00am (5 horas antes de lo debido). Colombia
+// no tiene horario de verano, así que el offset fijo -05:00 siempre es correcto.
 const yaDebioSalir = (ruta) => {
   if (!ruta.fechaSalida || !ruta.horaSalida) return false;
-  const salida = new Date(`${ruta.fechaSalida}T${ruta.horaSalida}`);
+  const salida = new Date(`${ruta.fechaSalida}T${ruta.horaSalida}-05:00`);
   return !isNaN(salida.getTime()) && salida <= new Date();
 };
 
@@ -18,7 +22,7 @@ const yaDebioSalir = (ruta) => {
 // CONDUCTOR_IN_USE), no aplica esta ventana — ese conflicto se resuelve solo apenas
 // la otra ruta se complete, no necesita que alguien entre a arreglarlo a mano.
 const dentroDeVentanaDeReintento = (ruta) => {
-  const salida = new Date(`${ruta.fechaSalida}T${ruta.horaSalida}`);
+  const salida = new Date(`${ruta.fechaSalida}T${ruta.horaSalida}-05:00`);
   return (new Date() - salida) <= VENTANA_REINTENTO_MS;
 };
 
