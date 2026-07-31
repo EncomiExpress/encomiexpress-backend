@@ -97,3 +97,12 @@ exports.getPageOf = async (req, res, next) => {
     next(error);
   }
 };
+
+exports.getRangoFechas = async (req, res, next) => {
+  try {
+    const data = await encomiendaService.getRangoFechas();
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};

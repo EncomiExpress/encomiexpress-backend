@@ -93,6 +93,13 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
 
   const include = [INCLUDE_PARES, { model: Destino, as: 'destino' }];
 
+  // OJO con subQuery:false acá: paresVehiculoConductor es hasMany (una ruta puede
+  // tener varios vehículos, ver el convoy) — con subQuery:false, LIMIT se aplica sobre
+  // las filas ya unidas (una por cada par), no sobre las rutas distintas. Una ruta con
+  // 2+ vehículos "gastaba" cupos de más y la página devolvía menos rutas de las
+  // pedidas (ej. limit=5 devolvía 4). Sin subQuery:false, Sequelize aplica LIMIT/OFFSET
+  // en una subconsulta sobre "ruta" antes de unir los pares, así que siempre da
+  // exactamente `limit` rutas distintas (o menos solo si de verdad no hay más).
   const { count, rows: data } = await Ruta.findAndCountAll({
     where,
     include,
@@ -100,7 +107,6 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
     offset,
     order: order.length > 0 ? order : [['fechaSalida', 'DESC'], ['horaSalida', 'DESC'], ['idRuta', 'DESC']],
     distinct: true,
-    subQuery: false,
   });
 
   const enCursoIds = data.filter(r => r.estado === 'En Curso').map(r => r.idRuta);

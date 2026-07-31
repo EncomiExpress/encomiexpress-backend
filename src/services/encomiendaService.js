@@ -651,6 +651,24 @@ const getPageOf = async (id, { limit = 10 } = {}) => {
   return { page: Math.floor(before / limit) + 1 };
 };
 
+// Límites reales para el filtro de período del Dashboard — evita que "Desde" acepte
+// cualquier año arbitrario (ej. 1956) y que "Hasta" acepte fechas futuras sin sentido.
+// Se calcula con MIN/MAX directo en la BD (no sobre una página de ventas ya cargada)
+// para que siga siendo correcto sin importar cuántas ventas haya en total.
+const getRangoFechas = async () => {
+  const resultado = await EncomiendaVenta.findOne({
+    attributes: [
+      [sequelize.fn('MIN', sequelize.col('fecha_registro')), 'primerRegistro'],
+      [sequelize.fn('MAX', sequelize.col('fecha_registro')), 'ultimoRegistro'],
+    ],
+    raw: true,
+  });
+  return {
+    primerRegistro: resultado?.primerRegistro || null,
+    ultimoRegistro: resultado?.ultimoRegistro || null,
+  };
+};
+
 module.exports = {
   getAll,
   getById,
@@ -660,4 +678,5 @@ module.exports = {
   cambiarEstadoPago,
   toggleHabilitado,
   getPageOf,
+  getRangoFechas,
 };

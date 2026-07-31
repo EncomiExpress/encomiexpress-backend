@@ -34,7 +34,11 @@ const createValidation = [
   body('paquetes').isArray({ min: 1 }).withMessage('Debe registrar al menos un paquete'),
   body('paquetes.*.peso')
     .notEmpty().withMessage('El peso del paquete es obligatorio')
-    .isFloat({ min: 0.01 }).withMessage('El peso del paquete debe ser mayor a 0'),
+    .isFloat({ min: 1 }).withMessage('El peso del paquete debe ser de al menos 1 kg'),
+  body('paquetes.*.alto').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('El alto del paquete debe ser de al menos 1 cm'),
+  body('paquetes.*.ancho').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('El ancho del paquete debe ser de al menos 1 cm'),
+  body('paquetes.*.profundidad').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('La profundidad del paquete debe ser de al menos 1 cm'),
+  body('paquetes.*.valorDeclarado').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('El valor declarado debe ser de al menos $1'),
   body('paquetes.*.idRutaVehiculoConductor')
     .notEmpty().withMessage('Cada paquete debe tener un vehículo asignado')
     .isInt().withMessage('ID de vehículo/conductor de ruta debe ser un número entero'),
@@ -62,7 +66,11 @@ const updateValidation = [
   body('paquetes').optional().isArray({ min: 1 }).withMessage('Debe registrar al menos un paquete'),
   body('paquetes.*.peso')
     .notEmpty().withMessage('El peso del paquete es obligatorio')
-    .isFloat({ min: 0.01 }).withMessage('El peso del paquete debe ser mayor a 0'),
+    .isFloat({ min: 1 }).withMessage('El peso del paquete debe ser de al menos 1 kg'),
+  body('paquetes.*.alto').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('El alto del paquete debe ser de al menos 1 cm'),
+  body('paquetes.*.ancho').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('El ancho del paquete debe ser de al menos 1 cm'),
+  body('paquetes.*.profundidad').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('La profundidad del paquete debe ser de al menos 1 cm'),
+  body('paquetes.*.valorDeclarado').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('El valor declarado debe ser de al menos $1'),
   body('paquetes.*.idRutaVehiculoConductor')
     .notEmpty().withMessage('Cada paquete debe tener un vehículo asignado')
     .isInt().withMessage('ID de vehículo/conductor de ruta debe ser un número entero'),

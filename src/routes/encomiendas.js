@@ -23,6 +23,18 @@ router.get('/:id/page-of', encomiendaVentaController.getPageOf);
 
 /**
  * @swagger
+ * /encomiendas/rango-fechas:
+ *   get:
+ *     summary: Fecha de registro de la primera y la última venta (para el filtro de período del Dashboard)
+ *     tags: [Encomiendas]
+ *     responses:
+ *       200:
+ *         description: "{ primerRegistro, ultimoRegistro } en formato YYYY-MM-DD, o null si no hay ventas"
+ */
+router.get('/rango-fechas', encomiendaVentaController.getRangoFechas);
+
+/**
+ * @swagger
  * /encomiendas:
  *   get:
  *     summary: Listar encomiendas
