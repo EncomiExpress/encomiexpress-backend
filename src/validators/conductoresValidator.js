@@ -3,6 +3,12 @@ const r = require('./commonRules');
 
 const ESTADOS_VALIDOS = ['Disponible', 'En Ruta'];
 
+const numeroLicenciaRule = body('numeroLicencia').optional().notEmpty().withMessage('Número de licencia es requerido')
+  .custom((value) => {
+    if (value && r.soloRelleno(value)) throw new Error('El número de licencia no puede contener solo espacios o guiones');
+    return true;
+  });
+
 const createValidation = [
   r.tipoIdentificacion.required(),
   r.numeroIdentificacion.required(),
@@ -11,7 +17,7 @@ const createValidation = [
   r.telefono.optional(),
   r.email.required(),
   r.password.required(),
-  body('numeroLicencia').optional().notEmpty().withMessage('Número de licencia es requerido'),
+  numeroLicenciaRule,
   body('categoriasLicencia').isArray({ min: 1 }).withMessage('Debe registrar al menos una categoría de licencia'),
   body('categoriasLicencia.*.categoria').notEmpty().withMessage('La categoría es obligatoria'),
   body('categoriasLicencia.*.vencimiento').isDate().withMessage('Fecha de vencimiento inválida'),
@@ -23,7 +29,7 @@ const updateValidation = [
   r.telefono.optional(),
   r.email.optional(),
   r.password.optional(),
-  body('numeroLicencia').optional(),
+  numeroLicenciaRule,
   body('categoriasLicencia').optional().isArray({ min: 1 }).withMessage('Debe registrar al menos una categoría de licencia'),
   body('categoriasLicencia.*.categoria').notEmpty().withMessage('La categoría es obligatoria'),
   body('categoriasLicencia.*.vencimiento').isDate().withMessage('Fecha de vencimiento inválida'),

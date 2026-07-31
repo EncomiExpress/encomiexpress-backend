@@ -1,4 +1,10 @@
 const { body } = require('express-validator');
+const r = require('./commonRules');
+
+const noSoloRelleno = (mensaje) => (value) => {
+  if (value && r.soloRelleno(value)) throw new Error(mensaje);
+  return true;
+};
 
 const createValidation = [
   body('idPropietario').notEmpty().withMessage('Propietario es requerido'),
@@ -6,7 +12,10 @@ const createValidation = [
   body('placa').notEmpty().withMessage('Placa es requerida')
     .matches(/^[A-Z]{3}[0-9]{3}$/).withMessage('La placa debe tener 3 letras seguidas de 3 números, sin guiones ni espacios'),
   body('marca').notEmpty().withMessage('Marca es requerida'),
-  body('modelo').notEmpty().withMessage('Modelo es requerido'),
+  body('modelo').notEmpty().withMessage('Modelo es requerido')
+    .custom(noSoloRelleno('El modelo no puede contener solo espacios o guiones')),
+  body('tarjetaPropiedad').optional({ nullable: true }).isString()
+    .custom(noSoloRelleno('La tarjeta de propiedad no puede contener solo espacios o guiones')),
   body('anio').optional().isInt({ min: 1900, max: 2100 }).withMessage('Año inválido'),
   body('color').optional().notEmpty().withMessage('Color es requerido'),
   body('tipo').optional().notEmpty().withMessage('Tipo es requerido'),
@@ -22,7 +31,10 @@ const updateValidation = [
   body('placa').optional().notEmpty().withMessage('Placa es requerida')
     .matches(/^[A-Z]{3}[0-9]{3}$/).withMessage('La placa debe tener 3 letras seguidas de 3 números, sin guiones ni espacios'),
   body('marca').optional().notEmpty().withMessage('Marca es requerida'),
-  body('modelo').optional().notEmpty().withMessage('Modelo es requerido'),
+  body('modelo').optional().notEmpty().withMessage('Modelo es requerido')
+    .custom(noSoloRelleno('El modelo no puede contener solo espacios o guiones')),
+  body('tarjetaPropiedad').optional({ nullable: true }).isString()
+    .custom(noSoloRelleno('La tarjeta de propiedad no puede contener solo espacios o guiones')),
   body('anio').optional().isInt({ min: 1900, max: 2100 }).withMessage('Año inválido'),
   body('color').optional(),
   body('tipo').optional(),

@@ -3,6 +3,14 @@ const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { verificarDependenciasVehiculo } = require('../middlewares/validateDependencies');
 
+// Debe coincidir con capitalizarPrimeraLetra en shared/utils/formatters.js — se aplica
+// también acá (no solo en el frontend) para que quede igual sin importar si el dato
+// entra desde el formulario, Postman o cualquier otro cliente de la API.
+const capitalizar = (value) => {
+  if (!value) return value;
+  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+};
+
 const buildOrder = (sortBy) => {
   if (!sortBy) return [];
   const allowed = ['placa', 'estado', 'idVehiculo', 'habilitado'];
@@ -109,9 +117,9 @@ const create = async (data) => {
     idPropietario,
     placa,
     tarjetaPropiedad,
-    marca,
+    marca: capitalizar(marca),
     modelo,
-    color,
+    color: capitalizar(color),
     tipo,
     origen: origen || 'Propio',
     capacidad,
@@ -171,9 +179,9 @@ const update = async (id, data) => {
     idPropietario: idPropietario || vehiculo.idPropietario,
     placa: placa || vehiculo.placa,
     tarjetaPropiedad: tarjetaPropiedad !== undefined ? tarjetaPropiedad : vehiculo.tarjetaPropiedad,
-    marca: marca !== undefined ? marca : vehiculo.marca,
+    marca: marca !== undefined ? capitalizar(marca) : vehiculo.marca,
     modelo: modelo !== undefined ? modelo : vehiculo.modelo,
-    color: color !== undefined ? color : vehiculo.color,
+    color: color !== undefined ? capitalizar(color) : vehiculo.color,
     tipo: tipo !== undefined ? tipo : vehiculo.tipo,
     origen: origen !== undefined ? origen : vehiculo.origen,
     capacidad: capacidad !== undefined ? capacidad : vehiculo.capacidad,

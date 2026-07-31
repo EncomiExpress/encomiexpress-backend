@@ -1,6 +1,12 @@
 const { body } = require('express-validator');
+const r = require('./commonRules');
 
-const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia', 'Nequi'];
+const noSoloRelleno = (mensaje) => (value) => {
+  if (value && r.soloRelleno(value)) throw new Error(mensaje);
+  return true;
+};
+
+const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia'];
 const ESTADOS_PAGO_VALIDOS = ['Pendiente', 'Pagado'];
 
 const ESTADOS_ENCOMIENDA_VALIDOS = [
@@ -16,7 +22,8 @@ const createValidation = [
   body('idRuta').notEmpty().withMessage('La ruta es obligatoria'),
   body('idRuta').isInt().withMessage('ID de ruta debe ser un número entero'),
   body('fechaEstimadaEntrega').optional({ nullable: true }).isDate().withMessage('Fecha estimada de entrega inválida'),
-  body('observaciones').optional({ nullable: true }).isString().withMessage('Observaciones debe ser un texto'),
+  body('observaciones').optional({ nullable: true }).isString().withMessage('Observaciones debe ser un texto')
+    .custom(noSoloRelleno('Las observaciones no pueden contener solo espacios o guiones')),
   body('valorServicio').optional().isFloat({ min: 0 }).withMessage('Valor del servicio debe ser un número positivo'),
   body('impuestos').optional().isFloat({ min: 0 }).withMessage('Impuestos debe ser un número positivo'),
   body('metodoPago')
@@ -31,7 +38,14 @@ const createValidation = [
   body('destinatario.nombreDestinatario')
     .notEmpty().withMessage('El nombre del destinatario es obligatorio')
     .isLength({ max: 150 }).withMessage('El nombre del destinatario es demasiado largo'),
+  body('destinatario.direccionDestinatario')
+    .notEmpty().withMessage('La dirección del destinatario es obligatoria')
+    .custom(noSoloRelleno('La dirección no puede contener solo espacios o guiones')),
   body('paquetes').isArray({ min: 1 }).withMessage('Debe registrar al menos un paquete'),
+  body('paquetes.*.descripcionContenido')
+    .notEmpty().withMessage('La descripción del paquete es obligatoria')
+    .isLength({ max: 300 }).withMessage('Máximo 300 caracteres')
+    .custom(noSoloRelleno('La descripción no puede contener solo espacios o guiones')),
   body('paquetes.*.peso')
     .notEmpty().withMessage('El peso del paquete es obligatorio')
     .isFloat({ min: 1 }).withMessage('El peso del paquete debe ser de al menos 1 kg'),
@@ -47,7 +61,8 @@ const createValidation = [
 const updateValidation = [
   body('idRuta').optional().isInt().withMessage('ID de ruta debe ser un número entero'),
   body('fechaEstimadaEntrega').optional({ nullable: true }).isDate().withMessage('Fecha estimada de entrega inválida'),
-  body('observaciones').optional({ nullable: true }).isString().withMessage('Observaciones debe ser un texto'),
+  body('observaciones').optional({ nullable: true }).isString().withMessage('Observaciones debe ser un texto')
+    .custom(noSoloRelleno('Las observaciones no pueden contener solo espacios o guiones')),
   body('valorServicio').optional().isFloat({ min: 0 }).withMessage('Valor del servicio debe ser un número positivo'),
   body('impuestos').optional().isFloat({ min: 0 }).withMessage('Impuestos debe ser un número positivo'),
   body('metodoPago')
@@ -63,7 +78,15 @@ const updateValidation = [
     .if(body('destinatario').exists())
     .notEmpty().withMessage('El nombre del destinatario es obligatorio')
     .isLength({ max: 150 }).withMessage('El nombre del destinatario es demasiado largo'),
+  body('destinatario.direccionDestinatario')
+    .if(body('destinatario').exists())
+    .notEmpty().withMessage('La dirección del destinatario es obligatoria')
+    .custom(noSoloRelleno('La dirección no puede contener solo espacios o guiones')),
   body('paquetes').optional().isArray({ min: 1 }).withMessage('Debe registrar al menos un paquete'),
+  body('paquetes.*.descripcionContenido')
+    .notEmpty().withMessage('La descripción del paquete es obligatoria')
+    .isLength({ max: 300 }).withMessage('Máximo 300 caracteres')
+    .custom(noSoloRelleno('La descripción no puede contener solo espacios o guiones')),
   body('paquetes.*.peso')
     .notEmpty().withMessage('El peso del paquete es obligatorio')
     .isFloat({ min: 1 }).withMessage('El peso del paquete debe ser de al menos 1 kg'),

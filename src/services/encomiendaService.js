@@ -8,7 +8,7 @@ const ESTADOS_VALIDOS = [
   'Entregada',
   'Cancelada',
 ];
-const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia', 'Nequi'];
+const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia'];
 const ESTADOS_PAGO_VALIDOS = ['Pendiente', 'Pagado'];
 
 // Una ruta ahora puede tener varios pares vehículo+conductor (convoy) — este include
@@ -306,6 +306,16 @@ const create = async (data) => {
     const valorImpuestos = impuestos || 0;
     const total = (valorServicio || 0) + valorImpuestos;
 
+    const metodoPagoResuelto = metodoPago
+      ? (METODOS_PAGO_VALIDOS.find((v) => v.toLowerCase() === metodoPago.toLowerCase()) || null)
+      : null;
+    // Efectivo se cobra en el momento mismo del registro (no hay nada pendiente por
+    // cobrar después, a diferencia de Contraentrega/Transferencia) — nace "Pagado"
+    // directamente, sin importar qué estadoPago haya mandado el cliente.
+    const estadoPagoResuelto = metodoPagoResuelto === 'Efectivo'
+      ? 'Pagado'
+      : (ESTADOS_PAGO_VALIDOS.find((v) => v.toLowerCase() === (estadoPago || 'Pendiente').toLowerCase()) || 'Pendiente');
+
     const encomienda = await EncomiendaVenta.create(
       {
         idCliente,
@@ -315,8 +325,8 @@ const create = async (data) => {
         valorServicio: valorServicio || 0,
         impuestos: valorImpuestos,
         total,
-        metodoPago: metodoPago ? (METODOS_PAGO_VALIDOS.find(v => v.toLowerCase() === metodoPago.toLowerCase()) || null) : null,
-        estadoPago: ESTADOS_PAGO_VALIDOS.find(v => v.toLowerCase() === (estadoPago || 'Pendiente').toLowerCase()) || 'Pendiente',
+        metodoPago: metodoPagoResuelto,
+        estadoPago: estadoPagoResuelto,
         estado: 'Programada',
       },
       { transaction }
