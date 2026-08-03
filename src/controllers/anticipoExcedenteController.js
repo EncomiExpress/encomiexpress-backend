@@ -26,8 +26,8 @@ exports.getById = async (req, res, next) => {
 
 exports.create = async (req, res, next) => {
   try {
-    const { idConductor, idRuta, valorAnticipo, soporte, fechaEntrega } = req.body;
-    const anticipo = await anticipoService.create({ idConductor, idRuta, valorAnticipo, soporte, fechaEntrega });
+    const { idRuta, idRutaVehiculoConductor, valorAnticipo, soporte, fechaEntrega } = req.body;
+    const anticipo = await anticipoService.create({ idRuta, idRutaVehiculoConductor, valorAnticipo, soporte, fechaEntrega });
     res.status(201).json({ success: true, message: 'Anticipo creado exitosamente', data: anticipo });
   } catch (error) {
     next(error);
