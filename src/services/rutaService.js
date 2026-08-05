@@ -3,6 +3,7 @@ const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { verificarDependenciasRuta } = require('../middlewares/validateDependencies');
 const { tieneLicenciaVigente } = require('../utils/licenciaHelper');
+const { esDomingo, getRangoHorario, horaDentroDeRango, MIN_DIAS_SALIDA_LLEGADA, DIAS_MARGEN_ENTRE_RUTAS, MAX_DIAS_ANTICIPACION } = require('../utils/horarioLaboral');
 
 // Máximo de pares vehículo+conductor por ruta — igual que MAX_PAQUETES en Ventas,
 // un tope razonable para no dejar el array crecer sin límite en el formulario.
@@ -188,22 +189,17 @@ const getPesoAsignadoEnPar = async (idRutaVehiculoConductor, transaction) => {
   return paquetes.reduce((sum, p) => sum + parseFloat(p.peso || 0), 0);
 };
 
-// Ventana de "enfriamiento" de COOLDOWN_DIAS después de la salida de cualquier otra
-// ruta (Programada o En Curso) del mismo vehículo o conductor — ver validarEnfriamiento
-// más abajo. El conflicto "el conductor todavía anda de viaje" (más allá de esta
-// ventana) sigue resolviéndose aparte con Conductor.estado/Vehiculo.estado='En Ruta' +
-// el chequeo que ya existe al pasar una ruta a 'En Curso' (ver updateEstado, códigos
-// VEHICLE_IN_USE/CONDUCTOR_IN_USE).
-// Un vehículo o conductor que ya tiene otra ruta (Programada/En Curso) necesita
-// COOLDOWN_DIAS de margen antes Y después de esa salida — no se puede asumir que ya
-// volvió (la duración real de un viaje depende del destino, no se puede adivinar), y
-// tampoco importa en qué orden se programen las rutas: una ruta que sale el día D
-// bloquea [D-COOLDOWN_DIAS, D+COOLDOWN_DIAS] para ese mismo vehículo/conductor. Cada
-// ruta existente arma su propia ventana independiente — no se acumulan ni se fusionan
-// entre rutas separadas por más días que el margen (ej. una ruta el día 5 y otra el día
-// 20 del mismo conductor no bloquean nada entre medio). El choque exacto (misma fecha)
-// queda cubierto como caso particular (distancia 0).
-const COOLDOWN_DIAS = 2;
+// Choque de vehículo/conductor entre rutas distintas — cada ruta "ocupa" a su vehículo
+// y conductor desde su fechaSalida hasta su fechaLlegadaEstimada, más DIAS_MARGEN_ENTRE_RUTAS
+// de margen entre el final de una y el inicio de la otra (tiempo de descargar, revisar
+// el vehículo y que el conductor descanse). El margen se exige UNA sola vez entre el
+// final de una ruta y el inicio de la otra (no se "acolchona" cada ruta por separado).
+// Ejemplo: Ruta A ocupa 20→22 de agosto, con margen de 1 día → una Ruta B puede salir
+// el 23 de agosto sin chocar (22+1), pero no el 22 (mismo día que A llega, 0 días de
+// margen).
+// Rutas antiguas sin fechaLlegadaEstimada (antes de esta migración) se tratan como ocupación
+// de un solo día, por seguridad.
+const GAP_TRANSICION = DIAS_MARGEN_ENTRE_RUTAS;
 
 const sumarDias = (fechaStr, dias) => {
   const d = new Date(`${fechaStr}T00:00:00`);
@@ -211,16 +207,12 @@ const sumarDias = (fechaStr, dias) => {
   return d.toISOString().slice(0, 10);
 };
 
-const validarEnfriamiento = async ({ idVehiculo, idConductor, fechaSalida, idRutaExcluir }) => {
+const validarChoqueVehiculoConductor = async ({ idVehiculo, idConductor, fechaSalida, fechaLlegadaEstimada, idRutaExcluir }) => {
   if (!fechaSalida) return;
 
-  // Ventana simétrica: cualquier otra ruta del mismo vehículo/conductor a menos de
-  // COOLDOWN_DIAS de distancia (antes o después) de la fecha candidata choca — así no
-  // importa el orden en que se programen (crear primero la más tardía y después una más
-  // temprana muy pegada a esa no se escapa de la validación).
-  const desde = sumarDias(fechaSalida, -COOLDOWN_DIAS);
-  const hasta = sumarDias(fechaSalida, COOLDOWN_DIAS);
-  const conflicto = await RutaVehiculoConductor.findOne({
+  const llegadaCandidata = fechaLlegadaEstimada || fechaSalida;
+
+  const pares = await RutaVehiculoConductor.findAll({
     where: {
       habilitado: true,
       [Op.or]: [{ idVehiculo }, { idConductor }],
@@ -230,26 +222,85 @@ const validarEnfriamiento = async ({ idVehiculo, idConductor, fechaSalida, idRut
       model: Ruta,
       as: 'ruta',
       required: true,
-      where: {
-        estado: { [Op.in]: ['Programada', 'En Curso'] },
-        fechaSalida: { [Op.between]: [desde, hasta] },
-      },
+      where: { habilitado: true, estado: { [Op.in]: ['Programada', 'En Curso'] } },
     }],
   });
 
-  if (conflicto) {
-    const rangoDesde = sumarDias(conflicto.ruta.fechaSalida, -COOLDOWN_DIAS);
-    const rangoHasta = sumarDias(conflicto.ruta.fechaSalida, COOLDOWN_DIAS);
-    throw new AppError(
-      `Este vehículo o conductor ya tiene otra ruta (#${conflicto.idRuta}) programada el ${conflicto.ruta.fechaSalida} y necesita ${COOLDOWN_DIAS} días de margen. No se puede programar otra entre el ${rangoDesde} y el ${rangoHasta}.`,
-      409,
-      [{
-        tipo: 'Enfriamiento de vehículo/conductor',
-        id: conflicto.idRuta,
-        descripcion: `La Ruta #${conflicto.idRuta} ya tiene este vehículo/conductor asignado, con salida el ${conflicto.ruta.fechaSalida}`
-      }],
-      'COOLDOWN_CONFLICT'
-    );
+  for (const p of pares) {
+    const otraSalida = p.ruta.fechaSalida;
+    const otraLlegada = p.ruta.fechaLlegadaEstimada || otraSalida;
+    // Margen entre el final de una ruta y el inicio de la otra — en cualquiera de los
+    // dos sentidos (no importa cuál de las dos se programó primero). OJO: el margen se
+    // exige UNA sola vez entre el final de una y el inicio de la otra, no dos veces
+    // (no se "acolchona" cada ruta por separado y se compara el solape — eso exigiría
+    // el doble del margen real). Ejemplo (el mismo que ya validó la usuaria): Ruta A
+    // ocupa 3→5 de agosto → una Ruta B puede salir el 7 de agosto (5+2) sin chocar,
+    // porque ya deja exactamente GAP_TRANSICION días entre el final de A y el inicio
+    // de B.
+    const chocaPorInicioB = fechaSalida < sumarDias(otraLlegada, GAP_TRANSICION);
+    const chocaPorInicioOtra = otraSalida < sumarDias(llegadaCandidata, GAP_TRANSICION);
+    const seSuperponen = chocaPorInicioB && chocaPorInicioOtra;
+    if (seSuperponen) {
+      throw new AppError(
+        `Este vehículo o conductor ya tiene otra ruta (#${p.idRuta}) programada del ${otraSalida} al ${otraLlegada}. Debes dejar al menos ${GAP_TRANSICION} días de margen antes o después de ese rango.`,
+        409,
+        [{
+          tipo: 'Choque de vehículo/conductor',
+          id: p.idRuta,
+          descripcion: `La Ruta #${p.idRuta} ya tiene este vehículo/conductor asignado, del ${otraSalida} al ${otraLlegada}`
+        }],
+        'SCHEDULE_CONFLICT'
+      );
+    }
+  }
+};
+
+// Horario laboral de la empresa (ver src/utils/horarioLaboral.js): valida que la salida
+// y la llegada de la ruta caigan en día/hora hábil, y que la llegada deje al menos
+// MIN_DIAS_SALIDA_LLEGADA días de margen desde la salida (ej. salida 3 de agosto →
+// llegada mínima 5 de agosto, dejando el 4 como único día de entrega posible). Concepto
+// separado de validarChoqueVehiculoConductor (esa función es sobre choque de
+// vehículo/conductor entre rutas distintas, esta es sobre el horario de UNA sola
+// ruta) — no se mezclan.
+const validarHorarioRuta = ({ fechaSalida, horaSalida, fechaLlegadaEstimada, horaLlegadaEstimada }) => {
+  // "Hoy" en hora Colombia — mismo patrón que validarDocumentosVehiculo, para que el
+  // límite no dependa de en qué zona horaria corre el servidor (Render corre en UTC).
+  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+  // Mismo tope (1 mes) para ambas fechas — no se reduce el de salida para "dejar
+  // espacio" al mínimo de llegada: si alguien elige una salida tan pegada al tope que
+  // no queda ningún día de llegada válido, eso se rechaza más abajo con un mensaje
+  // claro (el chequeo de "mínimo 2 días desde la salida" y el de "máximo 30 días desde
+  // hoy" conviven — si chocan entre sí para una combinación puntual, el usuario lo ve
+  // explicado, en vez de que el campo de salida le reduzca el mes sin avisar por qué.
+  const maxPermitido = sumarDias(hoy, MAX_DIAS_ANTICIPACION);
+
+  if (fechaSalida && esDomingo(fechaSalida)) {
+    throw new AppError('No se puede programar una salida en domingo (la empresa permanece cerrada)', 400);
+  }
+  if (fechaSalida && fechaSalida > maxPermitido) {
+    throw new AppError(`La fecha de salida no puede ser más de ${MAX_DIAS_ANTICIPACION} días a partir de hoy (máximo el ${maxPermitido})`, 400);
+  }
+  if (fechaSalida && horaSalida && !horaDentroDeRango(fechaSalida, horaSalida)) {
+    const r = getRangoHorario(fechaSalida);
+    throw new AppError(`La hora de salida debe estar entre las ${r.min} y las ${r.max}`, 400);
+  }
+  if (fechaLlegadaEstimada) {
+    if (esDomingo(fechaLlegadaEstimada)) {
+      throw new AppError('No se puede programar una llegada en domingo (la empresa permanece cerrada)', 400);
+    }
+    if (fechaLlegadaEstimada > maxPermitido) {
+      throw new AppError(`La fecha de llegada no puede ser más de ${MAX_DIAS_ANTICIPACION} días a partir de hoy (máximo el ${maxPermitido})`, 400);
+    }
+    if (fechaSalida) {
+      const minima = sumarDias(fechaSalida, MIN_DIAS_SALIDA_LLEGADA);
+      if (fechaLlegadaEstimada < minima) {
+        throw new AppError(`La fecha de llegada debe ser al menos ${MIN_DIAS_SALIDA_LLEGADA} días después de la salida (mínimo el ${minima})`, 400);
+      }
+    }
+    if (horaLlegadaEstimada && !horaDentroDeRango(fechaLlegadaEstimada, horaLlegadaEstimada)) {
+      const r = getRangoHorario(fechaLlegadaEstimada);
+      throw new AppError(`La hora estimada de llegada debe estar entre las ${r.min} y las ${r.max}`, 400);
+    }
   }
 };
 
@@ -271,8 +322,9 @@ const validarPares = (pares) => {
 };
 
 const create = async (data) => {
-  const { idDestino, nombreRuta, fechaSalida, horaSalida, horaLlegadaEstimada, estado, observaciones, pares } = data;
+  const { idDestino, nombreRuta, fechaSalida, horaSalida, horaLlegadaEstimada, fechaLlegadaEstimada, estado, observaciones, pares } = data;
 
+  validarHorarioRuta({ fechaSalida, horaSalida, fechaLlegadaEstimada, horaLlegadaEstimada });
   validarPares(pares);
 
   const destino = await Destino.findByPk(idDestino);
@@ -289,7 +341,7 @@ const create = async (data) => {
       throw new AppError('El conductor tiene la licencia de conducción vencida y no puede ser asignado a una ruta', 400);
     }
 
-    await validarEnfriamiento({ idVehiculo: par.idVehiculo, idConductor: par.idConductor, fechaSalida });
+    await validarChoqueVehiculoConductor({ idVehiculo: par.idVehiculo, idConductor: par.idConductor, fechaSalida, fechaLlegadaEstimada });
   }
 
   const transaction = await sequelize.transaction();
@@ -299,6 +351,7 @@ const create = async (data) => {
       nombreRuta: nombreRuta || null,
       idDestino,
       fechaSalida: fechaSalida || null,
+      fechaLlegadaEstimada: fechaLlegadaEstimada || null,
       horaSalida: horaSalida || null,
       horaLlegadaEstimada: horaLlegadaEstimada || null,
       estado: estado || 'Programada',
@@ -321,7 +374,7 @@ const create = async (data) => {
 };
 
 const update = async (id, data) => {
-  const { nombreRuta, idDestino, fechaSalida, horaSalida, horaLlegadaEstimada, estado, observaciones, habilitado, pares } = data;
+  const { nombreRuta, idDestino, fechaSalida, horaSalida, horaLlegadaEstimada, fechaLlegadaEstimada, estado, observaciones, habilitado, pares } = data;
 
   const ruta = await Ruta.findByPk(id);
   if (!ruta) throw new AppError('Ruta no encontrada', 404);
@@ -341,7 +394,47 @@ const update = async (id, data) => {
 
   const nuevaFechaSalida = fechaSalida !== undefined ? fechaSalida : ruta.fechaSalida;
   const nuevaHoraSalida = horaSalida !== undefined ? horaSalida : ruta.horaSalida;
-  const fechaHoraCambio = fechaSalida !== undefined || horaSalida !== undefined;
+  const nuevaFechaLlegadaEstimada = fechaLlegadaEstimada !== undefined ? fechaLlegadaEstimada : ruta.fechaLlegadaEstimada;
+  const nuevaHoraLlegadaEstimada = horaLlegadaEstimada !== undefined ? horaLlegadaEstimada : ruta.horaLlegadaEstimada;
+  // El nombre se quedó de cuando solo existía fechaSalida — hoy dispara la revalidación
+  // de choque (validarChoqueVehiculoConductor) ante cualquier cambio que afecte el rango
+  // ocupado por la ruta, incluida la nueva fechaLlegadaEstimada.
+  const fechaHoraCambio = fechaSalida !== undefined || horaSalida !== undefined
+    || fechaLlegadaEstimada !== undefined || horaLlegadaEstimada !== undefined;
+
+  validarHorarioRuta({
+    fechaSalida: nuevaFechaSalida, horaSalida: nuevaHoraSalida,
+    fechaLlegadaEstimada: nuevaFechaLlegadaEstimada, horaLlegadaEstimada: nuevaHoraLlegadaEstimada,
+  });
+
+  // Si se mueve la fecha de salida y/o llegada, cualquier venta que ya tenga una
+  // fechaEstimadaEntrega prometida sobre esta ruta podría dejar de caer dentro del
+  // nuevo rango (salida+1 a llegada-1). Bloquear la edición no sirve aquí: exigiría
+  // corregir esas ventas ANTES de saber a qué fechas se va a mover la ruta, un
+  // problema circular (ver discusión con la usuaria). En vez de eso, se deja mover la
+  // ruta y se vacía la fechaEstimadaEntrega solo de las ventas que quedaron fuera de
+  // rango — el campo admite null — para que quien las vea sepa que hay que ponerles
+  // una fecha nueva (el listado de Ventas marca visualmente cuáles quedaron así). Se
+  // excluyen las ventas Canceladas (no prometen nada real); el resto (incluidas las
+  // "huérfanas" de una ruta que se canceló y se está reprogramando, ver updateEstado)
+  // si siguen atadas a esta ruta, se revisan igual.
+  let ventasSinFechaEntrega = [];
+  if (fechaHoraCambio) {
+    const ventasConEntrega = await EncomiendaVenta.findAll({
+      where: {
+        idRuta: id,
+        habilitado: true,
+        estado: { [Op.ne]: 'Cancelada' },
+        fechaEstimadaEntrega: { [Op.ne]: null },
+      },
+      attributes: ['idEncomiendaVenta', 'fechaEstimadaEntrega'],
+    });
+    if (ventasConEntrega.length > 0) {
+      const minimaEntrega = sumarDias(nuevaFechaSalida, 1);
+      const maximaEntrega = sumarDias(nuevaFechaLlegadaEstimada, -1);
+      ventasSinFechaEntrega = ventasConEntrega.filter(v => v.fechaEstimadaEntrega < minimaEntrega || v.fechaEstimadaEntrega > maximaEntrega);
+    }
+  }
 
   if (pares !== undefined) validarPares(pares);
 
@@ -387,9 +480,9 @@ const update = async (id, data) => {
           }
         }
         if (esNuevo || cambioVehiculo || cambioConductor || fechaHoraCambio) {
-          await validarEnfriamiento({
+          await validarChoqueVehiculoConductor({
             idVehiculo: par.idVehiculo, idConductor: par.idConductor,
-            fechaSalida: nuevaFechaSalida, idRutaExcluir: parseInt(id),
+            fechaSalida: nuevaFechaSalida, fechaLlegadaEstimada: nuevaFechaLlegadaEstimada, idRutaExcluir: parseInt(id),
           });
         }
 
@@ -420,9 +513,9 @@ const update = async (id, data) => {
       // revalidar el choque contra los pares que ya tenía la ruta.
       const paresActuales = await RutaVehiculoConductor.findAll({ where: { idRuta: id, habilitado: true }, transaction });
       for (const par of paresActuales) {
-        await validarEnfriamiento({
+        await validarChoqueVehiculoConductor({
           idVehiculo: par.idVehiculo, idConductor: par.idConductor,
-          fechaSalida: nuevaFechaSalida, idRutaExcluir: parseInt(id),
+          fechaSalida: nuevaFechaSalida, fechaLlegadaEstimada: nuevaFechaLlegadaEstimada, idRutaExcluir: parseInt(id),
         });
       }
     }
@@ -431,12 +524,20 @@ const update = async (id, data) => {
       nombreRuta:            nombreRuta            !== undefined ? nombreRuta            : ruta.nombreRuta,
       idDestino:             idDestino             !== undefined ? idDestino             : ruta.idDestino,
       fechaSalida:           nuevaFechaSalida,
+      fechaLlegadaEstimada:          nuevaFechaLlegadaEstimada,
       horaSalida:            nuevaHoraSalida,
-      horaLlegadaEstimada:   horaLlegadaEstimada   !== undefined ? horaLlegadaEstimada   : ruta.horaLlegadaEstimada,
+      horaLlegadaEstimada:   nuevaHoraLlegadaEstimada,
       estado:                estado                !== undefined ? estado                : ruta.estado,
       observaciones:         observaciones         !== undefined ? observaciones         : ruta.observaciones,
       habilitado:            habilitado            !== undefined ? habilitado            : ruta.habilitado
     }, { transaction });
+
+    if (ventasSinFechaEntrega.length > 0) {
+      await EncomiendaVenta.update(
+        { fechaEstimadaEntrega: null },
+        { where: { idEncomiendaVenta: { [Op.in]: ventasSinFechaEntrega.map(v => v.idEncomiendaVenta) } }, transaction }
+      );
+    }
 
     await transaction.commit();
   } catch (error) {
@@ -444,7 +545,7 @@ const update = async (id, data) => {
     throw error;
   }
 
-  return getById(id);
+  return { ruta: await getById(id), ventasSinFechaEntrega };
 };
 
 const updateEstado = async (id, estado) => {
@@ -474,7 +575,7 @@ const updateEstado = async (id, estado) => {
     for (const par of pares) {
       const conflictoVehiculo = await RutaVehiculoConductor.findOne({
         where: { idVehiculo: par.idVehiculo, habilitado: true, idRuta: { [Op.ne]: id } },
-        include: [{ model: Ruta, as: 'ruta', required: true, where: { estado: 'En Curso' } }],
+        include: [{ model: Ruta, as: 'ruta', required: true, where: { habilitado: true, estado: 'En Curso' } }],
       });
       if (conflictoVehiculo) {
         throw new AppError(
@@ -491,7 +592,7 @@ const updateEstado = async (id, estado) => {
 
       const conflictoConductor = await RutaVehiculoConductor.findOne({
         where: { idConductor: par.idConductor, habilitado: true, idRuta: { [Op.ne]: id } },
-        include: [{ model: Ruta, as: 'ruta', required: true, where: { estado: 'En Curso' } }],
+        include: [{ model: Ruta, as: 'ruta', required: true, where: { habilitado: true, estado: 'En Curso' } }],
       });
       if (conflictoConductor) {
         const u = par.conductor?.usuario;
@@ -526,6 +627,25 @@ const updateEstado = async (id, estado) => {
     });
     if (encomiendaCount === 0) {
       throw new AppError('No se puede iniciar la ruta sin encomiendas asignadas. Registra al menos una encomienda antes de poner la ruta En Curso.', 400);
+    }
+
+    const ventasSinFecha = await EncomiendaVenta.findAll({
+      where: { idRuta: parseInt(id), habilitado: true, estado: { [Op.ne]: 'Cancelada' }, fechaEstimadaEntrega: null },
+      attributes: ['idEncomiendaVenta'],
+      include: [{ model: Paquete, as: 'paquetes', attributes: ['numeroGuia'], required: false, limit: 1 }],
+    });
+    if (ventasSinFecha.length > 0) {
+      throw new AppError(
+        `Hay ${ventasSinFecha.length === 1 ? '1 venta' : ventasSinFecha.length + ' ventas'} sin fecha estimada de entrega. Asígnales una fecha antes de poner la ruta En Curso.`,
+        409,
+        ventasSinFecha.map(v => ({
+          tipo: 'venta',
+          id: v.idEncomiendaVenta,
+          guia: v.paquetes?.[0]?.numeroGuia || `#${v.idEncomiendaVenta}`,
+          descripcion: `Guía ${v.paquetes?.[0]?.numeroGuia || '#' + v.idEncomiendaVenta} no tiene fecha estimada de entrega asignada`,
+        })),
+        'MISSING_DELIVERY_DATE'
+      );
     }
 
     for (const par of pares) {
@@ -650,10 +770,11 @@ const getPageOf = async (id, { limit = 10 } = {}) => {
 // Devuelve, para la lista de vehículos/conductores dada, todas las rutas activas
 // (Programada/En Curso) que ya los tienen asignados — es la materia prima que usa el
 // frontend para pintar el calendario de disponibilidad al registrar/editar una ruta
-// (un día cae "ocupado" si está a ≤COOLDOWN_DIAS de alguna de estas fechas; ver
-// validarEnfriamiento más arriba, misma regla, calculada en el cliente para poder
-// mostrarla antes de que el usuario intente guardar). idRutaExcluir se usa al editar,
-// para no chocar contra la propia ruta que se está editando.
+// (un día cae "ocupado" si está dentro del rango salida→llegada de alguna de estas
+// rutas, con el margen de GAP_TRANSICION en cada punta; ver validarChoqueVehiculoConductor
+// más arriba, misma regla, calculada en el cliente para poder mostrarla antes de que el
+// usuario intente guardar). idRutaExcluir se usa al editar, para no chocar contra la
+// propia ruta que se está editando.
 const getDisponibilidad = async ({ idVehiculos = [], idConductores = [], idRutaExcluir } = {}) => {
   if (idVehiculos.length === 0 && idConductores.length === 0) return [];
 
@@ -672,8 +793,8 @@ const getDisponibilidad = async ({ idVehiculos = [], idConductores = [], idRutaE
         model: Ruta,
         as: 'ruta',
         required: true,
-        where: { estado: { [Op.in]: ['Programada', 'En Curso'] } },
-        attributes: ['idRuta', 'nombreRuta', 'fechaSalida'],
+        where: { habilitado: true, estado: { [Op.in]: ['Programada', 'En Curso'] } },
+        attributes: ['idRuta', 'nombreRuta', 'estado', 'fechaSalida', 'fechaLlegadaEstimada'],
       },
       { model: Vehiculo, as: 'vehiculo', attributes: ['idVehiculo', 'placa'] },
       {
@@ -688,7 +809,9 @@ const getDisponibilidad = async ({ idVehiculos = [], idConductores = [], idRutaE
   return pares.map((p) => ({
     idRuta: p.ruta.idRuta,
     nombreRuta: p.ruta.nombreRuta,
+    estado: p.ruta.estado,
     fechaSalida: p.ruta.fechaSalida,
+    fechaLlegadaEstimada: p.ruta.fechaLlegadaEstimada,
     idVehiculo: p.idVehiculo,
     placa: p.vehiculo?.placa || null,
     idConductor: p.idConductor,

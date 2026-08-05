@@ -119,6 +119,7 @@ CREATE TABLE ruta (
   hora_salida           TIME,
   hora_llegada_estimada TIME,
   fecha_salida          DATE,
+  fecha_llegada_estimada DATE,
   estado                VARCHAR(30) NOT NULL DEFAULT 'Programada',
   observaciones         TEXT,
   habilitado            BOOLEAN NOT NULL DEFAULT true,

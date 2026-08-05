@@ -11,6 +11,31 @@ const ESTADOS_VALIDOS = [
 const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia'];
 const ESTADOS_PAGO_VALIDOS = ['Pendiente', 'Pagado'];
 
+const sumarDias = (fechaStr, dias) => {
+  const d = new Date(`${fechaStr}T00:00:00`);
+  d.setDate(d.getDate() + dias);
+  return d.toISOString().slice(0, 10);
+};
+
+// La fecha estimada de entrega de un paquete tiene que caer DESPUÉS de que el vehículo
+// salga y ANTES de que vuelva — no tiene sentido prometer una entrega el mismo día de
+// la salida (todavía no ha llegado a ningún lado) ni después de que el vehículo ya
+// regresó (fechaLlegadaEstimada de la ruta). ruta.fechaLlegadaEstimada puede ser null en rutas creadas
+// antes de esta validación — en ese caso solo se exige el mínimo.
+const validarFechaEntrega = (fechaEstimadaEntrega, ruta) => {
+  if (!fechaEstimadaEntrega || !ruta.fechaSalida) return;
+  const minima = sumarDias(ruta.fechaSalida, 1);
+  if (fechaEstimadaEntrega < minima) {
+    throw new AppError(`La fecha estimada de entrega debe ser al menos un día después de la salida de la ruta (mínimo el ${minima})`, 400);
+  }
+  if (ruta.fechaLlegadaEstimada) {
+    const maxima = sumarDias(ruta.fechaLlegadaEstimada, -1);
+    if (fechaEstimadaEntrega > maxima) {
+      throw new AppError(`La fecha estimada de entrega debe ser al menos un día antes de la llegada de la ruta (máximo el ${maxima})`, 400);
+    }
+  }
+};
+
 // Una ruta ahora puede tener varios pares vehículo+conductor (convoy) — este include
 // se reutiliza en todas las consultas que devuelven una venta con su ruta, para que el
 // frontend pueda mostrar el vehículo/conductor correcto de cada paquete (ya no hay uno
@@ -279,6 +304,7 @@ const create = async (data) => {
     if (!ruta) {
       throw new AppError('Ruta no encontrada', 400);
     }
+    validarFechaEntrega(fechaEstimadaEntrega, ruta);
 
     if (paquetes && paquetes.length > 0) {
       for (const pkg of paquetes) {
@@ -451,6 +477,8 @@ const update = async (id, data) => {
     if (!rutaNueva) {
       throw new AppError('Ruta no encontrada', 400);
     }
+    const nuevaFechaEstimadaEntrega = fechaEstimadaEntrega !== undefined ? fechaEstimadaEntrega : encomienda.fechaEstimadaEntrega;
+    validarFechaEntrega(nuevaFechaEstimadaEntrega, rutaNueva);
 
     if (paquetes && paquetes.length > 0) {
       for (const pkg of paquetes) {
@@ -469,10 +497,7 @@ const update = async (id, data) => {
     await encomienda.update(
       {
         idRuta: nuevoIdRuta,
-        fechaEstimadaEntrega:
-          fechaEstimadaEntrega !== undefined
-            ? fechaEstimadaEntrega
-            : encomienda.fechaEstimadaEntrega,
+        fechaEstimadaEntrega: nuevaFechaEstimadaEntrega,
         observaciones: observaciones !== undefined ? observaciones : encomienda.observaciones,
         valorServicio: nuevoValorServicio,
         impuestos: nuevoImpuestos,

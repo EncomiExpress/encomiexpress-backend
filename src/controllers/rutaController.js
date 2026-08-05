@@ -47,8 +47,14 @@ exports.create = async (req, res) => {
 exports.update = async (req, res) => {
   try {
     const { id } = req.params;
-    const ruta = await rutaService.update(id, req.body);
-    res.json({ success: true, message: 'Ruta actualizada exitosamente', data: ruta });
+    const { ruta, ventasSinFechaEntrega } = await rutaService.update(id, req.body);
+    // Si mover la fecha de la ruta dejó ventas sin una fecha de entrega válida
+    // (se les vació el campo — ver rutaService.update), se avisa en el mismo mensaje
+    // de éxito para que quien edita la ruta se entere de una y las revise después.
+    const aviso = ventasSinFechaEntrega.length > 0
+      ? ` Se vació la fecha estimada de entrega de ${ventasSinFechaEntrega.length === 1 ? 'la venta' : 'las ventas'} #${ventasSinFechaEntrega.map(v => v.idEncomiendaVenta).join(', #')} porque quedó fuera del nuevo rango — asígnales una fecha nueva.`
+      : '';
+    res.json({ success: true, message: `Ruta actualizada exitosamente.${aviso}`, data: ruta });
   } catch (error) {
     res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al actualizar ruta' });
   }
@@ -64,7 +70,12 @@ exports.updateEstado = async (req, res) => {
     const ruta = await rutaService.updateEstado(id, estado);
     res.json({ success: true, message: `Estado actualizado a "${ruta.estado}"`, data: ruta });
   } catch (error) {
-    res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al actualizar estado' });
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || 'Error al actualizar estado',
+      details: error.details,
+      errorCode: error.errorCode,
+    });
   }
 };
 

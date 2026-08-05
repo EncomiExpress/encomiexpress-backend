@@ -16,7 +16,9 @@ const createValidation = [
   body('observaciones').optional({ nullable: true }).isString()
     .custom(noSoloRelleno('Las observaciones no pueden contener solo espacios o guiones')),
   body('fechaSalida').optional().isDate().withMessage('Fecha de salida inválida'),
-  body('fechaLlegada').optional().isDate().withMessage('Fecha de llegada inválida'),
+  body('fechaLlegadaEstimada').optional().isDate().withMessage('Fecha de llegada inválida'),
+  body('horaSalida').optional().matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/).withMessage('Hora de salida inválida'),
+  body('horaLlegadaEstimada').optional({ nullable: true }).matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/).withMessage('Hora de llegada inválida'),
   body('estado').optional().isIn(['Programada', 'En Curso', 'Completada', 'Cancelada']).withMessage('Estado de ruta inválido')
 ];
 
@@ -30,7 +32,9 @@ const updateValidation = [
   body('observaciones').optional({ nullable: true }).isString()
     .custom(noSoloRelleno('Las observaciones no pueden contener solo espacios o guiones')),
   body('fechaSalida').optional().isDate().withMessage('Fecha de salida inválida'),
-  body('fechaLlegada').optional().isDate().withMessage('Fecha de llegada inválida'),
+  body('fechaLlegadaEstimada').optional().isDate().withMessage('Fecha de llegada inválida'),
+  body('horaSalida').optional().matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/).withMessage('Hora de salida inválida'),
+  body('horaLlegadaEstimada').optional({ nullable: true }).matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/).withMessage('Hora de llegada inválida'),
   body('estado').optional().isIn(['Programada', 'En Curso', 'Completada', 'Cancelada']).withMessage('Estado de ruta inválido')
 ];
 

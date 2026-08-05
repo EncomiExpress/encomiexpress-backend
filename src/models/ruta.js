@@ -19,6 +19,10 @@ const Ruta = sequelize.define('Ruta', {
     type: DataTypes.DATEONLY,
     allowNull: true
   },
+  fechaLlegadaEstimada: {
+    type: DataTypes.DATEONLY,
+    allowNull: true
+  },
   horaSalida: {
     type: DataTypes.TIME,
     allowNull: true
