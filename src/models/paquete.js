@@ -43,6 +43,28 @@ const Paquete = sequelize.define('Paquete', {
   valorDeclarado: {
     type: DataTypes.DECIMAL(12, 2),
     allowNull: true
+  },
+  estado: {
+    type: DataTypes.STRING(30),
+    allowNull: false,
+    defaultValue: 'Por entregar'
+  },
+  historialEstado: {
+    type: DataTypes.JSONB,
+    allowNull: true,
+    defaultValue: []
+  },
+  observacionEstado: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  fechaUltimoEstado: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  fotoEntrega: {
+    type: DataTypes.TEXT,
+    allowNull: true
   }
 }, {
   tableName: 'paquete',

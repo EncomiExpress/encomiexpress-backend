@@ -147,7 +147,7 @@ CREATE TABLE anticipo_excedente (
   valor_anticipo          DECIMAL(12,2) NOT NULL DEFAULT 0,
   valor_gastado           DECIMAL(12,2) DEFAULT 0,
   excedente               DECIMAL(12,2) DEFAULT 0,
-  estado                  VARCHAR(30) NOT NULL DEFAULT 'pendiente',
+  estado                  VARCHAR(30) NOT NULL DEFAULT 'Entregado',
   soporte                 JSONB NOT NULL DEFAULT '[]',
   fecha_entrega           DATE,
   fecha_legalizacion      DATE,
@@ -191,6 +191,12 @@ CREATE TABLE paquete (
   ancho                       DECIMAL(8,2),
   profundidad                 DECIMAL(8,2),
   valor_declarado             DECIMAL(12,2)
+  ,estado                      VARCHAR(30) NOT NULL DEFAULT 'Por entregar'
+  ,historial_estado            JSONB NOT NULL DEFAULT '[]'
+  ,observacion_estado         TEXT
+  ,fecha_ultimo_estado        TIMESTAMP
+  ,foto_entrega               TEXT
+  ,habilitado                 BOOLEAN NOT NULL DEFAULT true
 );
 
 -- ============================================

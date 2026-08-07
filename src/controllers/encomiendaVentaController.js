@@ -106,3 +106,27 @@ exports.getRangoFechas = async (req, res, next) => {
     next(error);
   }
 };
+
+exports.actualizarEstadoPaquete = async (req, res, next) => {
+  try {
+    const paquete = await encomiendaService.actualizarEstadoPaquete(req.params.idPaquete, req.body.estado, {
+      observacion: req.body.observacion,
+      fotoEntrega: req.body.fotoEntrega || null,
+    });
+    res.json({ success: true, message: 'Estado del paquete actualizado correctamente', data: paquete });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.actualizarVariosPaquetes = async (req, res, next) => {
+  try {
+    const paquetes = await encomiendaService.actualizarVariosPaquetes(req.body.idsPaquetes || [], req.body.estado, {
+      observacion: req.body.observacion,
+      fotoEntrega: req.body.fotoEntrega || null,
+    });
+    res.json({ success: true, message: 'Estados de paquetes actualizados correctamente', data: paquetes });
+  } catch (error) {
+    next(error);
+  }
+};

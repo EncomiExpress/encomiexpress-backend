@@ -1,6 +1,7 @@
 const { EncomiendaVenta, Destinatario, Paquete, Cliente, Ruta, RutaVehiculoConductor, Vehiculo, Conductor, Destino, Usuario, sequelize } = require('../models');
 const AppError = require('../errors/appError');
 const crypto = require('crypto');
+const { normalizarEstadoPaquete, construirHistorialEstado, determinarEstadoEncomienda } = require('./paqueteStateUtils');
 
 const ESTADOS_VALIDOS = [
   'Programada',
@@ -613,6 +614,40 @@ const cambiarEstado = async (id, estado) => {
   return encomienda;
 };
 
+const actualizarEstadoPaquete = async (idPaquete, estado, { observacion = '', fotoEntrega = null } = {}) => {
+  const paquete = await Paquete.findByPk(idPaquete);
+  if (!paquete) {
+    throw new AppError('Paquete no encontrado', 404);
+  }
+
+  const estadoNormalizado = normalizarEstadoPaquete(estado);
+  const historial = construirHistorialEstado(paquete.historialEstado, estadoNormalizado, 'Cambio manual', observacion);
+
+  await paquete.update({
+    estado: estadoNormalizado,
+    observacionEstado: observacion || paquete.observacionEstado || '',
+    historialEstado: historial,
+    fechaUltimoEstado: new Date(),
+    fotoEntrega: fotoEntrega || paquete.fotoEntrega || null,
+  });
+
+  const encomienda = await EncomiendaVenta.findByPk(paquete.idEncomiendaVenta);
+  if (encomienda) {
+    const paquetes = await Paquete.findAll({ where: { idEncomiendaVenta: paquete.idEncomiendaVenta } });
+    await encomienda.update({ estado: determinarEstadoEncomienda(paquetes) });
+  }
+
+  return paquete;
+};
+
+const actualizarVariosPaquetes = async (idsPaquetes, estado, options = {}) => {
+  const resultados = [];
+  for (const idPaquete of idsPaquetes) {
+    resultados.push(await actualizarEstadoPaquete(idPaquete, estado, options));
+  }
+  return resultados;
+};
+
 const cambiarEstadoPago = async (id, estadoPago) => {
   const encomienda = await EncomiendaVenta.findByPk(id);
 
@@ -714,4 +749,6 @@ module.exports = {
   toggleHabilitado,
   getPageOf,
   getRangoFechas,
+  actualizarEstadoPaquete,
+  actualizarVariosPaquetes,
 };

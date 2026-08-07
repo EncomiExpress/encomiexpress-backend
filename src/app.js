@@ -43,6 +43,7 @@ const rutaRoutes = require('./routes/rutas');
 const anticipoRoutes = require('./routes/anticipos');
 const clienteRoutes = require('./routes/clientes');
 const encomiendaRoutes = require('./routes/encomiendas');
+const paqueteRoutes = require('./routes/paquetes');
 const rolRoutes = require('./routes/roles');
 const permisosRoutes = require('./routes/permisos');
 const configuracionRoutes = require('./routes/configuracion');
@@ -84,6 +85,7 @@ app.use('/api/rutas', rutaRoutes);
 app.use('/api/anticipos', anticipoRoutes);
 app.use('/api/clientes', clienteRoutes);
 app.use('/api/encomiendas', encomiendaRoutes);
+app.use('/api/paquetes', paqueteRoutes);
 app.use('/api/roles', rolRoutes);
 app.use('/api/configuracion', configuracionRoutes);
 

@@ -144,6 +144,28 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
   return { data, total: count };
 };
 
+const marcarReparto = async (idRuta, { idConductor } = {}) => {
+  const ruta = await Ruta.findByPk(idRuta);
+  if (!ruta) throw new AppError('Ruta no encontrada', 404);
+
+  const where = { idRuta: idRuta, habilitado: true };
+  if (idConductor) where.idConductor = idConductor;
+
+  const pares = await RutaVehiculoConductor.findAll({ where, attributes: ['idRutaVehiculoConductor'] });
+  if (!pares || pares.length === 0) return { count: 0 };
+
+  const ids = pares.map(p => p.idRutaVehiculoConductor);
+  const paquetes = await Paquete.findAll({ where: { idRutaVehiculoConductor: { [Op.in]: ids } }, attributes: ['idPaquete'] });
+  const idsPaquetes = paquetes.map(p => p.idPaquete);
+  if (idsPaquetes.length === 0) return { count: 0 };
+
+  // Usar el servicio de encomiendas para conservar historial y lógica
+  const encomiendaService = require('./encomiendaService');
+  await encomiendaService.actualizarVariosPaquetes(idsPaquetes, 'En reparto', { observacion: 'Marcado como En reparto por el conductor' });
+
+  return { count: idsPaquetes.length };
+};
+
 const getById = async (id) => {
   const ruta = await Ruta.findByPk(id, {
     include: [INCLUDE_PARES, { model: Destino, as: 'destino' }]

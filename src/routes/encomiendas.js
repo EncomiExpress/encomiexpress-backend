@@ -84,6 +84,8 @@ router.get('/', encomiendaVentaController.getAll);
  *               $ref: '#/components/schemas/Error'
  */
 router.get('/:id', encomiendaVentaController.getById);
+router.patch('/paquetes/:idPaquete/estado', encomiendaVentaController.actualizarEstadoPaquete);
+router.patch('/paquetes/estado-masivo', encomiendaVentaController.actualizarVariosPaquetes);
 
 /**
  * @swagger
