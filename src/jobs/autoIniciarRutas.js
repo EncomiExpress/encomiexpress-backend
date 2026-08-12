@@ -18,7 +18,7 @@ const yaDebioSalir = (ruta) => {
 // Después de VENTANA_REINTENTO_MS sin poder iniciarse, el conflicto (sin encomiendas
 // asignadas, documento vencido, etc.) requiere revisión manual — seguir reintentando
 // cada minuto solo satura los logs sin resolver nada. EXCEPCIÓN: si el motivo es que
-// el vehículo/conductor sigue ocupado en otra ruta "En Curso" (VEHICLE_IN_USE/
+// el vehículo/conductor sigue ocupado en otra ruta "En Ruta" (VEHICLE_IN_USE/
 // CONDUCTOR_IN_USE), no aplica esta ventana — ese conflicto se resuelve solo apenas
 // la otra ruta se complete, no necesita que alguien entre a arreglarlo a mano.
 const dentroDeVentanaDeReintento = (ruta) => {
@@ -56,8 +56,8 @@ const revisarRutasProgramadas = async () => {
     const info = rutasEstado.get(ruta.idRuta);
     if (!debeReintentar(ruta, info)) continue;
     try {
-      await rutaService.updateEstado(ruta.idRuta, 'En Curso');
-      console.log(`🚚 Ruta #${ruta.idRuta} ("${ruta.nombreRuta || 'sin nombre'}") pasó automáticamente a "En Curso"`);
+      await rutaService.updateEstado(ruta.idRuta, 'En Ruta');
+      console.log(`🚚 Ruta #${ruta.idRuta} ("${ruta.origen || 'sin origen'}") pasó automáticamente a "En Ruta"`);
       rutasEstado.delete(ruta.idRuta);
     } catch (error) {
       // Ej: sin encomiendas asignadas, documento vencido, o vehículo/conductor ya en

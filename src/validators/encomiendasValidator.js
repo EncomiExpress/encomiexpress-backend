@@ -11,7 +11,7 @@ const ESTADOS_PAGO_VALIDOS = ['Pendiente', 'Pagado'];
 
 const ESTADOS_ENCOMIENDA_VALIDOS = [
   'Programada',
-  'En Tránsito',
+  'En Ruta',
   'Entregada',
   'Cancelada',
 ];

@@ -12,6 +12,7 @@ const transporter = nodemailer.createTransport({
 
 const ICONS = {
   candado: '🔒',
+  paquete: '📦',
 };
 
 const buildEmailShell = ({ badgeBg, icon, heading, bodyHtml, extraHtml = '' }) => `
@@ -63,4 +64,25 @@ const sendPasswordRecoveryEmail = async (email, resetUrl) => {
   return transporter.sendMail(mailOptions);
 };
 
-module.exports = { transporter, sendPasswordRecoveryEmail };
+const sendPaqueteDevueltoEmail = async (email, { nombreCliente = '', numeroGuia = '', motivo = '' } = {}) => {
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject: 'Tu paquete fue devuelto a bodega - EncomiExpress',
+    html: buildEmailShell({
+      badgeBg: '#F59E0B20',
+      icon: ICONS.paquete,
+      heading: 'Tu paquete fue devuelto a bodega',
+      bodyHtml: `
+        Hola${nombreCliente ? ` <b>${nombreCliente}</b>` : ''}, no fue posible completar la entrega de tu
+        paquete con guía <b>${numeroGuia}</b> y quedó devuelto en nuestra bodega.
+        ${motivo ? `<br><br>Motivo: ${motivo}` : ''}
+        <br><br>Nos pondremos en contacto contigo para coordinar una nueva entrega o la devolución del envío.
+      `,
+    }),
+  };
+
+  return transporter.sendMail(mailOptions);
+};
+
+module.exports = { transporter, sendPasswordRecoveryEmail, sendPaqueteDevueltoEmail };

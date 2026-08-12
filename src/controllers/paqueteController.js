@@ -1,4 +1,5 @@
-const { Paquete, RutaVehiculoConductor, EncomiendaVenta, Destinatario, Ruta, sequelize } = require('../models');
+const { Paquete, RutaVehiculoConductor, EncomiendaVenta, Destinatario, Ruta, Destino } = require('../models');
+const { Op } = require('sequelize');
 const encomiendaService = require('../services/encomiendaService');
 const AppError = require('../errors/appError');
 
@@ -12,10 +13,10 @@ exports.getByConductor = async (req, res, next) => {
     const ids = pares.map(p => p.idRutaVehiculoConductor);
 
     const paquetes = await Paquete.findAll({
-      where: { idRutaVehiculoConductor: { [sequelize.Op.in]: ids } },
+      where: { idRutaVehiculoConductor: { [Op.in]: ids } },
       include: [
-        { model: EncomiendaVenta, as: 'encomienda' },
-        { model: RutaVehiculoConductor, as: 'asignacion', include: [{ model: Ruta, as: 'ruta' }] },
+        { model: EncomiendaVenta, as: 'encomienda', include: [{ model: Destinatario, as: 'destinatario' }] },
+        { model: RutaVehiculoConductor, as: 'asignacion', include: [{ model: Ruta, as: 'ruta', include: [{ model: Destino, as: 'destino' }] }] },
       ],
       order: [['idPaquete', 'ASC']]
     });

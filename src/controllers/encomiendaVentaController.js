@@ -119,6 +119,17 @@ exports.actualizarEstadoPaquete = async (req, res, next) => {
   }
 };
 
+exports.getPaquetesDevueltos = async (req, res, next) => {
+  try {
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const result = await encomiendaService.getPaquetesDevueltos({ q: req.query.q, page, limit });
+    res.json({ success: true, data: result.data, total: result.total });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.actualizarVariosPaquetes = async (req, res, next) => {
   try {
     const paquetes = await encomiendaService.actualizarVariosPaquetes(req.body.idsPaquetes || [], req.body.estado, {

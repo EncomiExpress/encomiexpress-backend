@@ -18,17 +18,17 @@ const verificarDependenciasPropietario = async (propietarioId) => {
 
 const verificarDependenciasVehiculo = async (vehiculoId) => {
   const rutas = await Ruta.findAll({
-    where: { habilitado: true, estado: 'En Curso' },
+    where: { habilitado: true, estado: 'En Ruta' },
     include: [
       { model: RutaVehiculoConductor, as: 'paresVehiculoConductor', where: { idVehiculo: vehiculoId, habilitado: true }, required: true, attributes: [] },
       { model: Destino, as: 'destino', attributes: ['ciudad', 'departamento'] },
     ],
-    attributes: ['idRuta', 'nombreRuta', 'estado', 'fechaSalida']
+    attributes: ['idRuta', 'origen', 'estado', 'fechaSalida']
   });
   const dependencias = rutas.map(r => ({
     tipo: 'Ruta',
     id: r.idRuta,
-    descripcion: `${r.nombreRuta || `Ruta #${r.idRuta}`} → ${r.destino?.ciudad || ''} (${r.estado})`
+    descripcion: `${r.origen || `Ruta #${r.idRuta}`} → ${r.destino?.ciudad || ''} (${r.estado})`
   }));
   return { bloqueado: dependencias.length > 0, dependencias };
 };
@@ -37,17 +37,17 @@ const verificarDependenciasConductor = async (conductorId) => {
   const dependencias = [];
 
   const rutasEnCurso = await Ruta.findAll({
-    where: { habilitado: true, estado: 'En Curso' },
+    where: { habilitado: true, estado: 'En Ruta' },
     include: [
       { model: RutaVehiculoConductor, as: 'paresVehiculoConductor', where: { idConductor: conductorId, habilitado: true }, required: true, attributes: [] },
       { model: Destino, as: 'destino', attributes: ['ciudad'] },
     ],
-    attributes: ['idRuta', 'nombreRuta', 'fechaSalida']
+    attributes: ['idRuta', 'origen', 'fechaSalida']
   });
   rutasEnCurso.forEach(r => dependencias.push({
-    tipo: 'Ruta En Curso',
+    tipo: 'Ruta activa',
     id: r.idRuta,
-    descripcion: `${r.nombreRuta || `Ruta #${r.idRuta}`} → ${r.destino?.ciudad || ''} (En Curso)`
+    descripcion: `${r.origen || `Ruta #${r.idRuta}`} → ${r.destino?.ciudad || ''} (En Ruta)`
   }));
 
   const anticiposPendientes = await AnticipoExcedente.findAll({
@@ -68,14 +68,14 @@ const verificarDependenciasDestino = async (destinoId) => {
     where: {
       idDestino: destinoId,
       habilitado: true,
-      estado: { [Op.in]: ['Programada', 'En Curso'] }
+      estado: { [Op.in]: ['Programada', 'En Ruta'] }
     },
-    attributes: ['idRuta', 'nombreRuta', 'estado', 'fechaSalida']
+    attributes: ['idRuta', 'origen', 'estado', 'fechaSalida']
   });
   const dependencias = rutas.map(r => ({
     tipo: 'Ruta',
     id: r.idRuta,
-    descripcion: `${r.nombreRuta || `Ruta #${r.idRuta}`} — ${r.fechaSalida || ''} (${r.estado})`
+    descripcion: `${r.origen || `Ruta #${r.idRuta}`} — ${r.fechaSalida || ''} (${r.estado})`
   }));
   return { bloqueado: dependencias.length > 0, dependencias };
 };
@@ -133,7 +133,7 @@ const verificarDependenciasAnticipo = async (anticipoId) => {
 
 const tieneRutasActivas = async (conductorId) => {
   const count = await Ruta.count({
-    where: { habilitado: true, estado: 'En Curso' },
+    where: { habilitado: true, estado: 'En Ruta' },
     include: [{ model: RutaVehiculoConductor, as: 'paresVehiculoConductor', where: { idConductor: conductorId, habilitado: true }, required: true, attributes: [] }],
   });
   return count > 0;

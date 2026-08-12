@@ -26,10 +26,13 @@ test('agrega un registro de historial cuando cambia el estado', () => {
 
 test('determina el estado general de la encomienda a partir de los paquetes', () => {
   assert.equal(determinarEstadoEncomienda([{ estado: 'Entregado' }, { estado: 'Entregado' }]), 'Entregada');
-  assert.equal(determinarEstadoEncomienda([{ estado: 'En reparto' }, { estado: 'Por entregar' }]), 'En Tránsito');
+  assert.equal(determinarEstadoEncomienda([{ estado: 'En reparto' }, { estado: 'Por entregar' }]), 'En Ruta');
   assert.equal(determinarEstadoEncomienda([{ estado: 'Por entregar' }]), 'Programada');
+  assert.equal(determinarEstadoEncomienda([{ estado: 'Devuelto' }, { estado: 'Por entregar' }]), 'En Ruta');
+  assert.equal(determinarEstadoEncomienda([{ estado: 'Entregado' }, { estado: 'Devuelto' }]), 'Completada con novedades');
+  assert.equal(determinarEstadoEncomienda([{ estado: 'Devuelto' }, { estado: 'Devuelto' }]), 'Completada con novedades');
 });
 
 test('expone la lista de estados soportados', () => {
-  assert.deepEqual(ESTADOS_PAQUETE, ['Por entregar', 'En reparto', 'Entregado', 'No entregado', 'Devuelto a bodega']);
+  assert.deepEqual(ESTADOS_PAQUETE, ['Por entregar', 'En reparto', 'Entregado', 'Devuelto']);
 });

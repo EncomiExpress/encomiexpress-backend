@@ -83,6 +83,12 @@ router.get('/', encomiendaVentaController.getAll);
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
+/**
+ * Paquetes devueltos a bodega (para la sección "Paquetes devueltos" del panel admin).
+ * Debe quedar declarada antes de "/:id" y de "/paquetes/:idPaquete/estado" para que
+ * Express no intente matchear "devueltos" como parámetro de esas rutas.
+ */
+router.get('/paquetes/devueltos', authorizePermission('listar_venta'), encomiendaVentaController.getPaquetesDevueltos);
 router.get('/:id', encomiendaVentaController.getById);
 router.patch('/paquetes/:idPaquete/estado', encomiendaVentaController.actualizarEstadoPaquete);
 router.patch('/paquetes/estado-masivo', encomiendaVentaController.actualizarVariosPaquetes);

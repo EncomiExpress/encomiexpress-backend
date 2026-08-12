@@ -2,11 +2,13 @@ const { EncomiendaVenta, Destinatario, Paquete, Cliente, Ruta, RutaVehiculoCondu
 const AppError = require('../errors/appError');
 const crypto = require('crypto');
 const { normalizarEstadoPaquete, construirHistorialEstado, determinarEstadoEncomienda } = require('./paqueteStateUtils');
+const { sendPaqueteDevueltoEmail } = require('../config/email');
 
 const ESTADOS_VALIDOS = [
   'Programada',
-  'En Tránsito',
+  'En Ruta',
   'Entregada',
+  'Completada con novedades',
   'Cancelada',
 ];
 const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia'];
@@ -155,7 +157,7 @@ const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, metod
       { estadoPago: { [Op.iLike]: `%${trimmed}%` } },
       { '$cliente.nombre$': { [Op.iLike]: `%${trimmed}%` } },
       { '$cliente.apellido$': { [Op.iLike]: `%${trimmed}%` } },
-      { '$ruta.nombre_ruta$': { [Op.iLike]: `%${trimmed}%` } },
+      { '$ruta.origen$': { [Op.iLike]: `%${trimmed}%` } },
     ];
     const partes = trimmed.split(/\s+/).filter(Boolean);
     if (partes.length > 1) {
@@ -620,6 +622,7 @@ const actualizarEstadoPaquete = async (idPaquete, estado, { observacion = '', fo
     throw new AppError('Paquete no encontrado', 404);
   }
 
+  const estadoAnterior = paquete.estado;
   const estadoNormalizado = normalizarEstadoPaquete(estado);
   const historial = construirHistorialEstado(paquete.historialEstado, estadoNormalizado, 'Cambio manual', observacion);
 
@@ -637,7 +640,63 @@ const actualizarEstadoPaquete = async (idPaquete, estado, { observacion = '', fo
     await encomienda.update({ estado: determinarEstadoEncomienda(paquetes) });
   }
 
+  // Notificación al cliente por correo cuando un paquete pasa a "Devuelto" — solo en
+  // la transición (no en cada re-guardado mientras ya estaba devuelto), y sin bloquear
+  // la actualización del paquete si el envío del correo falla (SMTP caído, etc.).
+  if (estadoNormalizado === 'Devuelto' && estadoAnterior !== 'Devuelto' && encomienda) {
+    try {
+      const cliente = await Cliente.findByPk(encomienda.idCliente);
+      if (cliente?.email) {
+        await sendPaqueteDevueltoEmail(cliente.email, {
+          nombreCliente: `${cliente.nombre} ${cliente.apellido}`.trim(),
+          numeroGuia: paquete.numeroGuia,
+          motivo: observacion || '',
+        });
+      }
+    } catch (error) {
+      console.error(`No se pudo enviar el correo de paquete devuelto (paquete #${idPaquete}):`, error.message);
+    }
+  }
+
   return paquete;
+};
+
+const getPaquetesDevueltos = async ({ q, page = 1, limit = 10 } = {}) => {
+  const { Op } = sequelize.Sequelize;
+  const where = { estado: 'Devuelto' };
+  if (q) {
+    const trimmed = q.trim();
+    where[Op.or] = [
+      { numeroGuia: { [Op.iLike]: `%${trimmed}%` } },
+      { '$encomienda.cliente.nombre$': { [Op.iLike]: `%${trimmed}%` } },
+      { '$encomienda.cliente.apellido$': { [Op.iLike]: `%${trimmed}%` } },
+      { '$encomienda.cliente.email$': { [Op.iLike]: `%${trimmed}%` } },
+    ];
+  }
+
+  const offset = (page - 1) * limit;
+  const { count, rows: data } = await Paquete.findAndCountAll({
+    where,
+    include: [
+      {
+        model: EncomiendaVenta,
+        as: 'encomienda',
+        include: [{ model: Cliente, as: 'cliente' }],
+      },
+      {
+        model: RutaVehiculoConductor,
+        as: 'asignacion',
+        include: [{ model: Ruta, as: 'ruta' }],
+      },
+    ],
+    limit,
+    offset,
+    order: [['fechaUltimoEstado', 'DESC'], ['idPaquete', 'DESC']],
+    distinct: true,
+    subQuery: false,
+  });
+
+  return { data, total: count };
 };
 
 const actualizarVariosPaquetes = async (idsPaquetes, estado, options = {}) => {
@@ -663,7 +722,11 @@ const cambiarEstadoPago = async (id, estadoPago) => {
     throw new AppError('Esta venta fue cancelada: no se puede cambiar el estado de pago', 400);
   }
 
-  if (estadoPago === 'Pagado' && encomienda.metodoPago === 'Contraentrega' && encomienda.estado !== 'Entregada') {
+  if (
+    estadoPago === 'Pagado' &&
+    encomienda.metodoPago === 'Contraentrega' &&
+    !['Entregada', 'Completada con novedades'].includes(encomienda.estado)
+  ) {
     throw new AppError('Esta venta es Contraentrega: el pago solo se puede confirmar cuando ya fue entregada', 400);
   }
 
@@ -680,7 +743,7 @@ const toggleHabilitado = async (id) => {
   }
 
   if (encomienda.habilitado) {
-    const ESTADOS_FINALES = ['Entregada', 'Cancelada'];
+    const ESTADOS_FINALES = ['Entregada', 'Completada con novedades', 'Cancelada'];
     if (!ESTADOS_FINALES.includes(encomienda.estado)) {
       throw new AppError(
         `No se puede inhabilitar la encomienda porque está en estado "${encomienda.estado}"`,
@@ -751,4 +814,5 @@ module.exports = {
   getRangoFechas,
   actualizarEstadoPaquete,
   actualizarVariosPaquetes,
+  getPaquetesDevueltos,
 };

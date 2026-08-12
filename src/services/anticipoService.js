@@ -53,7 +53,7 @@ const getAll = async ({ idConductor, idRuta, estado, habilitado, anio, mes, q, p
         // que no aplica un ILIKE de texto — se sacó de la búsqueda.
         { '$conductor.usuario.nombre$': { [Op.iLike]: query } },
         { '$conductor.usuario.apellido$': { [Op.iLike]: query } },
-        { '$ruta.nombre_ruta$': { [Op.iLike]: query } },
+        { '$ruta.origen$': { [Op.iLike]: query } },
       ];
       const partes = trimmed.split(/\s+/).filter(Boolean);
       if (partes.length > 1) {

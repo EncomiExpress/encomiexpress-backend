@@ -7,9 +7,10 @@ const Ruta = sequelize.define('Ruta', {
     primaryKey: true,
     autoIncrement: true
   },
-  nombreRuta: {
+  origen: {
     type: DataTypes.STRING(150),
-    allowNull: true
+    allowNull: true,
+    defaultValue: 'Medellín'
   },
   idDestino: {
     type: DataTypes.INTEGER,

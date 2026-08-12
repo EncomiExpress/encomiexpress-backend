@@ -1,4 +1,4 @@
-const ESTADOS_PAQUETE = ['Por entregar', 'En reparto', 'Entregado', 'No entregado', 'Devuelto a bodega'];
+const ESTADOS_PAQUETE = ['Por entregar', 'En reparto', 'Entregado', 'Devuelto'];
 
 const ESTADO_ALIASES = {
   'por entregar': 'Por entregar',
@@ -7,11 +7,9 @@ const ESTADO_ALIASES = {
   'en reparto': 'En reparto',
   'en_reparto': 'En reparto',
   'entregado': 'Entregado',
-  'no entregado': 'No entregado',
-  'no_entregado': 'No entregado',
-  'devuelto a bodega': 'Devuelto a bodega',
-  'devuelto_a_bodega': 'Devuelto a bodega',
-  'devuelto': 'Devuelto a bodega',
+  'devuelto a bodega': 'Devuelto',
+  'devuelto_a_bodega': 'Devuelto',
+  'devuelto': 'Devuelto',
 };
 
 const normalizarEstadoPaquete = (estado) => {
@@ -47,11 +45,17 @@ const determinarEstadoEncomienda = (paquetes = []) => {
   }
 
   const estados = paquetes.map((pkg) => normalizarEstadoPaquete(pkg?.estado || 'Por entregar'));
-  if (estados.every((estado) => estado === 'Entregado')) {
-    return 'Entregada';
+
+  // Terminal = ya no requiere más acción del conductor (se entregó o se devolvió a
+  // bodega). Si TODOS los paquetes llegaron a un estado terminal, la venta ya
+  // terminó su proceso — "Entregada" si todos se entregaron, o "Completada con
+  // novedades" si al menos uno quedó devuelto en bodega.
+  const todosTerminados = estados.every((estado) => estado === 'Entregado' || estado === 'Devuelto');
+  if (todosTerminados) {
+    return estados.some((estado) => estado === 'Devuelto') ? 'Completada con novedades' : 'Entregada';
   }
-  if (estados.some((estado) => estado === 'En reparto' || estado === 'No entregado' || estado === 'Devuelto a bodega')) {
-    return 'En Tránsito';
+  if (estados.some((estado) => estado === 'En reparto' || estado === 'Devuelto')) {
+    return 'En Ruta';
   }
   return 'Programada';
 };

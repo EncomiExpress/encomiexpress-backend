@@ -123,7 +123,7 @@ const create = async (data) => {
     idUsuario: usuario.idUsuario,
     categoriasLicencia: categoriasLicencia || [],
     numeroLicencia: numeroLicencia || null,
-    estado: 'activo',
+    estado: 'Disponible',
   });
 
   return Conductor.findByPk(conductor.idConductor, {
@@ -274,12 +274,12 @@ const getMiPerfil = async (idUsuario, rolNombre) => {
 
   // No existe una asignación fija conductor→vehículo en el modelo de datos — el vehículo
   // que se muestra es el del par vehículo+conductor de la ruta que el conductor tiene
-  // "En Curso" en este momento, si hay una (una ruta puede repartirse entre varios
+  // "En Ruta" en este momento, si hay una (una ruta puede repartirse entre varios
   // vehículos; este es específicamente el que le tocó a este conductor).
   const par = await RutaVehiculoConductor.findOne({
     where: { idConductor: conductor.idConductor, habilitado: true },
     include: [
-      { model: Ruta, as: 'ruta', where: { estado: 'En Curso' }, attributes: [], required: true },
+      { model: Ruta, as: 'ruta', where: { estado: 'En Ruta' }, attributes: [], required: true },
       { model: Vehiculo, as: 'vehiculo', attributes: ['idVehiculo', 'placa', 'marca', 'modelo', 'color', 'tipo', 'capacidad'] },
     ],
   });

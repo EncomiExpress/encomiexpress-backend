@@ -4,6 +4,7 @@ const AppError = require('../errors/appError');
 const { verificarDependenciasRuta } = require('../middlewares/validateDependencies');
 const { tieneLicenciaVigente } = require('../utils/licenciaHelper');
 const { esDomingo, getRangoHorario, horaDentroDeRango, MIN_DIAS_SALIDA_LLEGADA, DIAS_MARGEN_ENTRE_RUTAS, MAX_DIAS_ANTICIPACION } = require('../utils/horarioLaboral');
+const { normalizarEstadoPaquete, determinarEstadoEncomienda } = require('./paqueteStateUtils');
 
 // Máximo de pares vehículo+conductor por ruta — igual que MAX_PAQUETES en Ventas,
 // un tope razonable para no dejar el array crecer sin límite en el formulario.
@@ -22,7 +23,7 @@ const INCLUDE_PARES = {
 
 const buildOrder = (sortBy) => {
   if (!sortBy) return [];
-  const allowed = ['fechaSalida', 'estado', 'idRuta', 'habilitado', 'nombreRuta'];
+  const allowed = ['fechaSalida', 'estado', 'idRuta', 'habilitado', 'origen'];
   const parts = sortBy.split('.');
   const field = allowed.includes(parts[0]) ? parts[0] : 'fechaSalida';
   const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
@@ -69,7 +70,7 @@ const buildRutaWhere = ({ habilitado, estado, anio, mes, q, idConductor, idVehic
     const trimmed = q.trim();
     const escapado = sequelize.escape(`%${trimmed}%`);
     const conditions = [
-      { nombreRuta: { [Op.iLike]: `%${trimmed}%` } },
+      { origen: { [Op.iLike]: `%${trimmed}%` } },
       sequelize.literal(
         `EXISTS (SELECT 1 FROM ruta_vehiculo_conductor rvc JOIN vehiculo v ON v.id_vehiculo = rvc.id_vehiculo ` +
         `WHERE rvc.id_ruta = "Ruta"."id_ruta" AND rvc.habilitado = true AND v.placa ILIKE ${escapado})`
@@ -110,7 +111,7 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
     distinct: true,
   });
 
-  const enCursoIds = data.filter(r => r.estado === 'En Curso').map(r => r.idRuta);
+  const enCursoIds = data.filter(r => r.estado === 'En Ruta').map(r => r.idRuta);
   if (enCursoIds.length > 0) {
     const pendientes = await AnticipoExcedente.findAll({
       where: { idRuta: { [Op.in]: enCursoIds }, estado: 'En Legalización', habilitado: true },
@@ -244,7 +245,7 @@ const validarChoqueVehiculoConductor = async ({ idVehiculo, idConductor, fechaSa
       model: Ruta,
       as: 'ruta',
       required: true,
-      where: { habilitado: true, estado: { [Op.in]: ['Programada', 'En Curso'] } },
+      where: { habilitado: true, estado: { [Op.in]: ['Programada', 'En Ruta'] } },
     }],
   });
 
@@ -344,7 +345,7 @@ const validarPares = (pares) => {
 };
 
 const create = async (data) => {
-  const { idDestino, nombreRuta, fechaSalida, horaSalida, horaLlegadaEstimada, fechaLlegadaEstimada, estado, observaciones, pares } = data;
+  const { idDestino, origen, fechaSalida, horaSalida, horaLlegadaEstimada, fechaLlegadaEstimada, estado, observaciones, pares } = data;
 
   validarHorarioRuta({ fechaSalida, horaSalida, fechaLlegadaEstimada, horaLlegadaEstimada });
   validarPares(pares);
@@ -370,7 +371,7 @@ const create = async (data) => {
   let idRutaCreada;
   try {
     const ruta = await Ruta.create({
-      nombreRuta: nombreRuta || null,
+      origen: origen || 'Medellín',
       idDestino,
       fechaSalida: fechaSalida || null,
       fechaLlegadaEstimada: fechaLlegadaEstimada || null,
@@ -396,13 +397,13 @@ const create = async (data) => {
 };
 
 const update = async (id, data) => {
-  const { nombreRuta, idDestino, fechaSalida, horaSalida, horaLlegadaEstimada, fechaLlegadaEstimada, estado, observaciones, habilitado, pares } = data;
+  const { origen, idDestino, fechaSalida, horaSalida, horaLlegadaEstimada, fechaLlegadaEstimada, estado, observaciones, habilitado, pares } = data;
 
   const ruta = await Ruta.findByPk(id);
   if (!ruta) throw new AppError('Ruta no encontrada', 404);
 
   // Edición general solo permitida en Programada (nada comprometido aún) o
-  // Cancelada (se puede reprogramar libremente). "En Curso"/"Completada" ya
+  // Cancelada (se puede reprogramar libremente). "En Ruta"/"Completada" ya
   // tienen guías/anticipos/estados en cascada que dependen de estos datos —
   // cambiarlos por fuera de updateEstado corrompería esa cadena.
   if (!['Programada', 'Cancelada'].includes(ruta.estado)) {
@@ -543,7 +544,7 @@ const update = async (id, data) => {
     }
 
     await ruta.update({
-      nombreRuta:            nombreRuta            !== undefined ? nombreRuta            : ruta.nombreRuta,
+      origen:                origen                !== undefined ? origen                : ruta.origen,
       idDestino:             idDestino             !== undefined ? idDestino             : ruta.idDestino,
       fechaSalida:           nuevaFechaSalida,
       fechaLlegadaEstimada:          nuevaFechaLlegadaEstimada,
@@ -571,7 +572,7 @@ const update = async (id, data) => {
 };
 
 const updateEstado = async (id, estado) => {
-  const estadosValidos = ['Programada', 'En Curso', 'Completada', 'Cancelada'];
+  const estadosValidos = ['Programada', 'En Ruta', 'Completada', 'Cancelada'];
   if (!estadosValidos.includes(estado)) {
     throw new AppError(`Estado inválido. Debe ser uno de: ${estadosValidos.join(', ')}`, 400);
   }
@@ -583,7 +584,7 @@ const updateEstado = async (id, estado) => {
     throw new AppError('No se puede cambiar el estado de una ruta completada', 400);
   }
 
-  if (estado === 'Programada' && ruta.estado === 'En Curso') {
+  if (estado === 'Programada' && ruta.estado === 'En Ruta') {
     throw new AppError('No se puede revertir el estado de una ruta en curso a Programada', 400);
   }
 
@@ -593,11 +594,11 @@ const updateEstado = async (id, estado) => {
 
   const pares = ruta.paresVehiculoConductor || [];
 
-  if (estado === 'En Curso') {
+  if (estado === 'En Ruta') {
     for (const par of pares) {
       const conflictoVehiculo = await RutaVehiculoConductor.findOne({
         where: { idVehiculo: par.idVehiculo, habilitado: true, idRuta: { [Op.ne]: id } },
-        include: [{ model: Ruta, as: 'ruta', required: true, where: { habilitado: true, estado: 'En Curso' } }],
+        include: [{ model: Ruta, as: 'ruta', required: true, where: { habilitado: true, estado: 'En Ruta' } }],
       });
       if (conflictoVehiculo) {
         throw new AppError(
@@ -606,7 +607,7 @@ const updateEstado = async (id, estado) => {
           [{
             tipo: 'Conflicto de vehículo',
             id: conflictoVehiculo.idRuta,
-            descripcion: `${par.vehiculo?.placa || 'Vehículo'} ya está asignado a la Ruta #${conflictoVehiculo.idRuta} que se encuentra En Curso`
+            descripcion: `${par.vehiculo?.placa || 'Vehículo'} ya está asignado a la Ruta #${conflictoVehiculo.idRuta} que se encuentra En Ruta`
           }],
           'VEHICLE_IN_USE'
         );
@@ -614,7 +615,7 @@ const updateEstado = async (id, estado) => {
 
       const conflictoConductor = await RutaVehiculoConductor.findOne({
         where: { idConductor: par.idConductor, habilitado: true, idRuta: { [Op.ne]: id } },
-        include: [{ model: Ruta, as: 'ruta', required: true, where: { habilitado: true, estado: 'En Curso' } }],
+        include: [{ model: Ruta, as: 'ruta', required: true, where: { habilitado: true, estado: 'En Ruta' } }],
       });
       if (conflictoConductor) {
         const u = par.conductor?.usuario;
@@ -624,14 +625,14 @@ const updateEstado = async (id, estado) => {
           [{
             tipo: 'Conflicto de conductor',
             id: conflictoConductor.idRuta,
-            descripcion: `${u ? `${u.nombre} ${u.apellido}` : 'El conductor'} ya está asignado a la Ruta #${conflictoConductor.idRuta} que se encuentra En Curso`
+            descripcion: `${u ? `${u.nombre} ${u.apellido}` : 'El conductor'} ya está asignado a la Ruta #${conflictoConductor.idRuta} que se encuentra En Ruta`
           }],
           'CONDUCTOR_IN_USE'
         );
       }
 
       // Revalidación de documentos/licencia justo al iniciar — antes solo se
-      // validaba al crear/asignar el par, nunca al pasar a "En Curso". Si un
+      // validaba al crear/asignar el par, nunca al pasar a "En Ruta". Si un
       // documento vence mientras la ruta seguía Programada, esto lo atrapa aquí,
       // en el momento exacto en que realmente importa.
       if (par.vehiculo) validarDocumentosVehiculo(par.vehiculo);
@@ -648,7 +649,7 @@ const updateEstado = async (id, estado) => {
       where: { idRuta: parseInt(id), habilitado: true }
     });
     if (encomiendaCount === 0) {
-      throw new AppError('No se puede iniciar la ruta sin encomiendas asignadas. Registra al menos una encomienda antes de poner la ruta En Curso.', 400);
+      throw new AppError('No se puede iniciar la ruta sin encomiendas asignadas. Registra al menos una encomienda antes de poner la ruta En Ruta.', 400);
     }
 
     const ventasSinFecha = await EncomiendaVenta.findAll({
@@ -658,7 +659,7 @@ const updateEstado = async (id, estado) => {
     });
     if (ventasSinFecha.length > 0) {
       throw new AppError(
-        `Hay ${ventasSinFecha.length === 1 ? '1 venta' : ventasSinFecha.length + ' ventas'} sin fecha estimada de entrega. Asígnales una fecha antes de poner la ruta En Curso.`,
+        `Hay ${ventasSinFecha.length === 1 ? '1 venta' : ventasSinFecha.length + ' ventas'} sin fecha estimada de entrega. Asígnales una fecha antes de poner la ruta En Ruta.`,
         409,
         ventasSinFecha.map(v => ({
           tipo: 'venta',
@@ -679,7 +680,7 @@ const updateEstado = async (id, estado) => {
       { where: { idRuta: ruta.idRuta, habilitado: true, estado: 'Entregado' } }
     );
     await EncomiendaVenta.update(
-      { estado: 'En Tránsito' },
+      { estado: 'En Ruta' },
       { where: { idRuta: ruta.idRuta, habilitado: true, estado: 'Programada' } }
     );
   }
@@ -694,7 +695,7 @@ const updateEstado = async (id, estado) => {
     }
   }
 
-  if ((estado === 'Completada' || estado === 'Cancelada') && ruta.estado === 'En Curso') {
+  if ((estado === 'Completada' || estado === 'Cancelada') && ruta.estado === 'En Ruta') {
     for (const par of pares) {
       await Vehiculo.update({ estado: 'Disponible' }, { where: { idVehiculo: par.idVehiculo } });
       await Conductor.update({ estado: 'Disponible' }, { where: { idConductor: par.idConductor } });
@@ -702,10 +703,33 @@ const updateEstado = async (id, estado) => {
   }
 
   if (estado === 'Completada') {
-    await EncomiendaVenta.update(
-      { estado: 'Entregada' },
-      { where: { idRuta: ruta.idRuta, habilitado: true, estado: 'En Tránsito' } }
+    const ventasActivas = await EncomiendaVenta.findAll({
+      where: { idRuta: ruta.idRuta, habilitado: true, estado: 'En Ruta' },
+      include: [{ model: Paquete, as: 'paquetes' }],
+    });
+
+    // No se puede completar la ruta si a alguna venta le quedó un paquete sin estado
+    // final (Entregado/Devuelto) — si no, la venta terminaría en "Entregada"/"Completada
+    // con novedades" sin que ese paquete realmente haya llegado a un desenlace.
+    const ventasConPendientes = ventasActivas.filter((venta) =>
+      (venta.paquetes || []).some((p) => !['Entregado', 'Devuelto'].includes(normalizarEstadoPaquete(p.estado)))
     );
+    if (ventasConPendientes.length > 0) {
+      throw new AppError(
+        'Hay ventas con paquetes que aún no tienen un estado final (Entregado o Devuelto). Actualiza el estado de todos los paquetes antes de completar la ruta.',
+        409,
+        ventasConPendientes.map((venta) => ({
+          tipo: 'venta',
+          id: venta.idEncomiendaVenta,
+          descripcion: `La venta #${venta.idEncomiendaVenta} tiene paquetes sin estado final`,
+        })),
+        'PACKAGES_PENDING'
+      );
+    }
+
+    for (const venta of ventasActivas) {
+      await venta.update({ estado: determinarEstadoEncomienda(venta.paquetes) });
+    }
   }
 
   if (estado === 'Cancelada') {
@@ -713,7 +737,7 @@ const updateEstado = async (id, estado) => {
     // pueden seguir su curso una vez se les asigne una ruta activa.
     await EncomiendaVenta.update(
       { estado: 'Programada' },
-      { where: { idRuta: ruta.idRuta, habilitado: true, estado: { [Op.in]: ['Programada', 'En Tránsito'] } } }
+      { where: { idRuta: ruta.idRuta, habilitado: true, estado: { [Op.in]: ['Programada', 'En Ruta'] } } }
     );
     // El excedente se calcula aquí (no solo se fuerza el estado) porque la ruta se
     // cancela antes de que el conductor legalice: si se dejara en 0, "Confirmar
@@ -790,7 +814,7 @@ const getPageOf = async (id, { limit = 10 } = {}) => {
 };
 
 // Devuelve, para la lista de vehículos/conductores dada, todas las rutas activas
-// (Programada/En Curso) que ya los tienen asignados — es la materia prima que usa el
+// (Programada/En Ruta) que ya los tienen asignados — es la materia prima que usa el
 // frontend para pintar el calendario de disponibilidad al registrar/editar una ruta
 // (un día cae "ocupado" si está dentro del rango salida→llegada de alguna de estas
 // rutas, con el margen de GAP_TRANSICION en cada punta; ver validarChoqueVehiculoConductor
@@ -815,8 +839,8 @@ const getDisponibilidad = async ({ idVehiculos = [], idConductores = [], idRutaE
         model: Ruta,
         as: 'ruta',
         required: true,
-        where: { habilitado: true, estado: { [Op.in]: ['Programada', 'En Curso'] } },
-        attributes: ['idRuta', 'nombreRuta', 'estado', 'fechaSalida', 'fechaLlegadaEstimada'],
+        where: { habilitado: true, estado: { [Op.in]: ['Programada', 'En Ruta'] } },
+        attributes: ['idRuta', 'origen', 'estado', 'fechaSalida', 'fechaLlegadaEstimada'],
       },
       { model: Vehiculo, as: 'vehiculo', attributes: ['idVehiculo', 'placa'] },
       {
@@ -830,7 +854,7 @@ const getDisponibilidad = async ({ idVehiculos = [], idConductores = [], idRutaE
 
   return pares.map((p) => ({
     idRuta: p.ruta.idRuta,
-    nombreRuta: p.ruta.nombreRuta,
+    origen: p.ruta.origen,
     estado: p.ruta.estado,
     fechaSalida: p.ruta.fechaSalida,
     fechaLlegadaEstimada: p.ruta.fechaLlegadaEstimada,
