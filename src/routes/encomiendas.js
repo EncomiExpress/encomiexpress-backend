@@ -84,14 +84,13 @@ router.get('/', encomiendaVentaController.getAll);
  *               $ref: '#/components/schemas/Error'
  */
 /**
- * Paquetes devueltos a bodega (para la sección "Paquetes devueltos" del panel admin).
- * Debe quedar declarada antes de "/:id" y de "/paquetes/:idPaquete/estado" para que
- * Express no intente matchear "devueltos" como parámetro de esas rutas.
+ * Paquetes marcados como devueltos por el conductor (para la sección "Paquetes
+ * devueltos" del panel admin). Deben quedar declaradas antes de "/:id" para que
+ * Express no intente matchear "paquetes" como parámetro de esa ruta.
  */
 router.get('/paquetes/devueltos', authorizePermission('listar_venta'), encomiendaVentaController.getPaquetesDevueltos);
+router.get('/paquetes/devueltos/anios-disponibles', authorizePermission('listar_venta'), encomiendaVentaController.getAniosDisponiblesPaquetesDevueltos);
 router.get('/:id', encomiendaVentaController.getById);
-router.patch('/paquetes/:idPaquete/estado', encomiendaVentaController.actualizarEstadoPaquete);
-router.patch('/paquetes/estado-masivo', encomiendaVentaController.actualizarVariosPaquetes);
 
 /**
  * @swagger

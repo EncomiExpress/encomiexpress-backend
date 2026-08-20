@@ -178,11 +178,6 @@ router.put('/:id', authorizePermission('actualizar_ruta'), updateValidation, val
 router.patch('/:id/estado', authorizePermission('actualizar_ruta'), rutaController.updateEstado);
 
 /**
- * Marcar todos los paquetes asignados a la ruta (o al conductor en la ruta) como 'En reparto'
- */
-router.patch('/:id/marcar-reparto', rutaController.marcarReparto);
-
-/**
  * @swagger
  * /rutas/{id}/toggle-habilitado:
  *   patch:

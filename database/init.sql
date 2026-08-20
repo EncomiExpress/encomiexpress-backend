@@ -192,11 +192,9 @@ CREATE TABLE paquete (
   profundidad                 DECIMAL(8,2),
   valor_declarado             DECIMAL(12,2)
   ,estado                      VARCHAR(30) NOT NULL DEFAULT 'Por entregar'
-  ,historial_estado            JSONB NOT NULL DEFAULT '[]'
   ,observacion_estado         TEXT
   ,fecha_ultimo_estado        TIMESTAMP
   ,foto_entrega               TEXT
-  ,habilitado                 BOOLEAN NOT NULL DEFAULT true
 );
 
 -- ============================================
@@ -210,7 +208,7 @@ COMMENT ON COLUMN anticipo_excedente.soporte IS 'Array JSONB de URLs de Cloudina
 COMMENT ON COLUMN ruta.estado IS 'Programada | En Ruta | Completada | Cancelada';
 COMMENT ON COLUMN ruta.origen IS 'Ciudad de origen de la ruta (texto libre, dato base: Medellín)';
 COMMENT ON COLUMN encomienda_venta.estado IS 'Programada | En Ruta | Entregada | Completada con novedades | Cancelada';
-COMMENT ON COLUMN paquete.estado IS 'Por entregar | En reparto | Entregado | Devuelto';
+COMMENT ON COLUMN paquete.estado IS 'Por entregar | Entregado | Devuelto';
 
 -- ============================================
 -- LLAVES FORÁNEAS

@@ -107,36 +107,27 @@ exports.getRangoFechas = async (req, res, next) => {
   }
 };
 
-exports.actualizarEstadoPaquete = async (req, res, next) => {
-  try {
-    const paquete = await encomiendaService.actualizarEstadoPaquete(req.params.idPaquete, req.body.estado, {
-      observacion: req.body.observacion,
-      fotoEntrega: req.body.fotoEntrega || null,
-    });
-    res.json({ success: true, message: 'Estado del paquete actualizado correctamente', data: paquete });
-  } catch (error) {
-    next(error);
-  }
-};
-
 exports.getPaquetesDevueltos = async (req, res, next) => {
   try {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
-    const result = await encomiendaService.getPaquetesDevueltos({ q: req.query.q, page, limit });
+    const result = await encomiendaService.getPaquetesDevueltos({
+      q: req.query.q,
+      anio: req.query.anio,
+      mes: req.query.mes,
+      page,
+      limit,
+    });
     res.json({ success: true, data: result.data, total: result.total });
   } catch (error) {
     next(error);
   }
 };
 
-exports.actualizarVariosPaquetes = async (req, res, next) => {
+exports.getAniosDisponiblesPaquetesDevueltos = async (req, res, next) => {
   try {
-    const paquetes = await encomiendaService.actualizarVariosPaquetes(req.body.idsPaquetes || [], req.body.estado, {
-      observacion: req.body.observacion,
-      fotoEntrega: req.body.fotoEntrega || null,
-    });
-    res.json({ success: true, message: 'Estados de paquetes actualizados correctamente', data: paquetes });
+    const anios = await encomiendaService.getAniosDisponiblesPaquetesDevueltos();
+    res.json({ success: true, data: anios });
   } catch (error) {
     next(error);
   }

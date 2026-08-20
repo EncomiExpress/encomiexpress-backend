@@ -68,14 +68,14 @@ const sendPaqueteDevueltoEmail = async (email, { nombreCliente = '', numeroGuia 
   const mailOptions = {
     from: process.env.EMAIL_USER,
     to: email,
-    subject: 'Tu paquete fue devuelto a bodega - EncomiExpress',
+    subject: 'No fue posible entregar tu paquete - EncomiExpress',
     html: buildEmailShell({
       badgeBg: '#F59E0B20',
       icon: ICONS.paquete,
-      heading: 'Tu paquete fue devuelto a bodega',
+      heading: 'No fue posible entregar tu paquete',
       bodyHtml: `
         Hola${nombreCliente ? ` <b>${nombreCliente}</b>` : ''}, no fue posible completar la entrega de tu
-        paquete con guía <b>${numeroGuia}</b> y quedó devuelto en nuestra bodega.
+        paquete con guía <b>${numeroGuia}</b> y quedó marcado como devuelto.
         ${motivo ? `<br><br>Motivo: ${motivo}` : ''}
         <br><br>Nos pondremos en contacto contigo para coordinar una nueva entrega o la devolución del envío.
       `,

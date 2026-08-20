@@ -1,7 +1,7 @@
 const { EncomiendaVenta, Destinatario, Paquete, Cliente, Ruta, RutaVehiculoConductor, Vehiculo, Conductor, Destino, Usuario, sequelize } = require('../models');
 const AppError = require('../errors/appError');
 const crypto = require('crypto');
-const { normalizarEstadoPaquete, construirHistorialEstado, determinarEstadoEncomienda } = require('./paqueteStateUtils');
+const { normalizarEstadoPaquete, determinarEstadoEncomienda } = require('./paqueteStateUtils');
 const { sendPaqueteDevueltoEmail } = require('../config/email');
 
 const ESTADOS_VALIDOS = [
@@ -617,28 +617,44 @@ const cambiarEstado = async (id, estado) => {
 };
 
 const actualizarEstadoPaquete = async (idPaquete, estado, { observacion = '', fotoEntrega = null } = {}) => {
-  const paquete = await Paquete.findByPk(idPaquete);
+  const paquete = await Paquete.findByPk(idPaquete, {
+    include: [{ model: RutaVehiculoConductor, as: 'asignacion', include: [{ model: Ruta, as: 'ruta' }] }],
+  });
   if (!paquete) {
     throw new AppError('Paquete no encontrado', 404);
   }
 
-  const estadoAnterior = paquete.estado;
-  const estadoNormalizado = normalizarEstadoPaquete(estado);
-  const historial = construirHistorialEstado(paquete.historialEstado, estadoNormalizado, 'Cambio manual', observacion);
+  // El conductor solo puede marcar la entrega mientras la ruta está en curso —
+  // antes de eso no ha salido de bodega, y después de completada ya no aplica.
+  if (paquete.asignacion?.ruta?.estado !== 'En Ruta') {
+    throw new AppError('Solo se puede actualizar un paquete mientras su ruta está "En Ruta"', 409);
+  }
 
-  await paquete.update({
-    estado: estadoNormalizado,
-    observacionEstado: observacion || paquete.observacionEstado || '',
-    historialEstado: historial,
-    fechaUltimoEstado: new Date(),
-    fotoEntrega: fotoEntrega || paquete.fotoEntrega || null,
-  });
+  const estadoAnterior = paquete.estado;
+  if (estadoAnterior === 'Entregado' || estadoAnterior === 'Devuelto') {
+    throw new AppError('Este paquete ya tiene un estado final y no se puede modificar', 409);
+  }
 
   const encomienda = await EncomiendaVenta.findByPk(paquete.idEncomiendaVenta);
-  if (encomienda) {
-    const paquetes = await Paquete.findAll({ where: { idEncomiendaVenta: paquete.idEncomiendaVenta } });
-    await encomienda.update({ estado: determinarEstadoEncomienda(paquetes) });
+  if (encomienda?.estado === 'Cancelada') {
+    throw new AppError('No se puede actualizar un paquete de una venta cancelada', 409);
   }
+
+  const estadoNormalizado = normalizarEstadoPaquete(estado);
+
+  await sequelize.transaction(async (t) => {
+    await paquete.update({
+      estado: estadoNormalizado,
+      observacionEstado: observacion || paquete.observacionEstado || '',
+      fechaUltimoEstado: new Date(),
+      fotoEntrega: fotoEntrega || paquete.fotoEntrega || null,
+    }, { transaction: t });
+
+    if (encomienda) {
+      const paquetes = await Paquete.findAll({ where: { idEncomiendaVenta: paquete.idEncomiendaVenta }, transaction: t });
+      await encomienda.update({ estado: determinarEstadoEncomienda(paquetes, encomienda.estado) }, { transaction: t });
+    }
+  });
 
   // Notificación al cliente por correo cuando un paquete pasa a "Devuelto" — solo en
   // la transición (no en cada re-guardado mientras ya estaba devuelto), y sin bloquear
@@ -661,7 +677,7 @@ const actualizarEstadoPaquete = async (idPaquete, estado, { observacion = '', fo
   return paquete;
 };
 
-const getPaquetesDevueltos = async ({ q, page = 1, limit = 10 } = {}) => {
+const getPaquetesDevueltos = async ({ q, anio, mes, page = 1, limit = 10 } = {}) => {
   const { Op } = sequelize.Sequelize;
   const where = { estado: 'Devuelto' };
   if (q) {
@@ -672,6 +688,18 @@ const getPaquetesDevueltos = async ({ q, page = 1, limit = 10 } = {}) => {
       { '$encomienda.cliente.apellido$': { [Op.iLike]: `%${trimmed}%` } },
       { '$encomienda.cliente.email$': { [Op.iLike]: `%${trimmed}%` } },
     ];
+  }
+  // Mismo patrón año/mes que anticipoService.getAll — fechaUltimoEstado se filtra
+  // por rango, no por LIKE.
+  if (anio) {
+    const anioNum = parseInt(anio);
+    const mesNum = mes ? parseInt(mes) : null;
+    const mesInicio = mesNum || 1;
+    const inicio = `${anioNum}-${String(mesInicio).padStart(2, '0')}-01`;
+    const fin = mesNum
+      ? (mesNum === 12 ? `${anioNum + 1}-01-01` : `${anioNum}-${String(mesNum + 1).padStart(2, '0')}-01`)
+      : `${anioNum + 1}-01-01`;
+    where.fechaUltimoEstado = { [Op.gte]: inicio, [Op.lt]: fin };
   }
 
   const offset = (page - 1) * limit;
@@ -699,12 +727,12 @@ const getPaquetesDevueltos = async ({ q, page = 1, limit = 10 } = {}) => {
   return { data, total: count };
 };
 
-const actualizarVariosPaquetes = async (idsPaquetes, estado, options = {}) => {
-  const resultados = [];
-  for (const idPaquete of idsPaquetes) {
-    resultados.push(await actualizarEstadoPaquete(idPaquete, estado, options));
-  }
-  return resultados;
+const getAniosDisponiblesPaquetesDevueltos = async () => {
+  const rows = await sequelize.query(
+    "SELECT DISTINCT EXTRACT(YEAR FROM fecha_ultimo_estado)::int AS anio FROM paquete WHERE estado = 'Devuelto' ORDER BY anio DESC",
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  return rows.map((r) => r.anio);
 };
 
 const cambiarEstadoPago = async (id, estadoPago) => {
@@ -813,6 +841,6 @@ module.exports = {
   getPageOf,
   getRangoFechas,
   actualizarEstadoPaquete,
-  actualizarVariosPaquetes,
   getPaquetesDevueltos,
+  getAniosDisponiblesPaquetesDevueltos,
 };

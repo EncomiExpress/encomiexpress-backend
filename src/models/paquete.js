@@ -49,11 +49,6 @@ const Paquete = sequelize.define('Paquete', {
     allowNull: false,
     defaultValue: 'Por entregar'
   },
-  historialEstado: {
-    type: DataTypes.JSONB,
-    allowNull: true,
-    defaultValue: []
-  },
   observacionEstado: {
     type: DataTypes.TEXT,
     allowNull: true

@@ -20,6 +20,7 @@ const storage = new CloudinaryStorage({
   allowedFormats: ['jpg', 'jpeg', 'png', 'pdf'],
 });
 
-const upload = multer({ storage });
+// Sin este límite, cualquier archivo autenticado (PDF o imagen) se sube sin tope de peso.
+const upload = multer({ storage, limits: { fileSize: 8 * 1024 * 1024 } }); // 8 MB
 
 module.exports = { cloudinary, upload };

@@ -119,6 +119,26 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
     });
     const pendientesSet = new Set(pendientes.map(a => a.idRuta));
     data.forEach(r => { r.dataValues.pendienteLegalizacion = pendientesSet.has(r.idRuta); });
+
+    // Mismo mecanismo que pendienteLegalizacion, pero mirando los paquetes: si algún
+    // paquete de los pares de esta ruta no llegó a un estado final, la ruta no se
+    // puede completar todavía (ver la validación PACKAGES_PENDING en updateEstado).
+    const pares = await RutaVehiculoConductor.findAll({
+      where: { idRuta: { [Op.in]: enCursoIds }, habilitado: true },
+      attributes: ['idRutaVehiculoConductor', 'idRuta'],
+    });
+    const rutaDelPar = new Map(pares.map(p => [p.idRutaVehiculoConductor, p.idRuta]));
+    if (rutaDelPar.size > 0) {
+      const pendientesPaquete = await Paquete.findAll({
+        where: {
+          idRutaVehiculoConductor: { [Op.in]: [...rutaDelPar.keys()] },
+          estado: { [Op.notIn]: ['Entregado', 'Devuelto'] },
+        },
+        attributes: ['idRutaVehiculoConductor'],
+      });
+      const rutasConPaquetesPendientes = new Set(pendientesPaquete.map(p => rutaDelPar.get(p.idRutaVehiculoConductor)));
+      data.forEach(r => { r.dataValues.paquetesPendientes = rutasConPaquetesPendientes.has(r.idRuta); });
+    }
   }
 
   // pesoUsado: kg ya ocupados en CADA PAR vehículo+conductor (no en la ruta completa)
@@ -143,28 +163,6 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
   }
 
   return { data, total: count };
-};
-
-const marcarReparto = async (idRuta, { idConductor } = {}) => {
-  const ruta = await Ruta.findByPk(idRuta);
-  if (!ruta) throw new AppError('Ruta no encontrada', 404);
-
-  const where = { idRuta: idRuta, habilitado: true };
-  if (idConductor) where.idConductor = idConductor;
-
-  const pares = await RutaVehiculoConductor.findAll({ where, attributes: ['idRutaVehiculoConductor'] });
-  if (!pares || pares.length === 0) return { count: 0 };
-
-  const ids = pares.map(p => p.idRutaVehiculoConductor);
-  const paquetes = await Paquete.findAll({ where: { idRutaVehiculoConductor: { [Op.in]: ids } }, attributes: ['idPaquete'] });
-  const idsPaquetes = paquetes.map(p => p.idPaquete);
-  if (idsPaquetes.length === 0) return { count: 0 };
-
-  // Usar el servicio de encomiendas para conservar historial y lógica
-  const encomiendaService = require('./encomiendaService');
-  await encomiendaService.actualizarVariosPaquetes(idsPaquetes, 'En reparto', { observacion: 'Marcado como En reparto por el conductor' });
-
-  return { count: idsPaquetes.length };
 };
 
 const getById = async (id) => {
@@ -728,17 +726,33 @@ const updateEstado = async (id, estado) => {
     }
 
     for (const venta of ventasActivas) {
-      await venta.update({ estado: determinarEstadoEncomienda(venta.paquetes) });
+      await venta.update({ estado: determinarEstadoEncomienda(venta.paquetes, venta.estado) });
     }
   }
 
   if (estado === 'Cancelada') {
+    const ventasAReasignar = await EncomiendaVenta.findAll({
+      where: { idRuta: ruta.idRuta, habilitado: true, estado: { [Op.in]: ['Programada', 'En Ruta'] } },
+      attributes: ['idEncomiendaVenta'],
+    });
+    const idsVentasAReasignar = ventasAReasignar.map((v) => v.idEncomiendaVenta);
+
     // Las ventas quedan pendientes de reasignación a otra ruta (no se cancelan):
     // pueden seguir su curso una vez se les asigne una ruta activa.
     await EncomiendaVenta.update(
       { estado: 'Programada' },
-      { where: { idRuta: ruta.idRuta, habilitado: true, estado: { [Op.in]: ['Programada', 'En Ruta'] } } }
+      { where: { idEncomiendaVenta: { [Op.in]: idsVentasAReasignar } } }
     );
+
+    // Los paquetes también se reinician: si la ruta ya había arrancado y algún
+    // conductor llegó a marcar entregas, esas marcas dejan de aplicar — la venta
+    // va a salir de nuevo, completa, en la próxima ruta que se le asigne.
+    if (idsVentasAReasignar.length > 0) {
+      await Paquete.update(
+        { estado: 'Por entregar' },
+        { where: { idEncomiendaVenta: { [Op.in]: idsVentasAReasignar } } }
+      );
+    }
     // El excedente se calcula aquí (no solo se fuerza el estado) porque la ruta se
     // cancela antes de que el conductor legalice: si se dejara en 0, "Confirmar
     // devolución" quedaría bloqueado para siempre (exige excedente > 0) y esa plata

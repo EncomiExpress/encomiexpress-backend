@@ -6,6 +6,7 @@ const handleSequelizeUniqueError = () => new AppError('El registro ya existe', 4
 const handleSequelizeForeignKeyError = () => new AppError('Referencia inválida a otro registro', 400);
 // err (no el "error" ya spreadeado) porque err.errors es la lista real de validaciones que trae Sequelize
 const handleSequelizeValidationError = (err) => new AppError(err.errors.map(e => e.message).join(', '), 400);
+const handleMulterFileSizeError = () => new AppError('El archivo supera el tamaño máximo permitido (8 MB)', 400);
 
 const sendErrorDev = (err, res) => {
   res.status(err.statusCode || 500).json({
@@ -50,6 +51,7 @@ module.exports = (err, req, res, next) => {
     if (error.name === 'SequelizeUniqueConstraintError') error = handleSequelizeUniqueError();
     if (error.name === 'SequelizeForeignKeyConstraintError') error = handleSequelizeForeignKeyError();
     if (error.name === 'SequelizeValidationError') error = handleSequelizeValidationError(err);
+    if (error.code === 'LIMIT_FILE_SIZE') error = handleMulterFileSizeError();
 
     sendErrorProd(error, res);
   }

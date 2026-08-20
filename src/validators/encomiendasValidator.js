@@ -13,6 +13,7 @@ const ESTADOS_ENCOMIENDA_VALIDOS = [
   'Programada',
   'En Ruta',
   'Entregada',
+  'Completada con novedades',
   'Cancelada',
 ];
 

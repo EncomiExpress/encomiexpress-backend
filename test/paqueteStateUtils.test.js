@@ -3,36 +3,27 @@ const assert = require('node:assert/strict');
 const {
   ESTADOS_PAQUETE,
   normalizarEstadoPaquete,
-  construirHistorialEstado,
   determinarEstadoEncomienda
 } = require('../src/services/paqueteStateUtils');
 
 test('normaliza estados con espacios y mayúsculas', () => {
   assert.equal(normalizarEstadoPaquete('por entregar'), 'Por entregar');
-  assert.equal(normalizarEstadoPaquete('EN REPARTO'), 'En reparto');
-  assert.equal(normalizarEstadoPaquete('Entregado'), 'Entregado');
+  assert.equal(normalizarEstadoPaquete('ENTREGADO'), 'Entregado');
+  assert.equal(normalizarEstadoPaquete('Devuelto'), 'Devuelto');
 });
 
 test('rechaza estados fuera del flujo soportado', () => {
   assert.throws(() => normalizarEstadoPaquete('Pendiente de revisión'));
 });
 
-test('agrega un registro de historial cuando cambia el estado', () => {
-  const historial = construirHistorialEstado([], 'En reparto', 'Salió de bodega', 'Sin observación');
-  assert.equal(historial.length, 1);
-  assert.equal(historial[0].estado, 'En reparto');
-  assert.match(historial[0].observacion, /Salió/);
-});
-
 test('determina el estado general de la encomienda a partir de los paquetes', () => {
-  assert.equal(determinarEstadoEncomienda([{ estado: 'Entregado' }, { estado: 'Entregado' }]), 'Entregada');
-  assert.equal(determinarEstadoEncomienda([{ estado: 'En reparto' }, { estado: 'Por entregar' }]), 'En Ruta');
-  assert.equal(determinarEstadoEncomienda([{ estado: 'Por entregar' }]), 'Programada');
-  assert.equal(determinarEstadoEncomienda([{ estado: 'Devuelto' }, { estado: 'Por entregar' }]), 'En Ruta');
-  assert.equal(determinarEstadoEncomienda([{ estado: 'Entregado' }, { estado: 'Devuelto' }]), 'Completada con novedades');
-  assert.equal(determinarEstadoEncomienda([{ estado: 'Devuelto' }, { estado: 'Devuelto' }]), 'Completada con novedades');
+  assert.equal(determinarEstadoEncomienda([{ estado: 'Entregado' }, { estado: 'Entregado' }], 'En Ruta'), 'Entregada');
+  assert.equal(determinarEstadoEncomienda([{ estado: 'Entregado' }, { estado: 'Por entregar' }], 'En Ruta'), 'En Ruta');
+  assert.equal(determinarEstadoEncomienda([], 'Programada'), 'Programada');
+  assert.equal(determinarEstadoEncomienda([{ estado: 'Entregado' }, { estado: 'Devuelto' }], 'En Ruta'), 'Completada con novedades');
+  assert.equal(determinarEstadoEncomienda([{ estado: 'Devuelto' }, { estado: 'Devuelto' }], 'En Ruta'), 'Completada con novedades');
 });
 
 test('expone la lista de estados soportados', () => {
-  assert.deepEqual(ESTADOS_PAQUETE, ['Por entregar', 'En reparto', 'Entregado', 'Devuelto']);
+  assert.deepEqual(ESTADOS_PAQUETE, ['Por entregar', 'Entregado', 'Devuelto']);
 });

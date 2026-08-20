@@ -108,17 +108,6 @@ exports.getPageOf = async (req, res, next) => {
   }
 };
 
-exports.marcarReparto = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const idConductor = req.body.idConductor ? parseInt(req.body.idConductor) : undefined;
-    const result = await rutaService.marcarReparto(parseInt(id), { idConductor });
-    res.json({ success: true, message: `Paquetes marcados como 'En reparto' (${result.count} paquetes)`, data: result });
-  } catch (error) {
-    next(error);
-  }
-};
-
 // Query params: idVehiculos/idConductores como listas separadas por coma (ej.
 // "1,2,3"), idRutaExcluir opcional (para editar sin chocar contra la propia ruta).
 const parseIdsCsv = (value) =>
