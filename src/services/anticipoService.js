@@ -407,17 +407,13 @@ const toggleHabilitado = async (id) => {
   return anticipoCompleto;
 };
 
+// El orden por defecto de getAll (sin sortBy) es idAnticipoExcedente DESC, no
+// fechaEntrega — este cálculo tiene que replicar ese mismo orden.
 const getPageOf = async (id, { limit = 10 } = {}) => {
-  const record = await AnticipoExcedente.findByPk(id, { attributes: ['idAnticipoExcedente', 'fechaEntrega'] });
+  const record = await AnticipoExcedente.findByPk(id, { attributes: ['idAnticipoExcedente'] });
   if (!record) throw new AppError('Anticipo no encontrado', 404);
-  // La lista ordena por fechaEntrega DESC; para igual fecha Postgres usa orden de inserción (id ASC)
   const before = await AnticipoExcedente.count({
-    where: {
-      [Op.or]: [
-        { fechaEntrega: { [Op.gt]: record.fechaEntrega } },
-        { fechaEntrega: record.fechaEntrega, idAnticipoExcedente: { [Op.lt]: parseInt(id) } },
-      ],
-    },
+    where: { idAnticipoExcedente: { [Op.gt]: parseInt(id) } },
   });
   const page = Math.floor(before / limit) + 1;
   const row = (before % limit) + 1;

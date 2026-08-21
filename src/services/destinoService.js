@@ -129,16 +129,13 @@ const toggleHabilitado = async (id) => {
   return destino;
 };
 
+// El orden por defecto de getAll (sin sortBy) es idDestino DESC, no ciudad —
+// este cálculo tiene que replicar ese mismo orden.
 const getPageOf = async (id, { limit = 10 } = {}) => {
-  const record = await Destino.findByPk(id, { attributes: ['idDestino', 'ciudad'] });
+  const record = await Destino.findByPk(id, { attributes: ['idDestino'] });
   if (!record) throw new AppError('Destino no encontrado', 404);
   const before = await Destino.count({
-    where: {
-      [Op.or]: [
-        { ciudad: { [Op.lt]: record.ciudad } },
-        { ciudad: record.ciudad, idDestino: { [Op.lt]: parseInt(id) } },
-      ],
-    },
+    where: { idDestino: { [Op.gt]: parseInt(id) } },
   });
   const page = Math.floor(before / limit) + 1;
   const row = (before % limit) + 1;

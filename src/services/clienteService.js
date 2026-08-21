@@ -161,17 +161,14 @@ const toggleHabilitado = async (id) => {
   return cliente;
 };
 
+// El orden por defecto de getAll (sin sortBy) es idCliente DESC — este cálculo
+// tiene que replicar exactamente ese orden, porque el frontend llama getPageOf
+// justo cuando llega recién cargado (sin ningún sortBy activo todavía).
 const getPageOf = async (id, { limit = 10 } = {}) => {
-  const record = await Cliente.findByPk(id, { attributes: ['idCliente', 'nombre', 'apellido'] });
+  const record = await Cliente.findByPk(id, { attributes: ['idCliente'] });
   if (!record) throw new AppError('Cliente no encontrado', 404);
   const before = await Cliente.count({
-    where: {
-      [Op.or]: [
-        { nombre: { [Op.lt]: record.nombre } },
-        { nombre: record.nombre, apellido: { [Op.lt]: record.apellido } },
-        { nombre: record.nombre, apellido: record.apellido, idCliente: { [Op.lt]: parseInt(id) } },
-      ],
-    },
+    where: { idCliente: { [Op.gt]: parseInt(id) } },
   });
   const page = Math.floor(before / limit) + 1;
   const row = (before % limit) + 1;

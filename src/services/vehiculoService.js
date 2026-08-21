@@ -250,17 +250,13 @@ const toggleHabilitado = async (id) => {
   return vehiculo;
 };
 
+// El orden por defecto de getAll (sin sortBy) es idVehiculo DESC, no placa —
+// este cálculo tiene que replicar ese mismo orden.
 const getPageOf = async (id, { limit = 10 } = {}) => {
-  const record = await Vehiculo.findByPk(id, { attributes: ['idVehiculo', 'placa'] });
+  const record = await Vehiculo.findByPk(id, { attributes: ['idVehiculo'] });
   if (!record) throw new AppError('Vehículo no encontrado', 404);
-  // La lista ordena por placa ASC; para igual placa tiebreaker idVehiculo ASC
   const before = await Vehiculo.count({
-    where: {
-      [Op.or]: [
-        { placa: { [Op.lt]: record.placa } },
-        { placa: record.placa, idVehiculo: { [Op.lt]: parseInt(id) } },
-      ],
-    },
+    where: { idVehiculo: { [Op.gt]: parseInt(id) } },
   });
   const page = Math.floor(before / limit) + 1;
   const row = (before % limit) + 1;

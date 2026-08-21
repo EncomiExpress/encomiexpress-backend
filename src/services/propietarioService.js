@@ -150,11 +150,13 @@ const update = async (id, data) => {
 };
 
 
+// El orden por defecto de getAll es idPropietario DESC, así que "antes" en la
+// lista significa id MAYOR (Op.gt), no menor.
 const getPageOf = async (id, { limit = 10 } = {}) => {
   const record = await PropietarioVehiculo.findByPk(id, { attributes: ['idPropietario'] });
   if (!record) throw new AppError('Propietario no encontrado', 404);
   const before = await PropietarioVehiculo.count({
-    where: { idPropietario: { [Op.lt]: parseInt(id) } },
+    where: { idPropietario: { [Op.gt]: parseInt(id) } },
   });
   const page = Math.floor(before / limit) + 1;
   const row = (before % limit) + 1;

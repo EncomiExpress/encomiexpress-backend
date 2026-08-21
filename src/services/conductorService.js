@@ -399,11 +399,13 @@ const toggleHabilitado = async (id) => {
   return conductor;
 };
 
+// El orden por defecto de getAll es idConductor DESC, así que "antes" en la
+// lista significa id MAYOR (Op.gt), no menor.
 const getPageOf = async (id, { limit = 10 } = {}) => {
   const record = await Conductor.findByPk(id, { attributes: ['idConductor'] });
   if (!record) throw new AppError('Conductor no encontrado', 404);
   const before = await Conductor.count({
-    where: { idConductor: { [Op.lt]: parseInt(id) } },
+    where: { idConductor: { [Op.gt]: parseInt(id) } },
   });
   return { page: Math.floor(before / limit) + 1 };
 };

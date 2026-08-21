@@ -797,6 +797,10 @@ const toggleHabilitado = async (id) => {
   return encomiendaActualizada;
 };
 
+// El orden por defecto de getAll es [fechaRegistro DESC, idEncomiendaVenta DESC] —
+// el desempate también tiene que ser DESC (Op.gt), no ASC. Con fechaRegistro
+// siendo un DATEONLY, es normal que varias ventas del mismo día empaten ahí y
+// dependan del desempate para quedar en el orden correcto.
 const getPageOf = async (id, { limit = 10 } = {}) => {
   const Op = sequelize.Sequelize.Op;
   const record = await EncomiendaVenta.findByPk(id, { attributes: ['idEncomiendaVenta', 'fechaRegistro'] });
@@ -805,7 +809,7 @@ const getPageOf = async (id, { limit = 10 } = {}) => {
     where: {
       [Op.or]: [
         { fechaRegistro: { [Op.gt]: record.fechaRegistro } },
-        { fechaRegistro: record.fechaRegistro, idEncomiendaVenta: { [Op.lt]: parseInt(id) } },
+        { fechaRegistro: record.fechaRegistro, idEncomiendaVenta: { [Op.gt]: parseInt(id) } },
       ],
     },
   });
