@@ -115,6 +115,7 @@ exports.getPaquetesDevueltos = async (req, res, next) => {
       q: req.query.q,
       anio: req.query.anio,
       mes: req.query.mes,
+      habilitado: req.query.habilitado,
       page,
       limit,
     });

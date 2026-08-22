@@ -22,7 +22,7 @@ exports.getByConductor = async (req, res, next) => {
         { model: EncomiendaVenta, as: 'encomienda', include: [{ model: Destinatario, as: 'destinatario' }] },
         { model: RutaVehiculoConductor, as: 'asignacion', include: [{ model: Ruta, as: 'ruta', include: [{ model: Destino, as: 'destino' }] }] },
       ],
-      order: [['idPaquete', 'ASC']]
+      order: [['idPaquete', 'DESC']]
     });
 
     res.json({ success: true, data: paquetes });

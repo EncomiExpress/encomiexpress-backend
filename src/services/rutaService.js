@@ -107,7 +107,11 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
     include,
     limit,
     offset,
-    order: order.length > 0 ? order : [['fechaSalida', 'DESC'], ['horaSalida', 'DESC'], ['idRuta', 'DESC']],
+    // Orden por defecto: más reciente REGISTRADA primero (idRuta DESC), igual que
+    // todos los demás módulos — antes era fechaSalida DESC (fecha de viaje, no de
+    // registro), así que una ruta recién creada con salida cercana no aparecía de
+    // primera si ya existían rutas programadas más lejos en el futuro.
+    order: order.length > 0 ? order : [['idRuta', 'DESC']],
     distinct: true,
   });
 
@@ -244,12 +248,14 @@ const validarChoqueVehiculoConductor = async ({ idVehiculo, idConductor, fechaSa
       as: 'ruta',
       required: true,
       where: { habilitado: true, estado: { [Op.in]: ['Programada', 'En Ruta'] } },
+      include: [{ model: Destino, as: 'destino', attributes: ['ciudad'] }],
     }],
   });
 
   for (const p of pares) {
     const otraSalida = p.ruta.fechaSalida;
     const otraLlegada = p.ruta.fechaLlegadaEstimada || otraSalida;
+    const rutaLabel = p.ruta.origen ? `${p.ruta.origen} → ${p.ruta.destino?.ciudad || 'Sin destino'}` : `Ruta #${p.idRuta}`;
     // Margen entre el final de una ruta y el inicio de la otra — en cualquiera de los
     // dos sentidos (no importa cuál de las dos se programó primero). OJO: el margen se
     // exige UNA sola vez entre el final de una y el inicio de la otra, no dos veces
@@ -263,12 +269,12 @@ const validarChoqueVehiculoConductor = async ({ idVehiculo, idConductor, fechaSa
     const seSuperponen = chocaPorInicioB && chocaPorInicioOtra;
     if (seSuperponen) {
       throw new AppError(
-        `Este vehículo o conductor ya tiene otra ruta (#${p.idRuta}) programada del ${otraSalida} al ${otraLlegada}. Debes dejar al menos ${GAP_TRANSICION} días de margen antes o después de ese rango.`,
+        `Este vehículo o conductor ya tiene otra ruta (${rutaLabel}) programada del ${otraSalida} al ${otraLlegada}. Debes dejar al menos ${GAP_TRANSICION} días de margen antes o después de ese rango.`,
         409,
         [{
           tipo: 'Choque de vehículo/conductor',
           id: p.idRuta,
-          descripcion: `La Ruta #${p.idRuta} ya tiene este vehículo/conductor asignado, del ${otraSalida} al ${otraLlegada}`
+          descripcion: `La ruta ${rutaLabel} ya tiene este vehículo/conductor asignado, del ${otraSalida} al ${otraLlegada}`
         }],
         'SCHEDULE_CONFLICT'
       );
@@ -596,16 +602,17 @@ const updateEstado = async (id, estado) => {
     for (const par of pares) {
       const conflictoVehiculo = await RutaVehiculoConductor.findOne({
         where: { idVehiculo: par.idVehiculo, habilitado: true, idRuta: { [Op.ne]: id } },
-        include: [{ model: Ruta, as: 'ruta', required: true, where: { habilitado: true, estado: 'En Ruta' } }],
+        include: [{ model: Ruta, as: 'ruta', required: true, where: { habilitado: true, estado: 'En Ruta' }, include: [{ model: Destino, as: 'destino', attributes: ['ciudad'] }] }],
       });
       if (conflictoVehiculo) {
+        const rutaLabel = conflictoVehiculo.ruta.origen ? `${conflictoVehiculo.ruta.origen} → ${conflictoVehiculo.ruta.destino?.ciudad || 'Sin destino'}` : `Ruta #${conflictoVehiculo.idRuta}`;
         throw new AppError(
-          `El vehículo ${par.vehiculo?.placa || ''} ya está en curso en otra ruta (Ruta #${conflictoVehiculo.idRuta})`,
+          `El vehículo ${par.vehiculo?.placa || ''} ya está en curso en otra ruta (${rutaLabel})`,
           409,
           [{
             tipo: 'Conflicto de vehículo',
             id: conflictoVehiculo.idRuta,
-            descripcion: `${par.vehiculo?.placa || 'Vehículo'} ya está asignado a la Ruta #${conflictoVehiculo.idRuta} que se encuentra En Ruta`
+            descripcion: `${par.vehiculo?.placa || 'Vehículo'} ya está asignado a la ruta ${rutaLabel} que se encuentra En Ruta`
           }],
           'VEHICLE_IN_USE'
         );
@@ -613,17 +620,18 @@ const updateEstado = async (id, estado) => {
 
       const conflictoConductor = await RutaVehiculoConductor.findOne({
         where: { idConductor: par.idConductor, habilitado: true, idRuta: { [Op.ne]: id } },
-        include: [{ model: Ruta, as: 'ruta', required: true, where: { habilitado: true, estado: 'En Ruta' } }],
+        include: [{ model: Ruta, as: 'ruta', required: true, where: { habilitado: true, estado: 'En Ruta' }, include: [{ model: Destino, as: 'destino', attributes: ['ciudad'] }] }],
       });
       if (conflictoConductor) {
         const u = par.conductor?.usuario;
+        const rutaLabel = conflictoConductor.ruta.origen ? `${conflictoConductor.ruta.origen} → ${conflictoConductor.ruta.destino?.ciudad || 'Sin destino'}` : `Ruta #${conflictoConductor.idRuta}`;
         throw new AppError(
-          `El conductor ${u ? `${u.nombre} ${u.apellido}` : ''} ya está en curso en otra ruta (Ruta #${conflictoConductor.idRuta})`,
+          `El conductor ${u ? `${u.nombre} ${u.apellido}` : ''} ya está en curso en otra ruta (${rutaLabel})`,
           409,
           [{
             tipo: 'Conflicto de conductor',
             id: conflictoConductor.idRuta,
-            descripcion: `${u ? `${u.nombre} ${u.apellido}` : 'El conductor'} ya está asignado a la Ruta #${conflictoConductor.idRuta} que se encuentra En Ruta`
+            descripcion: `${u ? `${u.nombre} ${u.apellido}` : 'El conductor'} ya está asignado a la ruta ${rutaLabel} que se encuentra En Ruta`
           }],
           'CONDUCTOR_IN_USE'
         );
@@ -719,7 +727,7 @@ const updateEstado = async (id, estado) => {
         ventasConPendientes.map((venta) => ({
           tipo: 'venta',
           id: venta.idEncomiendaVenta,
-          descripcion: `La venta #${venta.idEncomiendaVenta} tiene paquetes sin estado final`,
+          descripcion: `La venta con guía ${venta.paquetes?.[0]?.numeroGuia || 'sin guía'} tiene paquetes sin estado final`,
         })),
         'PACKAGES_PENDING'
       );
@@ -761,8 +769,12 @@ const updateEstado = async (id, estado) => {
       where: { idRuta: ruta.idRuta, habilitado: true, estado: { [Op.in]: ['Entregado', 'En Legalización'] } }
     });
     for (const anticipo of anticiposActivos) {
-      anticipo.excedente = anticipo.valorAnticipo - anticipo.valorGastado;
-      anticipo.estado = 'Excedente pendiente';
+      const excedenteCalculado = anticipo.valorAnticipo - anticipo.valorGastado;
+      anticipo.excedente = excedenteCalculado;
+      // Mismo criterio que anticipoService.update(): si no queda nada por
+      // resolver (valorAnticipo era 0, caso borde), no tiene sentido dejarlo
+      // "pendiente" — cierra directo.
+      anticipo.estado = excedenteCalculado === 0 ? 'Completado' : 'Excedente pendiente';
       await anticipo.save();
     }
   }
@@ -779,6 +791,22 @@ const toggleHabilitado = async (id) => {
   if (!ruta) throw new AppError('Ruta no encontrada', 404);
 
   if (ruta.habilitado === true) {
+    // Antes solo el frontend (ModalInhabilitarRuta.jsx) bloqueaba por ruta.estado
+    // === 'En Ruta' — el backend nunca lo validaba, solo miraba encomiendas activas
+    // vía verificarDependenciasRuta. Si todas las ventas de una ruta ya llegaban a
+    // un estado final pero nadie la pasaba manualmente a "Completada", el backend
+    // dejaba inhabilitarla igual, aunque vehículo/conductor siguieran marcados
+    // ocupados por ella. Replicado acá para que el backend sea consistente con el
+    // pre-chequeo del frontend, no solo un respaldo más laxo.
+    if (ruta.estado === 'En Ruta') {
+      throw new AppError(
+        'No se puede inhabilitar esta ruta porque está en curso. Complétala o cancélala primero.',
+        409,
+        [{ tipo: 'Ruta activa', id: ruta.idRuta, descripcion: 'Esta ruta está "En Ruta" y no ha finalizado' }],
+        'DEPENDENCY_CONFLICT'
+      );
+    }
+
     const { bloqueado, dependencias } = await verificarDependenciasRuta(id);
     if (bloqueado) {
       throw new AppError(
@@ -804,24 +832,11 @@ const getAniosDisponibles = async () => {
 };
 
 const getPageOf = async (id, { limit = 10 } = {}) => {
-  const record = await Ruta.findByPk(id, { attributes: ['idRuta', 'fechaSalida', 'horaSalida'] });
+  const record = await Ruta.findByPk(id, { attributes: ['idRuta'] });
   if (!record) throw new AppError('Ruta no encontrada', 404);
-  const before = await Ruta.count({
-    where: {
-      [Op.or]: [
-        { fechaSalida: { [Op.gt]: record.fechaSalida } },
-        {
-          fechaSalida: record.fechaSalida,
-          horaSalida: { [Op.gt]: record.horaSalida },
-        },
-        {
-          fechaSalida: record.fechaSalida,
-          horaSalida: record.horaSalida,
-          idRuta: { [Op.gt]: parseInt(id) },
-        },
-      ],
-    },
-  });
+  // Debe replicar exactamente el orden por defecto de getAll (idRuta DESC) — si no,
+  // "ir a la página donde está" vuelve a apuntar a la página equivocada.
+  const before = await Ruta.count({ where: { idRuta: { [Op.gt]: parseInt(id) } } });
   const page = Math.floor(before / limit) + 1;
   const row = (before % limit) + 1;
   return { page, row };

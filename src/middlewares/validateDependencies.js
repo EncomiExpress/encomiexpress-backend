@@ -57,7 +57,7 @@ const verificarDependenciasConductor = async (conductorId) => {
   anticiposPendientes.forEach(a => dependencias.push({
     tipo: 'Anticipo Pendiente',
     id: a.idAnticipoExcedente,
-    descripcion: `Anticipo #${a.idAnticipoExcedente} — $${a.valorAnticipo} (pendiente de legalización)`
+    descripcion: `Anticipo del ${a.fechaEntrega || 'sin fecha'} — $${a.valorAnticipo} (pendiente de legalización)`
   }));
 
   return { bloqueado: dependencias.length > 0, dependencias };
@@ -84,7 +84,7 @@ const verificarDependenciasCliente = async (clienteId) => {
   const encomiendas = await EncomiendaVenta.findAll({
     where: {
       idCliente: clienteId,
-      estado: { [Op.notIn]: ['Entregada', 'Cancelada'] }
+      estado: { [Op.notIn]: ['Entregada', 'Completada con novedades', 'Cancelada'] }
     },
     attributes: ['idEncomiendaVenta', 'estado'],
     include: [{ model: Paquete, as: 'paquetes', attributes: ['numeroGuia'], required: false, limit: 1 }]
@@ -101,7 +101,7 @@ const verificarDependenciasRuta = async (rutaId) => {
   const encomiendas = await EncomiendaVenta.findAll({
     where: {
       idRuta: rutaId,
-      estado: { [Op.notIn]: ['Entregada', 'Cancelada'] }
+      estado: { [Op.notIn]: ['Entregada', 'Completada con novedades', 'Cancelada'] }
     },
     attributes: ['idEncomiendaVenta', 'estado'],
     include: [{ model: Paquete, as: 'paquetes', attributes: ['numeroGuia'], required: false, limit: 1 }]
@@ -116,7 +116,7 @@ const verificarDependenciasRuta = async (rutaId) => {
 
 const verificarDependenciasAnticipo = async (anticipoId) => {
   const anticipo = await AnticipoExcedente.findByPk(anticipoId, {
-    attributes: ['idAnticipoExcedente', 'estado', 'valorAnticipo']
+    attributes: ['idAnticipoExcedente', 'estado', 'valorAnticipo', 'fechaEntrega']
   });
   if (!anticipo || !['Entregado', 'En Legalización', 'Excedente pendiente'].includes(anticipo.estado)) return { bloqueado: false, dependencias: [] };
   return {
@@ -124,7 +124,7 @@ const verificarDependenciasAnticipo = async (anticipoId) => {
     dependencias: [{
       tipo: 'Estado del anticipo',
       id: anticipo.idAnticipoExcedente,
-      descripcion: `Anticipo #${anticipo.idAnticipoExcedente} con valor $${anticipo.valorAnticipo} aún no ha sido legalizado`
+      descripcion: `El anticipo del ${anticipo.fechaEntrega || 'sin fecha'}, por $${anticipo.valorAnticipo}, aún no ha sido legalizado`
     }]
   };
 };

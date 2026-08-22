@@ -357,7 +357,8 @@ const getMisAnticipos = async (idUsuario, rolNombre) => {
       model: Ruta,
       as: 'ruta',
       include: [{ model: Destino, as: 'destino' }]
-    }]
+    }],
+    order: [['idAnticipoExcedente', 'DESC']]
   });
 
   // El vehículo de "mi" anticipo es el que le tocó a este conductor específicamente

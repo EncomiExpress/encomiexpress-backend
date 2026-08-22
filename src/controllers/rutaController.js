@@ -52,7 +52,7 @@ exports.update = async (req, res) => {
     // (se les vació el campo — ver rutaService.update), se avisa en el mismo mensaje
     // de éxito para que quien edita la ruta se entere de una y las revise después.
     const aviso = ventasSinFechaEntrega.length > 0
-      ? ` Se vació la fecha estimada de entrega de ${ventasSinFechaEntrega.length === 1 ? 'la venta' : 'las ventas'} #${ventasSinFechaEntrega.map(v => v.idEncomiendaVenta).join(', #')} porque quedó fuera del nuevo rango — asígnales una fecha nueva.`
+      ? ` Se vació la fecha estimada de entrega de ${ventasSinFechaEntrega.length === 1 ? '1 venta' : `${ventasSinFechaEntrega.length} ventas`} porque quedó fuera del nuevo rango — asígnale${ventasSinFechaEntrega.length === 1 ? '' : 'n'} una fecha nueva.`
       : '';
     res.json({ success: true, message: `Ruta actualizada exitosamente.${aviso}`, data: ruta });
   } catch (error) {

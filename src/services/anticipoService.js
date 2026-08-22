@@ -286,13 +286,14 @@ const update = async (id, data) => {
   let newExcedente;
 
   if (valorGastado !== undefined) {
-    // El gasto nunca puede superar lo entregado — así el excedente nunca es
-    // negativo y no hace falta un flujo aparte para "faltantes".
-    if (parseFloat(valorGastado) > parseFloat(anticipo.valorAnticipo)) {
-      throw new AppError('El valor gastado no puede ser mayor al valor del anticipo entregado', 400);
-    }
+    // El gasto puede superar lo entregado — queda un excedente negativo (la
+    // empresa le debe reponer la diferencia al conductor) en vez de bloquearlo.
+    // `excedente` positivo = a favor de la empresa, negativo = a favor del
+    // conductor; en ambos casos queda "Excedente pendiente" hasta que se
+    // confirme el cierre (entregarExcedente) — solo si da exactamente 0 no
+    // queda nada por resolver y pasa directo a Completado.
     newExcedente = parseFloat(anticipo.valorAnticipo) - parseFloat(valorGastado);
-    autoEstado = newExcedente > 0 ? 'Excedente pendiente' : 'Completado';
+    autoEstado = newExcedente === 0 ? 'Completado' : 'Excedente pendiente';
     autoFechaLegalizacion = new Date();
   }
 
@@ -323,8 +324,8 @@ const entregarExcedente = async (id, { soporte }) => {
     throw new AppError('Anticipo no encontrado', 404);
   }
 
-  if (anticipo.excedente <= 0) {
-    throw new AppError('No hay excedente para entregar', 400);
+  if (parseFloat(anticipo.excedente) === 0) {
+    throw new AppError('No hay ningún saldo pendiente por resolver', 400);
   }
 
   await anticipo.update({
@@ -385,7 +386,7 @@ const toggleHabilitado = async (id) => {
         [{
           tipo: 'Estado del anticipo',
           id: anticipo.idAnticipoExcedente,
-          descripcion: `Anticipo #${anticipo.idAnticipoExcedente} con valor $${anticipo.valorAnticipo} está en estado "${anticipo.estado}" y no ha sido cerrado aún`
+          descripcion: `El anticipo del ${anticipo.fechaEntrega || 'sin fecha'}, por $${anticipo.valorAnticipo}, está en estado "${anticipo.estado}" y no ha sido cerrado aún`
         }],
         'DEPENDENCY_CONFLICT'
       );

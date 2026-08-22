@@ -677,7 +677,7 @@ const actualizarEstadoPaquete = async (idPaquete, estado, { observacion = '', fo
   return paquete;
 };
 
-const getPaquetesDevueltos = async ({ q, anio, mes, page = 1, limit = 10 } = {}) => {
+const getPaquetesDevueltos = async ({ q, anio, mes, habilitado, page = 1, limit = 10 } = {}) => {
   const { Op } = sequelize.Sequelize;
   const where = { estado: 'Devuelto' };
   if (q) {
@@ -702,6 +702,13 @@ const getPaquetesDevueltos = async ({ q, anio, mes, page = 1, limit = 10 } = {})
     where.fechaUltimoEstado = { [Op.gte]: inicio, [Op.lt]: fin };
   }
 
+  // El paquete no tiene su propio "habilitado" (columna eliminada — su ciclo de vida
+  // depende enteramente de la venta dueña, ver Paquete.model). Por eso este filtro no
+  // toca `where` de Paquete, sino el `where` del include de la venta: un paquete
+  // "inhabilitado" en este listado es, en realidad, un paquete cuya venta lo está.
+  const whereEncomienda = {};
+  if (habilitado !== undefined) whereEncomienda.habilitado = habilitado === 'true';
+
   const offset = (page - 1) * limit;
   const { count, rows: data } = await Paquete.findAndCountAll({
     where,
@@ -709,6 +716,8 @@ const getPaquetesDevueltos = async ({ q, anio, mes, page = 1, limit = 10 } = {})
       {
         model: EncomiendaVenta,
         as: 'encomienda',
+        required: true,
+        where: whereEncomienda,
         include: [{ model: Cliente, as: 'cliente' }],
       },
       {
@@ -776,7 +785,7 @@ const toggleHabilitado = async (id) => {
       throw new AppError(
         `No se puede inhabilitar la encomienda porque está en estado "${encomienda.estado}"`,
         409,
-        [{ tipo: 'Estado activo', id: encomienda.idEncomiendaVenta, descripcion: `La encomienda #${encomienda.idEncomiendaVenta} está en estado "${encomienda.estado}" y no ha finalizado` }],
+        [{ tipo: 'Estado activo', id: encomienda.idEncomiendaVenta, descripcion: `Esta venta está en estado "${encomienda.estado}" y no ha finalizado` }],
         'DEPENDENCY_CONFLICT'
       );
     }

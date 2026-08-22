@@ -63,7 +63,7 @@ exports.entregarExcedente = async (req, res, next) => {
     const { id } = req.params;
     const { soporte } = req.body;
     const anticipo = await anticipoService.entregarExcedente(id, { soporte });
-    res.json({ success: true, message: 'Excedente entregado exitosamente', data: anticipo });
+    res.json({ success: true, message: 'Anticipo cerrado exitosamente', data: anticipo });
   } catch (error) {
     next(error);
   }

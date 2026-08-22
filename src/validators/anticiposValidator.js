@@ -10,6 +10,10 @@ const createValidation = [
 
 const updateValidation = [
   body('valorAnticipo').optional().isFloat({ min: 0 }).withMessage('Valor del anticipo debe ser un número positivo'),
+  // El gasto puede superar el anticipo entregado (queda un excedente negativo
+  // a favor del conductor) — este techo es solo una cota de sanidad, no una
+  // comparación contra valorAnticipo.
+  body('valorGastado').optional().isFloat({ min: 0, max: 999999999 }).withMessage('Valor gastado debe ser un número entre 0 y 999.999.999'),
   body('idRuta').optional().isInt().withMessage('ID de ruta debe ser un número entero'),
   body('idRutaVehiculoConductor').optional().isInt().withMessage('ID de vehículo/conductor de ruta debe ser un número entero'),
   body('soporte').optional().isArray().withMessage('Soporte debe ser un array de URLs')
