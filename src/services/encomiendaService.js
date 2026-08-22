@@ -714,7 +714,7 @@ const getPaquetesDevueltos = async ({ q, anio, mes, page = 1, limit = 10 } = {})
       {
         model: RutaVehiculoConductor,
         as: 'asignacion',
-        include: [{ model: Ruta, as: 'ruta' }],
+        include: [{ model: Ruta, as: 'ruta', include: [{ model: Destino, as: 'destino' }] }],
       },
     ],
     limit,

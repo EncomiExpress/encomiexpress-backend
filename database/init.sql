@@ -160,7 +160,7 @@ CREATE TABLE encomienda_venta (
   id_cliente             INTEGER NOT NULL,
   id_ruta                INTEGER NOT NULL,
   fecha_registro         DATE NOT NULL DEFAULT CURRENT_DATE,
-  fecha_hora_emision     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  fecha_hora_emision     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   fecha_estimada_entrega DATE,
   estado                 VARCHAR(30) NOT NULL DEFAULT 'pendiente de recogida',
   observaciones          TEXT,
@@ -193,7 +193,7 @@ CREATE TABLE paquete (
   valor_declarado             DECIMAL(12,2)
   ,estado                      VARCHAR(30) NOT NULL DEFAULT 'Por entregar'
   ,observacion_estado         TEXT
-  ,fecha_ultimo_estado        TIMESTAMP
+  ,fecha_ultimo_estado        TIMESTAMPTZ
   ,foto_entrega               TEXT
 );
 

@@ -855,6 +855,7 @@ const getDisponibilidad = async ({ idVehiculos = [], idConductores = [], idRutaE
         required: true,
         where: { habilitado: true, estado: { [Op.in]: ['Programada', 'En Ruta'] } },
         attributes: ['idRuta', 'origen', 'estado', 'fechaSalida', 'fechaLlegadaEstimada'],
+        include: [{ model: Destino, as: 'destino', attributes: ['ciudad', 'departamento'] }],
       },
       { model: Vehiculo, as: 'vehiculo', attributes: ['idVehiculo', 'placa'] },
       {
@@ -869,6 +870,7 @@ const getDisponibilidad = async ({ idVehiculos = [], idConductores = [], idRutaE
   return pares.map((p) => ({
     idRuta: p.ruta.idRuta,
     origen: p.ruta.origen,
+    destino: p.ruta.destino ? { ciudad: p.ruta.destino.ciudad, departamento: p.ruta.destino.departamento } : null,
     estado: p.ruta.estado,
     fechaSalida: p.ruta.fechaSalida,
     fechaLlegadaEstimada: p.ruta.fechaLlegadaEstimada,
