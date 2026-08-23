@@ -80,6 +80,18 @@ const create = async (data) => {
     throw new AppError('El número de identificación ya está registrado', 400);
   }
 
+  // Evita duplicados de nombre+apellido cuando no es una persona jurídica (NIT),
+  // igual que la advertencia que ya existe en el frontend, pero exigido también
+  // aquí para que la regla se cumpla sin importar el cliente que llame a la API.
+  if (tipoIdentificacion !== 'NIT' && nombre && apellido) {
+    const existingName = await Cliente.findOne({
+      where: { nombre: { [Op.iLike]: nombre }, apellido: { [Op.iLike]: apellido } },
+    });
+    if (existingName) {
+      throw new AppError('Ya existe un registro con este nombre y apellido. Verifica que no sea un duplicado.', 400);
+    }
+  }
+
   if (email) {
     const existingEmail = await Cliente.findOne({ where: { email } });
     if (existingEmail) {
@@ -124,6 +136,21 @@ const update = async (id, data) => {
     });
     if (existingEmail) {
       throw new AppError('El email ya está registrado', 400);
+    }
+  }
+
+  const tipoIdentificacionEfectivo = tipoIdentificacion || cliente.tipoIdentificacion;
+  if (tipoIdentificacionEfectivo !== 'NIT' && nombre && apellido &&
+      (nombre !== cliente.nombre || apellido !== cliente.apellido)) {
+    const existingName = await Cliente.findOne({
+      where: {
+        nombre: { [Op.iLike]: nombre },
+        apellido: { [Op.iLike]: apellido },
+        idCliente: { [Op.ne]: id },
+      },
+    });
+    if (existingName) {
+      throw new AppError('Ya existe un registro con este nombre y apellido. Verifica que no sea un duplicado.', 400);
     }
   }
 

@@ -17,23 +17,30 @@ const login = async (email, password) => {
     }]
   });
 
-  // Mensaje genérico a propósito: no revela si el correo existe o no (evita
-  // enumeración de correos registrados vía este endpoint público).
+  // Mensaje genérico a propósito en TODAS las ramas de fallo (usuario inexistente,
+  // contraseña incorrecta, cuenta inhabilitada o rol inhabilitado): evita que un
+  // atacante use el mensaje de error para confirmar si un correo está registrado
+  // en el sistema o en qué estado se encuentra su cuenta. La contraseña se verifica
+  // antes que el estado de la cuenta/rol por la misma razón: si se verificara el
+  // estado primero, una cuenta inhabilitada seguiría respondiendo distinto a una
+  // cuenta habilitada con contraseña incorrecta.
+  const CREDENCIALES_INVALIDAS = 'Correo o contraseña incorrectos';
+
   if (!usuario) {
-    throw new AppError('Correo o contraseña incorrectos', 401);
-  }
-
-  if (!usuario.habilitado) {
-    throw new AppError('Tu cuenta está inhabilitada. Contacta al administrador.', 401);
-  }
-
-  if (usuario.rol && !usuario.rol.habilitado) {
-    throw new AppError('El acceso para tu rol está inhabilitado. Contacta al administrador.', 401);
+    throw new AppError(CREDENCIALES_INVALIDAS, 401);
   }
 
   const isPasswordValid = await bcrypt.compare(password, usuario.password);
   if (!isPasswordValid) {
-    throw new AppError('Correo o contraseña incorrectos', 401);
+    throw new AppError(CREDENCIALES_INVALIDAS, 401);
+  }
+
+  if (!usuario.habilitado) {
+    throw new AppError(CREDENCIALES_INVALIDAS, 401);
+  }
+
+  if (usuario.rol && !usuario.rol.habilitado) {
+    throw new AppError(CREDENCIALES_INVALIDAS, 401);
   }
 
   const permisos = usuario.rol?.permisos?.map(p => p.nombre) ?? [];
