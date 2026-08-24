@@ -45,7 +45,7 @@ const recuperarPassword = async (req, res, next) => {
     const { email } = req.body;
     await authService.recuperarPassword(email);
     // Mismo mensaje exista o no el correo — ver nota en authService.recuperarPassword.
-    res.json({ success: true, message: 'En caso de que el correo esté registrado en la base de datos, se le enviará un enlace para recuperar su contraseña' });
+    res.json({ success: true, message: 'En caso de que el correo esté registrado, se le enviará un enlace para recuperar su contraseña' });
   } catch (error) {
     next(error);
   }

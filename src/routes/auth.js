@@ -101,8 +101,8 @@ router.post('/refresh', authLimiter, authController.refresh);
  *         description: >
  *           Mismo mensaje exista o no el correo (evita revelar qué correos están
  *           registrados). Si existe, se manda un enlace de reseteo por email (vence
- *           en 30 min, un solo uso) — requiere SMTP configurado
- *           (EMAIL_HOST/EMAIL_USER/EMAIL_PASS) y FRONTEND_URLS para armar el enlace.
+ *           en 30 min, un solo uso) — requiere la API de Brevo configurada
+ *           (BREVO_API_KEY/EMAIL_USER) y FRONTEND_URLS para armar el enlace.
  */
 router.post('/recuperar-password', authLimiter, recoverPasswordValidation, validate, authController.recuperarPassword);
 

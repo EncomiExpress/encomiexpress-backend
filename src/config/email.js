@@ -1,14 +1,31 @@
-const nodemailer = require('nodemailer');
+// Se envía por la API HTTP de Brevo (puerto 443) en vez de SMTP directo: Render
+// bloquea el tráfico saliente a los puertos SMTP (25/465/587) en sus servicios
+// gratuitos, así que un transporte SMTP como Nodemailer nunca conecta ahí.
+const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
 
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-  port: process.env.EMAIL_PORT || 587,
-  secure: false,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
+const sendBrevoEmail = async ({ to, subject, html }) => {
+  const response = await fetch(BREVO_API_URL, {
+    method: 'POST',
+    headers: {
+      'api-key': process.env.BREVO_API_KEY,
+      'Content-Type': 'application/json',
+      Accept: 'application/json'
+    },
+    body: JSON.stringify({
+      sender: { name: 'EncomiExpress', email: process.env.EMAIL_USER },
+      to: [{ email: to }],
+      subject,
+      htmlContent: html
+    })
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Brevo respondió ${response.status}: ${body}`);
   }
-});
+
+  return response.json();
+};
 
 const ICONS = {
   candado: '🔒',
@@ -38,8 +55,7 @@ const buildEmailShell = ({ badgeBg, icon, heading, bodyHtml, extraHtml = '' }) =
 `;
 
 const sendPasswordRecoveryEmail = async (email, resetUrl) => {
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
+  return sendBrevoEmail({
     to: email,
     subject: 'Recuperación de contraseña - EncomiExpress',
     html: buildEmailShell({
@@ -59,14 +75,11 @@ const sendPasswordRecoveryEmail = async (email, resetUrl) => {
         </p>
       `,
     }),
-  };
-
-  return transporter.sendMail(mailOptions);
+  });
 };
 
 const sendPaqueteDevueltoEmail = async (email, { nombreCliente = '', numeroGuia = '', motivo = '' } = {}) => {
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
+  return sendBrevoEmail({
     to: email,
     subject: 'No fue posible entregar tu paquete - EncomiExpress',
     html: buildEmailShell({
@@ -80,9 +93,7 @@ const sendPaqueteDevueltoEmail = async (email, { nombreCliente = '', numeroGuia 
         <br><br>Nos pondremos en contacto contigo para coordinar una nueva entrega o la devolución del envío.
       `,
     }),
-  };
-
-  return transporter.sendMail(mailOptions);
+  });
 };
 
-module.exports = { transporter, sendPasswordRecoveryEmail, sendPaqueteDevueltoEmail };
+module.exports = { sendPasswordRecoveryEmail, sendPaqueteDevueltoEmail };
