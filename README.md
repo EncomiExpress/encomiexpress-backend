@@ -50,7 +50,7 @@ API REST para la gestión operativa de EncomiExpress en OsvaldoC Mensajería y L
 - JWT — Autenticación (access token 1h + refresh token 24h)
 - Bcryptjs — Encriptación de contraseñas (salt 10)
 - Cloudinary — Almacenamiento de imágenes y soportes
-- Nodemailer — Envío de correos electrónicos
+- Brevo (API HTTP) — Envío de correos electrónicos
 - Multer — Manejo de archivos
 - Swagger (swagger-jsdoc + swagger-ui-express) — Documentación interactiva de la API
 
@@ -152,7 +152,7 @@ src/
 
 Opcional, solo si vas a usar esas funciones específicas:
 - Cuenta de [Cloudinary](https://cloudinary.com) — para subir soportes/imágenes
-- Credenciales SMTP (ej. Gmail) — para el correo de recuperar contraseña
+- Cuenta de [Brevo](https://www.brevo.com) (API key) — para el correo de recuperar contraseña
 
 ---
 
@@ -209,7 +209,7 @@ La documentación interactiva está disponible en:
 http://localhost:3000/api/docs
 ```
 
-Disponible únicamente en entorno de desarrollo. Incluye los 79 endpoints documentados (56 rutas distintas) con parámetros, cuerpos de solicitud, respuestas y autenticación JWT integrada.
+Disponible únicamente en entorno de desarrollo. Incluye los 89 endpoints (67 rutas distintas) con parámetros, cuerpos de solicitud, respuestas y autenticación JWT integrada.
 
 ---
 

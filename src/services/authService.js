@@ -26,20 +26,33 @@ const login = async (email, password) => {
   // cuenta habilitada con contraseña incorrecta.
   const CREDENCIALES_INVALIDAS = 'Correo o contraseña incorrectos';
 
+  // El mensaje al cliente es siempre el mismo (arriba) por seguridad, pero acá
+  // sí queda un rastro en los logs del servidor con el motivo real -- nunca
+  // sale en la respuesta HTTP, es solo para poder revisar en consola/Render
+  // por qué un usuario puntual no pudo entrar, sin reabrir el hueco de
+  // enumeración de correos que evita el mensaje genérico.
+  const logIntentoFallido = (motivo) => {
+    console.warn(`[login] intento fallido (${motivo}): ${email}`);
+  };
+
   if (!usuario) {
+    logIntentoFallido('correo no registrado');
     throw new AppError(CREDENCIALES_INVALIDAS, 401);
   }
 
   const isPasswordValid = await bcrypt.compare(password, usuario.password);
   if (!isPasswordValid) {
+    logIntentoFallido('contraseña incorrecta');
     throw new AppError(CREDENCIALES_INVALIDAS, 401);
   }
 
   if (!usuario.habilitado) {
+    logIntentoFallido('cuenta inhabilitada');
     throw new AppError(CREDENCIALES_INVALIDAS, 401);
   }
 
   if (usuario.rol && !usuario.rol.habilitado) {
+    logIntentoFallido('rol inhabilitado');
     throw new AppError(CREDENCIALES_INVALIDAS, 401);
   }
 
