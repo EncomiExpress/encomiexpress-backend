@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { Permiso } = require('../models');
+const permisoService = require('../services/permisoService');
 const { authenticate } = require('../middlewares/auth');
 
 /**
@@ -37,10 +37,7 @@ const { authenticate } = require('../middlewares/auth');
  */
 router.get('/', authenticate, async (req, res, next) => {
   try {
-    const permisos = await Permiso.findAll({
-      where: { habilitado: true },
-      order: [['nombre', 'ASC']]
-    });
+    const permisos = await permisoService.getAll();
     res.json({ success: true, data: permisos });
   } catch (error) {
     next(error);
