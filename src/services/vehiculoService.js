@@ -220,6 +220,15 @@ const cambiarEstado = async (id, estado) => {
     throw new AppError('No se puede cambiar el estado de un vehículo deshabilitado', 400);
   }
 
+  // "En Ruta" solo lo pone/quita la cascada de rutaService.updateEstado() cuando la
+  // ruta arranca/termina — nunca este endpoint manual. Si se permitiera cambiarlo
+  // acá mientras el vehículo sigue en una ruta activa, quedaría desincronizado del
+  // convoy real (el frontend ya oculta el selector en ese caso, pero el backend
+  // también debe rechazarlo por si el estado en pantalla está desactualizado).
+  if (vehiculo.estado === 'En Ruta') {
+    throw new AppError('No se puede cambiar el estado de un vehículo que está en ruta', 400);
+  }
+
   const estadoAnterior = vehiculo.estado;
   await vehiculo.update({ estado });
 
