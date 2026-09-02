@@ -397,14 +397,6 @@ const toggleHabilitado = async (id) => {
 
   const anticipoCompleto = await getAnticipoCompleto(id);
 
-  try {
-    const app = require('../app');
-    const io = app.get('io');
-    if (io) io.emit('anticipo_updated', anticipoCompleto);
-  } catch (e) {
-    // no bloquear por fallos al emitir eventos
-  }
-
   return anticipoCompleto;
 };
 
