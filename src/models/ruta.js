@@ -16,6 +16,13 @@ const Ruta = sequelize.define('Ruta', {
     type: DataTypes.INTEGER,
     allowNull: false
   },
+  // Si está lleno, esta fila ES el viaje de regreso de esa otra Ruta (misma noción
+  // de "un solo viaje con dos fases" que describió la usuaria, sin tocar el estado
+  // de ninguna de las dos filas — ver LOGICA.md, "Viaje de regreso vinculado").
+  idRutaIda: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
   fechaSalida: {
     type: DataTypes.DATEONLY,
     allowNull: true

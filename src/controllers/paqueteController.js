@@ -44,7 +44,13 @@ exports.subirEvidencia = async (req, res, next) => {
     if (!paquete) {
       return res.status(404).json({ success: false, message: 'Paquete no encontrado' });
     }
-    if (paquete.asignacion?.idConductor !== conductor.idConductor) {
+    // Dos conductores distintos pueden tocar este paquete según en qué punto del
+    // flujo esté: el del tramo troncal (asignacion.idConductor, para "Por entregar"
+    // y para la entrega directa de siempre) o el repartidor local ya asignado
+    // (idConductorEntrega, solo aplica una vez el paquete está "En sede de destino").
+    const esConductorTroncal = paquete.asignacion?.idConductor === conductor.idConductor;
+    const esRepartidorLocal = paquete.idConductorEntrega === conductor.idConductor;
+    if (!esConductorTroncal && !esRepartidorLocal) {
       return res.status(403).json({ success: false, message: 'Este paquete no está asignado a tu cuenta' });
     }
 
@@ -59,6 +65,20 @@ exports.subirEvidencia = async (req, res, next) => {
 
     const paqueteActualizado = await encomiendaService.actualizarEstadoPaquete(id, estado, { observacion: req.body.observacion || '', fotoEntrega: fileUrl });
     res.json({ success: true, message: 'Evidencia subida y paquete actualizado', data: paqueteActualizado });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.asignarRepartidorLocal = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { idConductor } = req.body;
+    if (!idConductor) {
+      return res.status(400).json({ success: false, message: 'El campo "idConductor" es requerido' });
+    }
+    const paquete = await encomiendaService.asignarRepartidorLocal(id, parseInt(idConductor));
+    res.json({ success: true, message: 'Repartidor local asignado exitosamente', data: paquete });
   } catch (error) {
     next(error);
   }

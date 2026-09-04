@@ -1,4 +1,4 @@
-const { Ruta, RutaVehiculoConductor, Vehiculo, Conductor, Destino, EncomiendaVenta, Usuario, AnticipoExcedente, Paquete, sequelize } = require('../models');
+const { Ruta, RutaVehiculoConductor, RutaParada, Vehiculo, Conductor, Destino, EncomiendaVenta, Usuario, AnticipoExcedente, Paquete, sequelize } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { verificarDependenciasRuta } = require('../middlewares/validateDependencies');
@@ -19,6 +19,29 @@ const INCLUDE_PARES = {
     { model: Vehiculo, as: 'vehiculo' },
     { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
   ],
+};
+
+const INCLUDE_PARADAS = {
+  model: RutaParada,
+  as: 'paradas',
+  required: false,
+  separate: true,
+  order: [['orden', 'ASC']],
+  include: [{ model: Destino, as: 'destino' }],
+};
+
+// Datos livianos del viaje enlazado (ida o regreso) — solo lo necesario para
+// mostrar un chip clickeable, sin anidar de nuevo sus propios pares/paradas (eso
+// se consulta abriendo esa otra ruta).
+const INCLUDE_REGRESO_IDA = {
+  model: Ruta, as: 'rutaIda', required: false,
+  attributes: ['idRuta', 'origen', 'estado'],
+  include: [{ model: Destino, as: 'destino', attributes: ['ciudad'] }],
+};
+const INCLUDE_REGRESO_VUELTA = {
+  model: Ruta, as: 'rutaRegreso', required: false,
+  attributes: ['idRuta', 'origen', 'estado'],
+  include: [{ model: Destino, as: 'destino', attributes: ['ciudad'] }],
 };
 
 const buildOrder = (sortBy) => {
@@ -93,7 +116,7 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
   const offset = (page - 1) * limit;
   const order = buildOrder(sortBy);
 
-  const include = [INCLUDE_PARES, { model: Destino, as: 'destino' }];
+  const include = [INCLUDE_PARES, INCLUDE_PARADAS, { model: Destino, as: 'destino' }, INCLUDE_REGRESO_IDA, INCLUDE_REGRESO_VUELTA];
 
   // OJO con subQuery:false acá: paresVehiculoConductor es hasMany (una ruta puede
   // tener varios vehículos, ver el convoy) — con subQuery:false, LIMIT se aplica sobre
@@ -171,7 +194,7 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
 
 const getById = async (id) => {
   const ruta = await Ruta.findByPk(id, {
-    include: [INCLUDE_PARES, { model: Destino, as: 'destino' }]
+    include: [INCLUDE_PARES, INCLUDE_PARADAS, { model: Destino, as: 'destino' }, INCLUDE_REGRESO_IDA, INCLUDE_REGRESO_VUELTA]
   });
 
   if (!ruta) {
@@ -348,11 +371,80 @@ const validarPares = (pares) => {
   }
 };
 
+const FECHA_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const HORA_REGEX = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+
+// Paradas intermedias del corredor — opcionales (una ruta puede seguir sin ninguna,
+// como hasta ahora). Si vienen, cada una necesita un destino válido y no se puede
+// repetir el mismo municipio dos veces en la misma ruta (ver índice único
+// uq_parada_ruta_destino en init.sql). El "orden" que manda el cliente se ignora:
+// se numera según la posición del array, así el frontend no tiene que llevar la
+// cuenta ni dejar huecos al reordenar/quitar una parada.
+//
+// fechaLlegadaEstimada/horaLlegadaEstimada son opcionales — la ETA de paso por esa
+// parada. Sin horario laboral ni choque que validar acá (a diferencia de
+// fechaSalida/fechaLlegadaEstimada de la Ruta completa): es solo una estimación
+// informativa que Ventas usa para acotar fechaEstimadaEntrega cuando el
+// destinatario está en esa parada, no un compromiso operativo con validación de
+// horario de atención.
+const validarParadas = async (paradas, transaction) => {
+  if (paradas === undefined) return null;
+  if (!Array.isArray(paradas)) {
+    throw new AppError('Las paradas deben ser una lista', 400);
+  }
+  if (paradas.length > 20) {
+    throw new AppError('No puedes agregar más de 20 paradas a una misma ruta', 400);
+  }
+  const idsDestino = paradas.map((p) => parseInt(p.idDestino));
+  if (idsDestino.some((id) => !id || isNaN(id))) {
+    throw new AppError('Cada parada necesita un destino válido', 400);
+  }
+  if (new Set(idsDestino).size !== idsDestino.length) {
+    throw new AppError('No puedes repetir el mismo municipio dos veces como parada de la misma ruta', 400);
+  }
+  for (const p of paradas) {
+    if (p.fechaLlegadaEstimada && !FECHA_REGEX.test(p.fechaLlegadaEstimada)) {
+      throw new AppError('Fecha estimada de paso inválida en una parada', 400);
+    }
+    if (p.horaLlegadaEstimada && !HORA_REGEX.test(p.horaLlegadaEstimada)) {
+      throw new AppError('Hora estimada de paso inválida en una parada', 400);
+    }
+  }
+  for (const idDestino of idsDestino) {
+    const destino = await Destino.findByPk(idDestino, { transaction });
+    if (!destino) throw new AppError(`Destino #${idDestino} no encontrado`, 404);
+  }
+  return paradas.map((p, i) => ({
+    idDestino: parseInt(p.idDestino),
+    orden: i + 1,
+    fechaLlegadaEstimada: p.fechaLlegadaEstimada || null,
+    horaLlegadaEstimada: p.horaLlegadaEstimada || null,
+  }));
+};
+
+// Si se manda idRutaIda, valida que sea una ruta real de la que ESTA sea el
+// regreso: debe existir, estar habilitada, ya "Completada" (el viaje de ida ya
+// terminó) y no tener ya otro regreso enlazado (uq_ruta_ida en init.sql es el
+// respaldo a nivel de BD; esto da un mensaje claro antes de llegar ahí).
+const validarRutaIda = async (idRutaIda) => {
+  if (!idRutaIda) return;
+  const rutaIda = await Ruta.findByPk(idRutaIda);
+  if (!rutaIda || !rutaIda.habilitado) throw new AppError('La ruta de ida no existe o está inhabilitada', 404);
+  if (rutaIda.estado !== 'Completada') {
+    throw new AppError('Solo se puede programar el regreso de una ruta que ya esté "Completada"', 400);
+  }
+  const yaTieneRegreso = await Ruta.findOne({ where: { idRutaIda } });
+  if (yaTieneRegreso) {
+    throw new AppError('Esa ruta ya tiene un viaje de regreso programado', 409);
+  }
+};
+
 const create = async (data) => {
-  const { idDestino, origen, fechaSalida, horaSalida, horaLlegadaEstimada, fechaLlegadaEstimada, estado, observaciones, pares } = data;
+  const { idDestino, origen, fechaSalida, horaSalida, horaLlegadaEstimada, fechaLlegadaEstimada, estado, observaciones, pares, paradas, idRutaIda } = data;
 
   validarHorarioRuta({ fechaSalida, horaSalida, fechaLlegadaEstimada, horaLlegadaEstimada });
   validarPares(pares);
+  await validarRutaIda(idRutaIda);
 
   const destino = await Destino.findByPk(idDestino);
   if (!destino) throw new AppError('Destino no encontrado', 404);
@@ -371,12 +463,15 @@ const create = async (data) => {
     await validarChoqueVehiculoConductor({ idVehiculo: par.idVehiculo, idConductor: par.idConductor, fechaSalida, fechaLlegadaEstimada });
   }
 
+  const paradasNormalizadas = await validarParadas(paradas);
+
   const transaction = await sequelize.transaction();
   let idRutaCreada;
   try {
     const ruta = await Ruta.create({
       origen: origen || 'Medellín',
       idDestino,
+      idRutaIda: idRutaIda || null,
       fechaSalida: fechaSalida || null,
       fechaLlegadaEstimada: fechaLlegadaEstimada || null,
       horaSalida: horaSalida || null,
@@ -391,6 +486,13 @@ const create = async (data) => {
       { transaction }
     );
 
+    if (paradasNormalizadas && paradasNormalizadas.length > 0) {
+      await RutaParada.bulkCreate(
+        paradasNormalizadas.map(p => ({ idRuta: ruta.idRuta, idDestino: p.idDestino, orden: p.orden, fechaLlegadaEstimada: p.fechaLlegadaEstimada, horaLlegadaEstimada: p.horaLlegadaEstimada })),
+        { transaction }
+      );
+    }
+
     await transaction.commit();
   } catch (error) {
     await transaction.rollback();
@@ -401,7 +503,7 @@ const create = async (data) => {
 };
 
 const update = async (id, data) => {
-  const { origen, idDestino, fechaSalida, horaSalida, horaLlegadaEstimada, fechaLlegadaEstimada, estado, observaciones, habilitado, pares } = data;
+  const { origen, idDestino, fechaSalida, horaSalida, horaLlegadaEstimada, fechaLlegadaEstimada, estado, observaciones, habilitado, pares, paradas } = data;
 
   const ruta = await Ruta.findByPk(id);
   if (!ruta) throw new AppError('Ruta no encontrada', 404);
@@ -464,6 +566,7 @@ const update = async (id, data) => {
   }
 
   if (pares !== undefined) validarPares(pares);
+  const paradasNormalizadas = await validarParadas(paradas);
 
   const transaction = await sequelize.transaction();
   try {
@@ -544,6 +647,20 @@ const update = async (id, data) => {
           idVehiculo: par.idVehiculo, idConductor: par.idConductor,
           fechaSalida: nuevaFechaSalida, fechaLlegadaEstimada: nuevaFechaLlegadaEstimada, idRutaExcluir: parseInt(id),
         });
+      }
+    }
+
+    // Paradas: conjunto completo, se reemplaza igual que "pares" — a diferencia de
+    // los pares, ninguna parada tiene todavía paquetes que dependan de ella (esa
+    // trazabilidad sigue viviendo en RutaVehiculoConductor), así que no hace falta
+    // soft-delete: se borran las que había y se crean las nuevas.
+    if (paradasNormalizadas !== null) {
+      await RutaParada.destroy({ where: { idRuta: id }, transaction });
+      if (paradasNormalizadas.length > 0) {
+        await RutaParada.bulkCreate(
+          paradasNormalizadas.map(p => ({ idRuta: parseInt(id), idDestino: p.idDestino, orden: p.orden, fechaLlegadaEstimada: p.fechaLlegadaEstimada, horaLlegadaEstimada: p.horaLlegadaEstimada })),
+          { transaction }
+        );
       }
     }
 
@@ -665,13 +782,13 @@ const updateEstado = async (id, estado) => {
     });
     if (ventasSinFecha.length > 0) {
       throw new AppError(
-        `Hay ${ventasSinFecha.length === 1 ? '1 venta' : ventasSinFecha.length + ' ventas'} sin fecha estimada de entrega. Asígnales una fecha antes de poner la ruta En Ruta.`,
+        `Hay ${ventasSinFecha.length === 1 ? '1 venta' : ventasSinFecha.length + ' ventas'} sin fecha estimada de entrega en sede. Asígnales una fecha antes de poner la ruta En Ruta.`,
         409,
         ventasSinFecha.map(v => ({
           tipo: 'venta',
           id: v.idEncomiendaVenta,
           guia: v.paquetes?.[0]?.numeroGuia || `#${v.idEncomiendaVenta}`,
-          descripcion: `Guía ${v.paquetes?.[0]?.numeroGuia || '#' + v.idEncomiendaVenta} no tiene fecha estimada de entrega asignada`,
+          descripcion: `Guía ${v.paquetes?.[0]?.numeroGuia || '#' + v.idEncomiendaVenta} no tiene fecha estimada de entrega en sede asignada`,
         })),
         'MISSING_DELIVERY_DATE'
       );

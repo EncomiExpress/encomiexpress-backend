@@ -22,7 +22,7 @@ const createValidation = [
   body('idCliente').isInt().withMessage('ID de cliente debe ser un número entero'),
   body('idRuta').notEmpty().withMessage('La ruta es obligatoria'),
   body('idRuta').isInt().withMessage('ID de ruta debe ser un número entero'),
-  body('fechaEstimadaEntrega').optional({ nullable: true }).isDate().withMessage('Fecha estimada de entrega inválida'),
+  body('fechaEstimadaEntrega').optional({ nullable: true }).isDate().withMessage('Fecha estimada de entrega en sede inválida'),
   body('observaciones').optional({ nullable: true }).isString().withMessage('Observaciones debe ser un texto')
     .custom(noSoloRelleno('Las observaciones no pueden contener solo espacios o guiones')),
   body('valorServicio').optional().isFloat({ min: 0 }).withMessage('Valor del servicio debe ser un número positivo'),
@@ -38,6 +38,12 @@ const createValidation = [
   body('destinatario.nombreDestinatario')
     .notEmpty().withMessage('El nombre del destinatario es obligatorio')
     .isLength({ max: 150 }).withMessage('El nombre del destinatario es demasiado largo'),
+  body('destinatario.tipoIdentificacionDestinatario')
+    .notEmpty().withMessage('El tipo de documento del destinatario es obligatorio'),
+  body('destinatario.numeroIdentificacionDestinatario')
+    .notEmpty().withMessage('El número de documento del destinatario es obligatorio')
+    .isLength({ max: 20 }).withMessage('El número de documento del destinatario es demasiado largo')
+    .custom(noSoloRelleno('El número de documento no puede contener solo espacios o guiones')),
   body('destinatario.idDestino')
     .notEmpty().withMessage('El municipio de destino del destinatario es obligatorio')
     .isInt().withMessage('ID de destino debe ser un número entero'),
@@ -69,7 +75,7 @@ const createValidation = [
 
 const updateValidation = [
   body('idRuta').optional().isInt().withMessage('ID de ruta debe ser un número entero'),
-  body('fechaEstimadaEntrega').optional({ nullable: true }).isDate().withMessage('Fecha estimada de entrega inválida'),
+  body('fechaEstimadaEntrega').optional({ nullable: true }).isDate().withMessage('Fecha estimada de entrega en sede inválida'),
   body('observaciones').optional({ nullable: true }).isString().withMessage('Observaciones debe ser un texto')
     .custom(noSoloRelleno('Las observaciones no pueden contener solo espacios o guiones')),
   body('valorServicio').optional().isFloat({ min: 0 }).withMessage('Valor del servicio debe ser un número positivo'),
@@ -86,6 +92,14 @@ const updateValidation = [
     .if(body('destinatario').exists())
     .notEmpty().withMessage('El nombre del destinatario es obligatorio')
     .isLength({ max: 150 }).withMessage('El nombre del destinatario es demasiado largo'),
+  body('destinatario.tipoIdentificacionDestinatario')
+    .if(body('destinatario').exists())
+    .notEmpty().withMessage('El tipo de documento del destinatario es obligatorio'),
+  body('destinatario.numeroIdentificacionDestinatario')
+    .if(body('destinatario').exists())
+    .notEmpty().withMessage('El número de documento del destinatario es obligatorio')
+    .isLength({ max: 20 }).withMessage('El número de documento del destinatario es demasiado largo')
+    .custom(noSoloRelleno('El número de documento no puede contener solo espacios o guiones')),
   body('destinatario.idDestino')
     .if(body('destinatario').exists())
     .notEmpty().withMessage('El municipio de destino del destinatario es obligatorio')

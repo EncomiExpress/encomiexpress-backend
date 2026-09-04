@@ -15,6 +15,15 @@ const Paquete = sequelize.define('Paquete', {
     type: DataTypes.INTEGER,
     allowNull: false
   },
+  // Repartidor local que hace la entrega puerta a puerta en el municipio de
+  // destino, DESPUÉS de que el paquete se marcó "En sede de destino" — distinto
+  // del conductor de idRutaVehiculoConductor, que solo hizo el tramo troncal.
+  // Nulo mientras el paquete no llega a una sede o no se le ha asignado nadie
+  // todavía. Ver encomiendaService.asignarRepartidorLocal.
+  idConductorEntrega: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
   numeroGuia: {
     type: DataTypes.STRING(50),
     allowNull: false,

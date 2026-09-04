@@ -24,6 +24,18 @@ const Destinatario = sequelize.define('Destinatario', {
     type: DataTypes.STRING(150),
     allowNull: false
   },
+  // Documento del destinatario — mismos tipos y validación que Cliente
+  // (CC/NIT/TI/CE/PAS/RC). allowNull:true a nivel de columna por flexibilidad
+  // (mismo criterio que el resto de campos de Destinatario); obligatorio en el
+  // flujo real vía encomiendasValidator.
+  tipoIdentificacionDestinatario: {
+    type: DataTypes.STRING(20),
+    allowNull: true
+  },
+  numeroIdentificacionDestinatario: {
+    type: DataTypes.STRING(20),
+    allowNull: true
+  },
   telefonoDestinatario: {
     type: DataTypes.STRING(20),
     allowNull: true

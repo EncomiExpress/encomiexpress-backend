@@ -18,8 +18,20 @@ const createValidation = [
   body('fechaSalida').optional().isDate().withMessage('Fecha de salida inválida'),
   body('fechaLlegadaEstimada').optional().isDate().withMessage('Fecha de llegada inválida'),
   body('horaSalida').optional().matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/).withMessage('Hora de salida inválida'),
-  body('horaLlegadaEstimada').optional({ nullable: true }).matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/).withMessage('Hora de llegada inválida'),
-  body('estado').optional().isIn(['Programada', 'En Ruta', 'Completada', 'Cancelada']).withMessage('Estado de ruta inválido')
+  // checkFalsy:true además de nullable:true -- el frontend manda '' (no null) cuando
+  // el campo queda vacío, y sin checkFalsy express-validator solo trata como "ausente"
+  // null/undefined, así que '' seguía cayendo en .matches() y se rechazaba como si
+  // fuera obligatorio.
+  body('horaLlegadaEstimada').optional({ nullable: true, checkFalsy: true }).matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/).withMessage('Hora de llegada inválida'),
+  body('estado').optional().isIn(['Programada', 'En Ruta', 'Completada', 'Cancelada']).withMessage('Estado de ruta inválido'),
+  // Paradas intermedias del corredor — opcionales, ver rutaService.validarParadas
+  // (el "orden" que se guarda al final es la posición en el array, no lo que
+  // mande el cliente, así que no se valida acá).
+  body('paradas').optional().isArray({ max: 20 }).withMessage('No puedes agregar más de 20 paradas a una misma ruta'),
+  body('paradas.*.idDestino').notEmpty().isInt().withMessage('Cada parada necesita un destino'),
+  body('paradas.*.fechaLlegadaEstimada').optional({ nullable: true, checkFalsy: true }).isDate().withMessage('Fecha estimada de paso inválida en una parada'),
+  body('paradas.*.horaLlegadaEstimada').optional({ nullable: true, checkFalsy: true }).matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/).withMessage('Hora estimada de paso inválida en una parada'),
+  body('idRutaIda').optional({ nullable: true }).isInt().withMessage('ID de ruta de ida debe ser un número entero'),
 ];
 
 const updateValidation = [
@@ -34,8 +46,16 @@ const updateValidation = [
   body('fechaSalida').optional().isDate().withMessage('Fecha de salida inválida'),
   body('fechaLlegadaEstimada').optional().isDate().withMessage('Fecha de llegada inválida'),
   body('horaSalida').optional().matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/).withMessage('Hora de salida inválida'),
-  body('horaLlegadaEstimada').optional({ nullable: true }).matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/).withMessage('Hora de llegada inválida'),
-  body('estado').optional().isIn(['Programada', 'En Ruta', 'Completada', 'Cancelada']).withMessage('Estado de ruta inválido')
+  // checkFalsy:true además de nullable:true -- el frontend manda '' (no null) cuando
+  // el campo queda vacío, y sin checkFalsy express-validator solo trata como "ausente"
+  // null/undefined, así que '' seguía cayendo en .matches() y se rechazaba como si
+  // fuera obligatorio.
+  body('horaLlegadaEstimada').optional({ nullable: true, checkFalsy: true }).matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/).withMessage('Hora de llegada inválida'),
+  body('estado').optional().isIn(['Programada', 'En Ruta', 'Completada', 'Cancelada']).withMessage('Estado de ruta inválido'),
+  body('paradas').optional().isArray({ max: 20 }).withMessage('No puedes agregar más de 20 paradas a una misma ruta'),
+  body('paradas.*.idDestino').notEmpty().isInt().withMessage('Cada parada necesita un destino'),
+  body('paradas.*.fechaLlegadaEstimada').optional({ nullable: true, checkFalsy: true }).isDate().withMessage('Fecha estimada de paso inválida en una parada'),
+  body('paradas.*.horaLlegadaEstimada').optional({ nullable: true, checkFalsy: true }).matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/).withMessage('Hora estimada de paso inválida en una parada'),
 ];
 
 module.exports = {

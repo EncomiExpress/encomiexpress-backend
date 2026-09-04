@@ -1,4 +1,4 @@
-const { Cliente } = require('../models');
+const { Cliente, Destino } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { verificarDependenciasCliente } = require('../middlewares/validateDependencies');
@@ -54,6 +54,7 @@ const getAll = async ({ habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
   const order = buildOrder(sortBy);
   const { count, rows: data } = await Cliente.findAndCountAll({
     where,
+    include: [{ model: Destino, as: 'destino' }],
     limit,
     offset,
     order: order.length > 0 ? order : [['idCliente', 'DESC']],
@@ -63,7 +64,7 @@ const getAll = async ({ habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
 };
 
 const getById = async (id) => {
-  const cliente = await Cliente.findByPk(id);
+  const cliente = await Cliente.findByPk(id, { include: [{ model: Destino, as: 'destino' }] });
 
   if (!cliente) {
     throw new AppError('Cliente no encontrado', 404);
@@ -73,7 +74,7 @@ const getById = async (id) => {
 };
 
 const create = async (data) => {
-  const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, direccion } = data;
+  const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, direccion, idDestino } = data;
 
   const existingCliente = await Cliente.findOne({ where: { numeroIdentificacion } });
   if (existingCliente) {
@@ -107,14 +108,15 @@ const create = async (data) => {
     telefono,
     email,
     direccion,
+    idDestino,
     habilitado: true
   });
 
-  return nuevoCliente;
+  return Cliente.findByPk(nuevoCliente.idCliente, { include: [{ model: Destino, as: 'destino' }] });
 };
 
 const update = async (id, data) => {
-  const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, direccion } = data;
+  const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, direccion, idDestino } = data;
 
   const cliente = await Cliente.findByPk(id);
   if (!cliente) {
@@ -161,10 +163,11 @@ const update = async (id, data) => {
     apellido: apellido || cliente.apellido,
     telefono: telefono || cliente.telefono,
     email: email || cliente.email,
-    direccion: direccion || cliente.direccion
+    direccion: direccion || cliente.direccion,
+    idDestino: idDestino || cliente.idDestino
   });
 
-  return cliente;
+  return Cliente.findByPk(id, { include: [{ model: Destino, as: 'destino' }] });
 };
 
 const toggleHabilitado = async (id) => {

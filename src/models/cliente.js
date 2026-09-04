@@ -36,6 +36,15 @@ const Cliente = sequelize.define('Cliente', {
     type: DataTypes.STRING(255),
     allowNull: true
   },
+  // Municipio del remitente — mismo catálogo `destino` que usa Destinatario/Ruta.
+  // allowNull:true a nivel de columna por flexibilidad (mismo criterio que
+  // destinatario.id_destino); obligatorio en el flujo real vía clientesValidator.
+  // Hace falta para saber a qué municipio devolver un paquete si el destinatario
+  // pasa un mes sin recogerlo (ver LOGICA.md).
+  idDestino: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
   habilitado: {
     type: DataTypes.BOOLEAN,
     defaultValue: true

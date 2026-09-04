@@ -48,11 +48,11 @@ exports.update = async (req, res) => {
   try {
     const { id } = req.params;
     const { ruta, ventasSinFechaEntrega } = await rutaService.update(id, req.body);
-    // Si mover la fecha de la ruta dejó ventas sin una fecha de entrega válida
+    // Si mover la fecha de la ruta dejó ventas sin una fecha de entrega en sede válida
     // (se les vació el campo — ver rutaService.update), se avisa en el mismo mensaje
     // de éxito para que quien edita la ruta se entere de una y las revise después.
     const aviso = ventasSinFechaEntrega.length > 0
-      ? ` Se vació la fecha estimada de entrega de ${ventasSinFechaEntrega.length === 1 ? '1 venta' : `${ventasSinFechaEntrega.length} ventas`} porque quedó fuera del nuevo rango — asígnale${ventasSinFechaEntrega.length === 1 ? '' : 'n'} una fecha nueva.`
+      ? ` Se vació la fecha estimada de entrega en sede de ${ventasSinFechaEntrega.length === 1 ? '1 venta' : `${ventasSinFechaEntrega.length} ventas`} porque quedó fuera del nuevo rango — asígnale${ventasSinFechaEntrega.length === 1 ? '' : 'n'} una fecha nueva.`
       : '';
     res.json({ success: true, message: `Ruta actualizada exitosamente.${aviso}`, data: ruta });
   } catch (error) {
