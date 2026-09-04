@@ -11,7 +11,7 @@ router.use(authenticate);
  * @swagger
  * tags:
  *   name: Configuración
- *   description: Valores de configuración globales del sistema (ej. tarifa por kg de Ventas)
+ *   description: Valores de configuración globales del sistema (tarifas por kg hierro/normal y tarifa por paquete de Ventas)
  */
 
 /**
@@ -32,7 +32,9 @@ router.use(authenticate);
  *                 data:
  *                   type: object
  *                   properties:
- *                     tarifaPorKg: { type: number }
+ *                     tarifaPorKgHierro: { type: number }
+ *                     tarifaPorKgNormal: { type: number }
+ *                     tarifaPorPaquete: { type: number }
  */
 router.get('/', configuracionController.get);
 
@@ -49,7 +51,9 @@ router.get('/', configuracionController.get);
  *           schema:
  *             type: object
  *             properties:
- *               tarifaPorKg: { type: number, example: 1500 }
+ *               tarifaPorKgHierro: { type: number, example: 450 }
+ *               tarifaPorKgNormal: { type: number, example: 650 }
+ *               tarifaPorPaquete: { type: number, example: 10000 }
  *     responses:
  *       200:
  *         description: Configuración actualizada

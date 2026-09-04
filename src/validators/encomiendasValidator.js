@@ -26,7 +26,6 @@ const createValidation = [
   body('observaciones').optional({ nullable: true }).isString().withMessage('Observaciones debe ser un texto')
     .custom(noSoloRelleno('Las observaciones no pueden contener solo espacios o guiones')),
   body('valorServicio').optional().isFloat({ min: 0 }).withMessage('Valor del servicio debe ser un número positivo'),
-  body('impuestos').optional().isFloat({ min: 0 }).withMessage('Impuestos debe ser un número positivo'),
   body('metodoPago')
     .optional()
     .isIn(METODOS_PAGO_VALIDOS)
@@ -39,6 +38,13 @@ const createValidation = [
   body('destinatario.nombreDestinatario')
     .notEmpty().withMessage('El nombre del destinatario es obligatorio')
     .isLength({ max: 150 }).withMessage('El nombre del destinatario es demasiado largo'),
+  body('destinatario.idDestino')
+    .notEmpty().withMessage('El municipio de destino del destinatario es obligatorio')
+    .isInt().withMessage('ID de destino debe ser un número entero'),
+  body('destinatario.correoDestinatario')
+    .optional({ nullable: true, checkFalsy: true })
+    .isEmail().withMessage('El correo del destinatario no es válido')
+    .isLength({ max: 150 }).withMessage('El correo del destinatario es demasiado largo'),
   body('destinatario.direccionDestinatario')
     .notEmpty().withMessage('La dirección del destinatario es obligatoria')
     .custom(noSoloRelleno('La dirección no puede contener solo espacios o guiones')),
@@ -54,6 +60,9 @@ const createValidation = [
   body('paquetes.*.ancho').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('El ancho del paquete debe ser de al menos 1 cm'),
   body('paquetes.*.profundidad').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('La profundidad del paquete debe ser de al menos 1 cm'),
   body('paquetes.*.valorDeclarado').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('El valor declarado debe ser de al menos $1'),
+  body('paquetes.*.tipoCarga')
+    .notEmpty().withMessage('Debes indicar el tipo de carga')
+    .isIn(['hierro', 'normal']).withMessage('Tipo de carga inválido. Opciones: hierro, normal'),
   body('paquetes.*.idRutaVehiculoConductor')
     .notEmpty().withMessage('Cada paquete debe tener un vehículo asignado')
     .isInt().withMessage('ID de vehículo/conductor de ruta debe ser un número entero'),
@@ -65,7 +74,6 @@ const updateValidation = [
   body('observaciones').optional({ nullable: true }).isString().withMessage('Observaciones debe ser un texto')
     .custom(noSoloRelleno('Las observaciones no pueden contener solo espacios o guiones')),
   body('valorServicio').optional().isFloat({ min: 0 }).withMessage('Valor del servicio debe ser un número positivo'),
-  body('impuestos').optional().isFloat({ min: 0 }).withMessage('Impuestos debe ser un número positivo'),
   body('metodoPago')
     .optional()
     .isIn(METODOS_PAGO_VALIDOS)
@@ -79,6 +87,14 @@ const updateValidation = [
     .if(body('destinatario').exists())
     .notEmpty().withMessage('El nombre del destinatario es obligatorio')
     .isLength({ max: 150 }).withMessage('El nombre del destinatario es demasiado largo'),
+  body('destinatario.idDestino')
+    .if(body('destinatario').exists())
+    .notEmpty().withMessage('El municipio de destino del destinatario es obligatorio')
+    .isInt().withMessage('ID de destino debe ser un número entero'),
+  body('destinatario.correoDestinatario')
+    .optional({ nullable: true, checkFalsy: true })
+    .isEmail().withMessage('El correo del destinatario no es válido')
+    .isLength({ max: 150 }).withMessage('El correo del destinatario es demasiado largo'),
   body('destinatario.direccionDestinatario')
     .if(body('destinatario').exists())
     .notEmpty().withMessage('La dirección del destinatario es obligatoria')
@@ -95,6 +111,9 @@ const updateValidation = [
   body('paquetes.*.ancho').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('El ancho del paquete debe ser de al menos 1 cm'),
   body('paquetes.*.profundidad').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('La profundidad del paquete debe ser de al menos 1 cm'),
   body('paquetes.*.valorDeclarado').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('El valor declarado debe ser de al menos $1'),
+  body('paquetes.*.tipoCarga')
+    .notEmpty().withMessage('Debes indicar el tipo de carga')
+    .isIn(['hierro', 'normal']).withMessage('Tipo de carga inválido. Opciones: hierro, normal'),
   body('paquetes.*.idRutaVehiculoConductor')
     .notEmpty().withMessage('Cada paquete debe tener un vehículo asignado')
     .isInt().withMessage('ID de vehículo/conductor de ruta debe ser un número entero'),

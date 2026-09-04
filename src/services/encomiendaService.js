@@ -189,7 +189,7 @@ const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, metod
     include: [
       { model: Cliente, as: 'cliente' },
       RUTA_INCLUDE,
-      { model: Destinatario, as: 'destinatario' },
+      { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
       paqueteIncludeConAsignacion({ separate: true }),
     ],
     limit,
@@ -207,7 +207,7 @@ const getById = async (id) => {
     include: [
       { model: Cliente, as: 'cliente' },
       RUTA_INCLUDE,
-      { model: Destinatario, as: 'destinatario' },
+      { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
       paqueteIncludeConAsignacion(),
     ],
   });
@@ -288,7 +288,6 @@ const create = async (data) => {
       fechaEstimadaEntrega,
       observaciones,
       valorServicio,
-      impuestos,
       metodoPago,
       estadoPago,
       destinatario,
@@ -308,6 +307,14 @@ const create = async (data) => {
       throw new AppError('Ruta no encontrada', 400);
     }
     validarFechaEntrega(fechaEstimadaEntrega, ruta);
+
+    if (!destinatario || !destinatario.idDestino) {
+      throw new AppError('El municipio de destino del destinatario es obligatorio', 400);
+    }
+    const destinoDestinatario = await Destino.findByPk(destinatario.idDestino);
+    if (!destinoDestinatario) {
+      throw new AppError('El destino del destinatario no existe', 400);
+    }
 
     if (paquetes && paquetes.length > 0) {
       for (const pkg of paquetes) {
@@ -332,8 +339,7 @@ const create = async (data) => {
       throw new AppError(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
     }
 
-    const valorImpuestos = impuestos || 0;
-    const total = (valorServicio || 0) + valorImpuestos;
+    const total = valorServicio || 0;
 
     const metodoPagoResuelto = metodoPago
       ? (METODOS_PAGO_VALIDOS.find((v) => v.toLowerCase() === metodoPago.toLowerCase()) || null)
@@ -352,7 +358,6 @@ const create = async (data) => {
         fechaEstimadaEntrega: fechaEstimadaEntrega || null,
         observaciones: observaciones || null,
         valorServicio: valorServicio || 0,
-        impuestos: valorImpuestos,
         total,
         metodoPago: metodoPagoResuelto,
         estadoPago: estadoPagoResuelto,
@@ -365,8 +370,10 @@ const create = async (data) => {
       await Destinatario.create(
         {
           idEncomiendaVenta: encomienda.idEncomiendaVenta,
+          idDestino: destinatario.idDestino,
           nombreDestinatario: destinatario.nombreDestinatario,
           telefonoDestinatario: destinatario.telefonoDestinatario || null,
+          correoDestinatario: destinatario.correoDestinatario || null,
           direccionDestinatario: destinatario.direccionDestinatario || null,
         },
         { transaction }
@@ -386,6 +393,7 @@ const create = async (data) => {
             ancho: pkg.ancho || null,
             profundidad: pkg.profundidad || null,
             valorDeclarado: pkg.valorDeclarado || null,
+            tipoCarga: pkg.tipoCarga || 'normal',
           },
           { transaction }
         );
@@ -398,7 +406,7 @@ const create = async (data) => {
       include: [
         { model: Cliente, as: 'cliente' },
         RUTA_INCLUDE,
-        { model: Destinatario, as: 'destinatario' },
+        { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
         paqueteIncludeConAsignacion(),
       ],
     });
@@ -419,7 +427,6 @@ const update = async (id, data) => {
       fechaEstimadaEntrega,
       observaciones,
       valorServicio,
-      impuestos,
       metodoPago,
       estadoPago,
       habilitado,
@@ -456,13 +463,11 @@ const update = async (id, data) => {
       return typeof value === 'number' ? value : parseFloat(String(value).replace(',', '.')) || 0;
     };
 
-    const nuevoImpuestos =
-      impuestos !== undefined ? parseDecimal(impuestos) : parseDecimal(encomienda.impuestos);
     const nuevoValorServicio =
       valorServicio !== undefined
         ? parseDecimal(valorServicio)
         : parseDecimal(encomienda.valorServicio);
-    const nuevoTotal = nuevoImpuestos + nuevoValorServicio;
+    const nuevoTotal = nuevoValorServicio;
 
     // La ruta es obligatoria siempre — una venta nunca puede quedar sin ruta.
     // Si se manda idRuta en la petición tiene que ser un id válido; si no se
@@ -503,7 +508,6 @@ const update = async (id, data) => {
         fechaEstimadaEntrega: nuevaFechaEstimadaEntrega,
         observaciones: observaciones !== undefined ? observaciones : encomienda.observaciones,
         valorServicio: nuevoValorServicio,
-        impuestos: nuevoImpuestos,
         total: nuevoTotal,
         metodoPago: metodoPago !== undefined ? (metodoPago ? METODOS_PAGO_VALIDOS.find(v => v.toLowerCase() === metodoPago.toLowerCase()) || encomienda.metodoPago : null) : encomienda.metodoPago,
         estadoPago: estadoPago !== undefined ? (ESTADOS_PAGO_VALIDOS.find(v => v.toLowerCase() === estadoPago.toLowerCase()) || encomienda.estadoPago) : encomienda.estadoPago,
@@ -517,12 +521,23 @@ const update = async (id, data) => {
         where: { idEncomiendaVenta: id },
       });
 
+      let idDestinoResuelto = destinatarioExistente?.idDestino ?? null;
+      if (destinatario.idDestino !== undefined) {
+        const destinoDestinatario = await Destino.findByPk(destinatario.idDestino);
+        if (!destinoDestinatario) {
+          throw new AppError('El destino del destinatario no existe', 400);
+        }
+        idDestinoResuelto = destinatario.idDestino;
+      }
+
       if (destinatarioExistente) {
         await destinatarioExistente.update(
           {
+            idDestino: idDestinoResuelto,
             nombreDestinatario:
               destinatario.nombreDestinatario || destinatarioExistente.nombreDestinatario,
             telefonoDestinatario: destinatario.telefonoDestinatario || null,
+            correoDestinatario: destinatario.correoDestinatario || null,
             direccionDestinatario: destinatario.direccionDestinatario || null,
           },
           { transaction }
@@ -531,8 +546,10 @@ const update = async (id, data) => {
         await Destinatario.create(
           {
             idEncomiendaVenta: id,
+            idDestino: idDestinoResuelto,
             nombreDestinatario: destinatario.nombreDestinatario,
             telefonoDestinatario: destinatario.telefonoDestinatario || null,
+            correoDestinatario: destinatario.correoDestinatario || null,
             direccionDestinatario: destinatario.direccionDestinatario || null,
           },
           { transaction }
@@ -561,6 +578,7 @@ const update = async (id, data) => {
           ancho: pkg.ancho || null,
           profundidad: pkg.profundidad || null,
           valorDeclarado: pkg.valorDeclarado || null,
+          tipoCarga: pkg.tipoCarga || 'normal',
         };
 
         if (pkg.idPaquete && existentesPorId.has(pkg.idPaquete)) {
@@ -588,7 +606,7 @@ const update = async (id, data) => {
       include: [
         { model: Cliente, as: 'cliente' },
         RUTA_INCLUDE,
-        { model: Destinatario, as: 'destinatario' },
+        { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
         paqueteIncludeConAsignacion(),
       ],
     });
@@ -797,7 +815,7 @@ const toggleHabilitado = async (id) => {
   const encomiendaActualizada = await EncomiendaVenta.findByPk(id, {
     include: [
       { model: Cliente, as: 'cliente' },
-      { model: Destinatario, as: 'destinatario' },
+      { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
       paqueteIncludeConAsignacion(),
       RUTA_INCLUDE,
     ],

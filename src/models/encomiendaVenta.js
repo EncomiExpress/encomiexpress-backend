@@ -39,10 +39,6 @@ const EncomiendaVenta = sequelize.define('EncomiendaVenta', {
     type: DataTypes.DECIMAL(12, 2),
     defaultValue: 0
   },
-  impuestos: {
-    type: DataTypes.DECIMAL(12, 2),
-    defaultValue: 0
-  },
   total: {
     type: DataTypes.DECIMAL(12, 2),
     defaultValue: 0

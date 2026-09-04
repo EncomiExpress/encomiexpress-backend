@@ -13,7 +13,14 @@ const getConfiguracion = async () => {
 
 const updateConfiguracion = async (data) => {
   const configuracion = await getOrCreate();
-  await configuracion.update({ tarifaPorKg: data.tarifaPorKg });
+  // Actualización parcial: cada control del panel (Ventas: Tarifa por kg
+  // hierro/normal, Tarifa por paquete) solo manda su propio campo -- sin esto,
+  // guardar uno pisaría los otros con "undefined".
+  const cambios = {};
+  if (data.tarifaPorKgHierro !== undefined) cambios.tarifaPorKgHierro = data.tarifaPorKgHierro;
+  if (data.tarifaPorKgNormal !== undefined) cambios.tarifaPorKgNormal = data.tarifaPorKgNormal;
+  if (data.tarifaPorPaquete !== undefined) cambios.tarifaPorPaquete = data.tarifaPorPaquete;
+  await configuracion.update(cambios);
   return configuracion;
 };
 

@@ -100,6 +100,12 @@ EncomiendaVenta.belongsTo(Ruta, { foreignKey: 'idRuta', as: 'ruta' });
 EncomiendaVenta.hasOne(Destinatario, { foreignKey: 'idEncomiendaVenta', as: 'destinatario' });
 Destinatario.belongsTo(EncomiendaVenta, { foreignKey: 'idEncomiendaVenta', as: 'encomienda' });
 
+// Destino - Destinatario (1:N) — a qué municipio se envía el paquete (decisión
+// comercial, capturada en Ventas), distinto del idDestino de la Ruta que después
+// se le asigne administrativamente.
+Destino.hasMany(Destinatario, { foreignKey: 'idDestino', as: 'destinatarios' });
+Destinatario.belongsTo(Destino, { foreignKey: 'idDestino', as: 'destino' });
+
 // EncomiendaVenta - Paquete (1:N)
 EncomiendaVenta.hasMany(Paquete, { foreignKey: 'idEncomiendaVenta', as: 'paquetes' });
 Paquete.belongsTo(EncomiendaVenta, { foreignKey: 'idEncomiendaVenta', as: 'encomienda' });
