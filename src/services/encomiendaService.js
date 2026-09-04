@@ -392,7 +392,6 @@ const create = async (data) => {
             alto: pkg.alto || null,
             ancho: pkg.ancho || null,
             profundidad: pkg.profundidad || null,
-            valorDeclarado: pkg.valorDeclarado || null,
             tipoCarga: pkg.tipoCarga || 'normal',
           },
           { transaction }
@@ -577,7 +576,6 @@ const update = async (id, data) => {
           alto: pkg.alto || null,
           ancho: pkg.ancho || null,
           profundidad: pkg.profundidad || null,
-          valorDeclarado: pkg.valorDeclarado || null,
           tipoCarga: pkg.tipoCarga || 'normal',
         };
 

@@ -59,7 +59,6 @@ const createValidation = [
   body('paquetes.*.alto').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('El alto del paquete debe ser de al menos 1 cm'),
   body('paquetes.*.ancho').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('El ancho del paquete debe ser de al menos 1 cm'),
   body('paquetes.*.profundidad').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('La profundidad del paquete debe ser de al menos 1 cm'),
-  body('paquetes.*.valorDeclarado').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('El valor declarado debe ser de al menos $1'),
   body('paquetes.*.tipoCarga')
     .notEmpty().withMessage('Debes indicar el tipo de carga')
     .isIn(['hierro', 'normal']).withMessage('Tipo de carga inválido. Opciones: hierro, normal'),
@@ -110,7 +109,6 @@ const updateValidation = [
   body('paquetes.*.alto').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('El alto del paquete debe ser de al menos 1 cm'),
   body('paquetes.*.ancho').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('El ancho del paquete debe ser de al menos 1 cm'),
   body('paquetes.*.profundidad').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('La profundidad del paquete debe ser de al menos 1 cm'),
-  body('paquetes.*.valorDeclarado').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('El valor declarado debe ser de al menos $1'),
   body('paquetes.*.tipoCarga')
     .notEmpty().withMessage('Debes indicar el tipo de carga')
     .isIn(['hierro', 'normal']).withMessage('Tipo de carga inválido. Opciones: hierro, normal'),

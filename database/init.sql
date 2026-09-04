@@ -194,8 +194,7 @@ CREATE TABLE paquete (
   peso                        DECIMAL(8,2) NOT NULL,
   alto                        DECIMAL(8,2),
   ancho                       DECIMAL(8,2),
-  profundidad                 DECIMAL(8,2),
-  valor_declarado             DECIMAL(12,2)
+  profundidad                 DECIMAL(8,2)
   ,tipo_carga                  VARCHAR(20) NOT NULL DEFAULT 'normal' CHECK (tipo_carga IN ('hierro','normal'))
   ,estado                      VARCHAR(30) NOT NULL DEFAULT 'Por entregar'
   ,observacion_estado         TEXT
