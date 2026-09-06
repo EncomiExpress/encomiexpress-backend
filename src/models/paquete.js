@@ -50,7 +50,7 @@ const Paquete = sequelize.define('Paquete', {
     allowNull: true
   },
   // hierro | normal — determina qué tarifa por kg (Configuracion.tarifaPorKgHierro/
-  // tarifaPorKgNormal) aplica en el cálculo de valorServicio de la venta.
+  // tarifaPorKgNormal) aplica en el cálculo de total de la venta.
   tipoCarga: {
     type: DataTypes.STRING(20),
     allowNull: false,

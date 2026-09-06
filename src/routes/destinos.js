@@ -11,7 +11,7 @@ router.use(authenticate);
  * @swagger
  * tags:
  *   name: Destinos
- *   description: Ciudades de destino de las rutas (Bajo Cauca y conexiones)
+ *   description: Municipios de destino de las rutas (Bajo Cauca y conexiones)
  */
 
 /**
@@ -72,7 +72,7 @@ router.get('/:id', authorizePermission('consultar_destino'), destinoController.g
  *       201:
  *         description: Destino registrado
  *       400:
- *         description: Destino ya existe (misma ciudad y departamento)
+ *         description: Destino ya existe (mismo municipio y departamento)
  *         content:
  *           application/json:
  *             schema:

@@ -98,12 +98,8 @@ const create = async (data) => {
     throw new AppError('El número de identificación ya está registrado', 400);
   }
 
-  if (numeroLicencia) {
-    const existingLicencia = await Conductor.findOne({ where: { numeroLicencia } });
-    if (existingLicencia) {
-      throw new AppError('El número de licencia ya está registrado', 400);
-    }
-  }
+  // numeroLicencia no se valida ni se chequea por duplicado: en Colombia siempre es
+  // el número de documento del titular (Ley 769 de 2002 — ver CLAUDE.md), ya validado arriba.
 
   const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -154,14 +150,8 @@ const update = async (id, data) => {
     throw new AppError('Conductor no encontrado', 404);
   }
 
-  if (numeroLicencia && numeroLicencia !== conductor.numeroLicencia) {
-    const existingLicencia = await Conductor.findOne({
-      where: { numeroLicencia, idConductor: { [Op.ne]: id } },
-    });
-    if (existingLicencia) {
-      throw new AppError('El número de licencia ya está registrado', 400);
-    }
-  }
+  // numeroLicencia no se chequea por duplicado: siempre es el número de documento del
+  // titular (Ley 769 de 2002 — ver CLAUDE.md), cuya unicidad ya se valida abajo sobre Usuario.
 
   if (conductor.usuario) {
     if (numeroIdentificacion && numeroIdentificacion !== conductor.usuario.numeroIdentificacion) {

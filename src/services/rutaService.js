@@ -36,12 +36,12 @@ const INCLUDE_PARADAS = {
 const INCLUDE_REGRESO_IDA = {
   model: Ruta, as: 'rutaIda', required: false,
   attributes: ['idRuta', 'origen', 'estado'],
-  include: [{ model: Destino, as: 'destino', attributes: ['ciudad'] }],
+  include: [{ model: Destino, as: 'destino', attributes: ['municipio'] }],
 };
 const INCLUDE_REGRESO_VUELTA = {
   model: Ruta, as: 'rutaRegreso', required: false,
   attributes: ['idRuta', 'origen', 'estado'],
-  include: [{ model: Destino, as: 'destino', attributes: ['ciudad'] }],
+  include: [{ model: Destino, as: 'destino', attributes: ['municipio'] }],
 };
 
 const buildOrder = (sortBy) => {
@@ -271,14 +271,14 @@ const validarChoqueVehiculoConductor = async ({ idVehiculo, idConductor, fechaSa
       as: 'ruta',
       required: true,
       where: { habilitado: true, estado: { [Op.in]: ['Programada', 'En Ruta'] } },
-      include: [{ model: Destino, as: 'destino', attributes: ['ciudad'] }],
+      include: [{ model: Destino, as: 'destino', attributes: ['municipio'] }],
     }],
   });
 
   for (const p of pares) {
     const otraSalida = p.ruta.fechaSalida;
     const otraLlegada = p.ruta.fechaLlegadaEstimada || otraSalida;
-    const rutaLabel = p.ruta.origen ? `${p.ruta.origen} → ${p.ruta.destino?.ciudad || 'Sin destino'}` : `Ruta #${p.idRuta}`;
+    const rutaLabel = p.ruta.origen ? `${p.ruta.origen} → ${p.ruta.destino?.municipio || 'Sin destino'}` : `Ruta #${p.idRuta}`;
     // Margen entre el final de una ruta y el inicio de la otra — en cualquiera de los
     // dos sentidos (no importa cuál de las dos se programó primero). OJO: el margen se
     // exige UNA sola vez entre el final de una y el inicio de la otra, no dos veces
@@ -306,22 +306,22 @@ const validarChoqueVehiculoConductor = async ({ idVehiculo, idConductor, fechaSa
 };
 
 // Horario laboral de la empresa (ver src/utils/horarioLaboral.js): valida que la salida
-// y la llegada de la ruta caigan en día/hora hábil, y que la llegada deje al menos
-// MIN_DIAS_SALIDA_LLEGADA días de margen desde la salida (ej. salida 3 de agosto →
-// llegada mínima 5 de agosto, dejando el 4 como único día de entrega posible). Concepto
-// separado de validarChoqueVehiculoConductor (esa función es sobre choque de
-// vehículo/conductor entre rutas distintas, esta es sobre el horario de UNA sola
-// ruta) — no se mezclan.
+// y la llegada de la ruta caigan en día/hora hábil, y que la llegada no sea anterior a
+// la salida (MIN_DIAS_SALIDA_LLEGADA = 0 — un vehículo puede salir e ir y venir el
+// mismo día, ej. rutas cortas). Concepto separado de validarChoqueVehiculoConductor
+// (esa función es sobre choque de vehículo/conductor entre rutas distintas, esta es
+// sobre el horario de UNA sola ruta) — no se mezclan.
 const validarHorarioRuta = ({ fechaSalida, horaSalida, fechaLlegadaEstimada, horaLlegadaEstimada }) => {
   // "Hoy" en hora Colombia — mismo patrón que validarDocumentosVehiculo, para que el
   // límite no dependa de en qué zona horaria corre el servidor (Render corre en UTC).
   const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
-  // Mismo tope (1 mes) para ambas fechas — no se reduce el de salida para "dejar
-  // espacio" al mínimo de llegada: si alguien elige una salida tan pegada al tope que
-  // no queda ningún día de llegada válido, eso se rechaza más abajo con un mensaje
-  // claro (el chequeo de "mínimo 2 días desde la salida" y el de "máximo 30 días desde
-  // hoy" conviven — si chocan entre sí para una combinación puntual, el usuario lo ve
-  // explicado, en vez de que el campo de salida le reduzca el mes sin avisar por qué.
+  // Mismo tope (MAX_DIAS_ANTICIPACION) para ambas fechas — no se reduce el de salida
+  // para "dejar espacio" al mínimo de llegada: si alguien elige una salida tan pegada
+  // al tope que no queda ningún día de llegada válido, eso se rechaza más abajo con un
+  // mensaje claro (el chequeo de "mínimo N días desde la salida" y el de "máximo
+  // MAX_DIAS_ANTICIPACION días desde hoy" conviven — si chocan entre sí para una
+  // combinación puntual, el usuario lo ve explicado, en vez de que el campo de salida
+  // le reduzca el rango sin avisar por qué.
   const maxPermitido = sumarDias(hoy, MAX_DIAS_ANTICIPACION);
 
   if (fechaSalida && esDomingo(fechaSalida)) {
@@ -344,7 +344,10 @@ const validarHorarioRuta = ({ fechaSalida, horaSalida, fechaLlegadaEstimada, hor
     if (fechaSalida) {
       const minima = sumarDias(fechaSalida, MIN_DIAS_SALIDA_LLEGADA);
       if (fechaLlegadaEstimada < minima) {
-        throw new AppError(`La fecha de llegada debe ser al menos ${MIN_DIAS_SALIDA_LLEGADA} días después de la salida (mínimo el ${minima})`, 400);
+        const mensaje = MIN_DIAS_SALIDA_LLEGADA > 0
+          ? `La fecha de llegada debe ser al menos ${MIN_DIAS_SALIDA_LLEGADA} día(s) después de la salida (mínimo el ${minima})`
+          : `La fecha de llegada no puede ser anterior a la fecha de salida (mínimo el ${minima})`;
+        throw new AppError(mensaje, 400);
       }
     }
     if (horaLlegadaEstimada && !horaDentroDeRango(fechaLlegadaEstimada, horaLlegadaEstimada)) {
@@ -371,22 +374,19 @@ const validarPares = (pares) => {
   }
 };
 
-const FECHA_REGEX = /^\d{4}-\d{2}-\d{2}$/;
-const HORA_REGEX = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
-
 // Paradas intermedias del corredor — opcionales (una ruta puede seguir sin ninguna,
 // como hasta ahora). Si vienen, cada una necesita un destino válido y no se puede
 // repetir el mismo municipio dos veces en la misma ruta (ver índice único
-// uq_parada_ruta_destino en init.sql). El "orden" que manda el cliente se ignora:
-// se numera según la posición del array, así el frontend no tiene que llevar la
-// cuenta ni dejar huecos al reordenar/quitar una parada.
-//
-// fechaLlegadaEstimada/horaLlegadaEstimada son opcionales — la ETA de paso por esa
-// parada. Sin horario laboral ni choque que validar acá (a diferencia de
-// fechaSalida/fechaLlegadaEstimada de la Ruta completa): es solo una estimación
-// informativa que Ventas usa para acotar fechaEstimadaEntrega cuando el
-// destinatario está en esa parada, no un compromiso operativo con validación de
-// horario de atención.
+// uq_parada_ruta_destino en init.sql). Hubo una validación de orden geográfico
+// (`destino.corredor`/`ordenCorredor`, un valor cargado a mano por destino) pero se
+// quitó — daba falsos positivos en rutas reales porque un valor manual de "posición
+// aproximada" no capta la geometría real de la carretera (ej. Medellín → Caucasia con
+// paradas Zaragoza y El Bagre se rechazaba aunque el mapa real confirma ese orden). Se
+// deja en manos del admin, que sí ve el camino real. Queda pendiente resolverlo bien
+// con coordenadas/mapa (ver PENDIENTES_MAPA_RUTAS.md).
+// El "orden" que manda el cliente se ignora: se numera según la posición del array,
+// así el frontend no tiene que llevar la cuenta ni dejar huecos al reordenar/quitar
+// una parada.
 const validarParadas = async (paradas, transaction) => {
   if (paradas === undefined) return null;
   if (!Array.isArray(paradas)) {
@@ -402,23 +402,16 @@ const validarParadas = async (paradas, transaction) => {
   if (new Set(idsDestino).size !== idsDestino.length) {
     throw new AppError('No puedes repetir el mismo municipio dos veces como parada de la misma ruta', 400);
   }
-  for (const p of paradas) {
-    if (p.fechaLlegadaEstimada && !FECHA_REGEX.test(p.fechaLlegadaEstimada)) {
-      throw new AppError('Fecha estimada de paso inválida en una parada', 400);
-    }
-    if (p.horaLlegadaEstimada && !HORA_REGEX.test(p.horaLlegadaEstimada)) {
-      throw new AppError('Hora estimada de paso inválida en una parada', 400);
-    }
-  }
+  if (idsDestino.length === 0) return [];
+
   for (const idDestino of idsDestino) {
     const destino = await Destino.findByPk(idDestino, { transaction });
     if (!destino) throw new AppError(`Destino #${idDestino} no encontrado`, 404);
   }
+
   return paradas.map((p, i) => ({
     idDestino: parseInt(p.idDestino),
     orden: i + 1,
-    fechaLlegadaEstimada: p.fechaLlegadaEstimada || null,
-    horaLlegadaEstimada: p.horaLlegadaEstimada || null,
   }));
 };
 
@@ -488,7 +481,7 @@ const create = async (data) => {
 
     if (paradasNormalizadas && paradasNormalizadas.length > 0) {
       await RutaParada.bulkCreate(
-        paradasNormalizadas.map(p => ({ idRuta: ruta.idRuta, idDestino: p.idDestino, orden: p.orden, fechaLlegadaEstimada: p.fechaLlegadaEstimada, horaLlegadaEstimada: p.horaLlegadaEstimada })),
+        paradasNormalizadas.map(p => ({ idRuta: ruta.idRuta, idDestino: p.idDestino, orden: p.orden })),
         { transaction }
       );
     }
@@ -538,15 +531,17 @@ const update = async (id, data) => {
 
   // Si se mueve la fecha de salida y/o llegada, cualquier venta que ya tenga una
   // fechaEstimadaEntrega prometida sobre esta ruta podría dejar de caer dentro del
-  // nuevo rango (salida+1 a llegada-1). Bloquear la edición no sirve aquí: exigiría
-  // corregir esas ventas ANTES de saber a qué fechas se va a mover la ruta, un
-  // problema circular (ver discusión con la usuaria). En vez de eso, se deja mover la
-  // ruta y se vacía la fechaEstimadaEntrega solo de las ventas que quedaron fuera de
-  // rango — el campo admite null — para que quien las vea sepa que hay que ponerles
-  // una fecha nueva (el listado de Ventas marca visualmente cuáles quedaron así). Se
-  // excluyen las ventas Canceladas (no prometen nada real); el resto (incluidas las
-  // "huérfanas" de una ruta que se canceló y se está reprogramando, ver updateEstado)
-  // si siguen atadas a esta ruta, se revisan igual.
+  // nuevo mínimo permitido (llegada, o salida+1 si la ruta no tiene llegada — mismo
+  // criterio que validarFechaEntrega en encomiendaService.js). Bloquear la edición no
+  // sirve aquí: exigiría corregir esas ventas ANTES de saber a qué fechas se va a
+  // mover la ruta, un problema circular (ver discusión con la usuaria). En vez de eso,
+  // se deja mover la ruta y se vacía la fechaEstimadaEntrega solo de las ventas que
+  // quedaron por debajo del nuevo mínimo — el campo admite null — para que quien las
+  // vea sepa que hay que ponerles una fecha nueva (el listado de Ventas marca
+  // visualmente cuáles quedaron así). Se excluyen las ventas Canceladas (no prometen
+  // nada real); el resto (incluidas las "huérfanas" de una ruta que se canceló y se
+  // está reprogramando, ver updateEstado) si siguen atadas a esta ruta, se revisan
+  // igual.
   let ventasSinFechaEntrega = [];
   if (fechaHoraCambio) {
     const ventasConEntrega = await EncomiendaVenta.findAll({
@@ -559,9 +554,8 @@ const update = async (id, data) => {
       attributes: ['idEncomiendaVenta', 'fechaEstimadaEntrega'],
     });
     if (ventasConEntrega.length > 0) {
-      const minimaEntrega = sumarDias(nuevaFechaSalida, 1);
-      const maximaEntrega = sumarDias(nuevaFechaLlegadaEstimada, -1);
-      ventasSinFechaEntrega = ventasConEntrega.filter(v => v.fechaEstimadaEntrega < minimaEntrega || v.fechaEstimadaEntrega > maximaEntrega);
+      const minimaEntrega = nuevaFechaLlegadaEstimada || sumarDias(nuevaFechaSalida, 1);
+      ventasSinFechaEntrega = ventasConEntrega.filter(v => v.fechaEstimadaEntrega < minimaEntrega);
     }
   }
 
@@ -658,7 +652,7 @@ const update = async (id, data) => {
       await RutaParada.destroy({ where: { idRuta: id }, transaction });
       if (paradasNormalizadas.length > 0) {
         await RutaParada.bulkCreate(
-          paradasNormalizadas.map(p => ({ idRuta: parseInt(id), idDestino: p.idDestino, orden: p.orden, fechaLlegadaEstimada: p.fechaLlegadaEstimada, horaLlegadaEstimada: p.horaLlegadaEstimada })),
+          paradasNormalizadas.map(p => ({ idRuta: parseInt(id), idDestino: p.idDestino, orden: p.orden })),
           { transaction }
         );
       }
@@ -719,10 +713,10 @@ const updateEstado = async (id, estado) => {
     for (const par of pares) {
       const conflictoVehiculo = await RutaVehiculoConductor.findOne({
         where: { idVehiculo: par.idVehiculo, habilitado: true, idRuta: { [Op.ne]: id } },
-        include: [{ model: Ruta, as: 'ruta', required: true, where: { habilitado: true, estado: 'En Ruta' }, include: [{ model: Destino, as: 'destino', attributes: ['ciudad'] }] }],
+        include: [{ model: Ruta, as: 'ruta', required: true, where: { habilitado: true, estado: 'En Ruta' }, include: [{ model: Destino, as: 'destino', attributes: ['municipio'] }] }],
       });
       if (conflictoVehiculo) {
-        const rutaLabel = conflictoVehiculo.ruta.origen ? `${conflictoVehiculo.ruta.origen} → ${conflictoVehiculo.ruta.destino?.ciudad || 'Sin destino'}` : `Ruta #${conflictoVehiculo.idRuta}`;
+        const rutaLabel = conflictoVehiculo.ruta.origen ? `${conflictoVehiculo.ruta.origen} → ${conflictoVehiculo.ruta.destino?.municipio || 'Sin destino'}` : `Ruta #${conflictoVehiculo.idRuta}`;
         throw new AppError(
           `El vehículo ${par.vehiculo?.placa || ''} ya está en curso en otra ruta (${rutaLabel})`,
           409,
@@ -737,11 +731,11 @@ const updateEstado = async (id, estado) => {
 
       const conflictoConductor = await RutaVehiculoConductor.findOne({
         where: { idConductor: par.idConductor, habilitado: true, idRuta: { [Op.ne]: id } },
-        include: [{ model: Ruta, as: 'ruta', required: true, where: { habilitado: true, estado: 'En Ruta' }, include: [{ model: Destino, as: 'destino', attributes: ['ciudad'] }] }],
+        include: [{ model: Ruta, as: 'ruta', required: true, where: { habilitado: true, estado: 'En Ruta' }, include: [{ model: Destino, as: 'destino', attributes: ['municipio'] }] }],
       });
       if (conflictoConductor) {
         const u = par.conductor?.usuario;
-        const rutaLabel = conflictoConductor.ruta.origen ? `${conflictoConductor.ruta.origen} → ${conflictoConductor.ruta.destino?.ciudad || 'Sin destino'}` : `Ruta #${conflictoConductor.idRuta}`;
+        const rutaLabel = conflictoConductor.ruta.origen ? `${conflictoConductor.ruta.origen} → ${conflictoConductor.ruta.destino?.municipio || 'Sin destino'}` : `Ruta #${conflictoConductor.idRuta}`;
         throw new AppError(
           `El conductor ${u ? `${u.nombre} ${u.apellido}` : ''} ya está en curso en otra ruta (${rutaLabel})`,
           409,
@@ -782,13 +776,13 @@ const updateEstado = async (id, estado) => {
     });
     if (ventasSinFecha.length > 0) {
       throw new AppError(
-        `Hay ${ventasSinFecha.length === 1 ? '1 venta' : ventasSinFecha.length + ' ventas'} sin fecha estimada de entrega en sede. Asígnales una fecha antes de poner la ruta En Ruta.`,
+        `Hay ${ventasSinFecha.length === 1 ? '1 venta' : ventasSinFecha.length + ' ventas'} sin fecha estimada de entrega. Asígnales una fecha antes de poner la ruta En Ruta.`,
         409,
         ventasSinFecha.map(v => ({
           tipo: 'venta',
           id: v.idEncomiendaVenta,
           guia: v.paquetes?.[0]?.numeroGuia || `#${v.idEncomiendaVenta}`,
-          descripcion: `Guía ${v.paquetes?.[0]?.numeroGuia || '#' + v.idEncomiendaVenta} no tiene fecha estimada de entrega en sede asignada`,
+          descripcion: `Guía ${v.paquetes?.[0]?.numeroGuia || '#' + v.idEncomiendaVenta} no tiene fecha estimada de entrega asignada`,
         })),
         'MISSING_DELIVERY_DATE'
       );
@@ -987,7 +981,7 @@ const getDisponibilidad = async ({ idVehiculos = [], idConductores = [], idRutaE
         required: true,
         where: { habilitado: true, estado: { [Op.in]: ['Programada', 'En Ruta'] } },
         attributes: ['idRuta', 'origen', 'estado', 'fechaSalida', 'fechaLlegadaEstimada'],
-        include: [{ model: Destino, as: 'destino', attributes: ['ciudad', 'departamento'] }],
+        include: [{ model: Destino, as: 'destino', attributes: ['municipio', 'departamento'] }],
       },
       { model: Vehiculo, as: 'vehiculo', attributes: ['idVehiculo', 'placa'] },
       {
@@ -1002,7 +996,7 @@ const getDisponibilidad = async ({ idVehiculos = [], idConductores = [], idRutaE
   return pares.map((p) => ({
     idRuta: p.ruta.idRuta,
     origen: p.ruta.origen,
-    destino: p.ruta.destino ? { ciudad: p.ruta.destino.ciudad, departamento: p.ruta.destino.departamento } : null,
+    destino: p.ruta.destino ? { municipio: p.ruta.destino.municipio, departamento: p.ruta.destino.departamento } : null,
     estado: p.ruta.estado,
     fechaSalida: p.ruta.fechaSalida,
     fechaLlegadaEstimada: p.ruta.fechaLlegadaEstimada,

@@ -5,7 +5,7 @@ const { Op } = require('sequelize');
 
 const buildOrder = (sortBy) => {
   if (!sortBy) return [];
-  const allowed = ['ciudad', 'departamento', 'idDestino', 'habilitado'];
+  const allowed = ['municipio', 'departamento', 'idDestino', 'habilitado'];
   const parts = sortBy.split('.');
   const field = allowed.includes(parts[0]) ? parts[0] : 'idDestino';
   const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
@@ -22,7 +22,7 @@ const getAll = async ({ habilitado, departamento, q, page = 1, limit = 10, sortB
   if (q) {
     const query = `%${q.trim()}%`;
     where[Op.or] = [
-      { ciudad: { [Op.iLike]: query } },
+      { municipio: { [Op.iLike]: query } },
       { departamento: { [Op.iLike]: query } },
     ];
   }
@@ -52,30 +52,30 @@ const getById = async (id) => {
 };
 
 const create = async (data) => {
-  const { departamento, ciudad, direccion, tarifaBase } = data;
+  const { departamento, municipio, direccion, tarifaBase } = data;
 
   const existente = await Destino.findOne({
     where: {
       departamento: { [Op.iLike]: departamento },
-      ciudad: { [Op.iLike]: ciudad },
+      municipio: { [Op.iLike]: municipio },
     },
   });
   if (existente) {
-    throw new AppError('Ya existe un destino registrado con ese departamento y ciudad', 400);
+    throw new AppError('Ya existe un destino registrado con ese departamento y municipio', 400);
   }
 
   const destino = await Destino.create({
     departamento,
-    ciudad,
+    municipio,
     direccion: direccion || null,
-    tarifaBase: tarifaBase || 0
+    tarifaBase: tarifaBase || 0,
   });
 
   return destino;
 };
 
 const update = async (id, data) => {
-  const { departamento, ciudad, direccion, tarifaBase, habilitado } = data;
+  const { departamento, municipio, direccion, tarifaBase, habilitado } = data;
 
   const destino = await Destino.findByPk(id);
 
@@ -84,23 +84,23 @@ const update = async (id, data) => {
   }
 
   const nuevoDepartamento = departamento || destino.departamento;
-  const nuevaCiudad = ciudad || destino.ciudad;
-  if (nuevoDepartamento !== destino.departamento || nuevaCiudad !== destino.ciudad) {
+  const nuevoMunicipio = municipio || destino.municipio;
+  if (nuevoDepartamento !== destino.departamento || nuevoMunicipio !== destino.municipio) {
     const existente = await Destino.findOne({
       where: {
         departamento: { [Op.iLike]: nuevoDepartamento },
-        ciudad: { [Op.iLike]: nuevaCiudad },
+        municipio: { [Op.iLike]: nuevoMunicipio },
         idDestino: { [Op.ne]: id },
       },
     });
     if (existente) {
-      throw new AppError('Ya existe un destino registrado con ese departamento y ciudad', 400);
+      throw new AppError('Ya existe un destino registrado con ese departamento y municipio', 400);
     }
   }
 
   await destino.update({
     departamento: departamento || destino.departamento,
-    ciudad: ciudad || destino.ciudad,
+    municipio: municipio || destino.municipio,
     direccion: direccion !== undefined ? direccion : destino.direccion,
     tarifaBase: tarifaBase !== undefined ? tarifaBase : destino.tarifaBase,
     habilitado: habilitado !== undefined ? habilitado : destino.habilitado
@@ -129,7 +129,7 @@ const toggleHabilitado = async (id) => {
   return destino;
 };
 
-// El orden por defecto de getAll (sin sortBy) es idDestino DESC, no ciudad —
+// El orden por defecto de getAll (sin sortBy) es idDestino DESC, no municipio —
 // este cálculo tiene que replicar ese mismo orden.
 const getPageOf = async (id, { limit = 10 } = {}) => {
   const record = await Destino.findByPk(id, { attributes: ['idDestino'] });

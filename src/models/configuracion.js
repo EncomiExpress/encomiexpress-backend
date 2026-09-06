@@ -3,7 +3,7 @@ const sequelize = require('../config/database');
 
 // Tabla de fila única (id siempre 1) para valores de negocio globales que un
 // admin puede ajustar desde el panel sin redesplegar el backend — usadas para
-// calcular valorServicio en Ventas (tarifaBase del destino + costo por peso de
+// calcular total en Ventas (tarifaBase del destino + costo por peso de
 // cada paquete, según su tipoCarga, + cantidad de paquetes × tarifaPorPaquete).
 const Configuracion = sequelize.define('Configuracion', {
   id: {

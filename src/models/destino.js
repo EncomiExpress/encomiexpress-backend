@@ -11,7 +11,7 @@ const Destino = sequelize.define('Destino', {
     type: DataTypes.STRING(60),
     allowNull: false
   },
-  ciudad: {
+  municipio: {
     type: DataTypes.STRING(60),
     allowNull: false
   },

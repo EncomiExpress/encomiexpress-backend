@@ -25,17 +25,6 @@ const RutaParada = sequelize.define('RutaParada', {
   orden: {
     type: DataTypes.INTEGER,
     allowNull: false
-  },
-  // ETA de paso por esta parada — opcional, no se pide todavía en el formulario.
-  // Reservado para cuando Ventas recalcule fechaEstimadaEntrega contra la parada
-  // del paquete en vez de contra el destino final de la ruta completa.
-  fechaLlegadaEstimada: {
-    type: DataTypes.DATEONLY,
-    allowNull: true
-  },
-  horaLlegadaEstimada: {
-    type: DataTypes.TIME,
-    allowNull: true
   }
 }, {
   tableName: 'ruta_parada',

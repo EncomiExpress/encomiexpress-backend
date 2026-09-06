@@ -100,7 +100,7 @@ src/
 | `Vehiculo` | Flota de vehículos asignados a conductores |
 | `Cliente` | Clientes remitentes de encomiendas |
 | `Destinatario` | Destinatarios de los envíos |
-| `Destino` | Ciudades y tarifas base habilitadas |
+| `Destino` | Municipios y tarifas base habilitadas |
 | `Ruta` | Rutas programadas con vehículo y conductor asignado |
 | `EncomiendaVenta` | Registro de ventas y encomiendas con guía generada |
 | `Paquete` | Paquetes asociados a cada encomienda |

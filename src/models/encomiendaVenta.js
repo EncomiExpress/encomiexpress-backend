@@ -35,10 +35,6 @@ const EncomiendaVenta = sequelize.define('EncomiendaVenta', {
     type: DataTypes.TEXT,
     allowNull: true
   },
-  valorServicio: {
-    type: DataTypes.DECIMAL(12, 2),
-    defaultValue: 0
-  },
   total: {
     type: DataTypes.DECIMAL(12, 2),
     defaultValue: 0

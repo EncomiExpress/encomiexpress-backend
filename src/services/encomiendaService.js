@@ -1,4 +1,4 @@
-const { EncomiendaVenta, Destinatario, Paquete, Cliente, Ruta, RutaVehiculoConductor, RutaParada, Vehiculo, Conductor, Destino, Usuario, ConductorSede, sequelize } = require('../models');
+const { EncomiendaVenta, Destinatario, Paquete, Cliente, Ruta, RutaParada, RutaVehiculoConductor, Vehiculo, Conductor, Destino, Usuario, ConductorSede, sequelize } = require('../models');
 const AppError = require('../errors/appError');
 const crypto = require('crypto');
 const { normalizarEstadoPaquete, determinarEstadoEncomienda } = require('./paqueteStateUtils');
@@ -20,55 +20,23 @@ const sumarDias = (fechaStr, dias) => {
   return d.toISOString().slice(0, 10);
 };
 
-// La fecha estimada de entrega EN SEDE (cuándo llega el paquete al punto/sede de
-// su municipio — no la entrega final puerta a puerta, que pasa después: en sede se
-// hace inventario y se asigna un repartidor local) depende de DÓNDE dentro del
-// corredor está esa sede, no solo de la ruta completa (ver LOGICA.md, "Ventas —
-// fecha estimada de entrega en sede por parada"):
-//   - Si el destinatario está en el destino FINAL de la ruta (caso de siempre):
-//     debe caer DESPUÉS de que el vehículo salga y ANTES de que vuelva — no
-//     tiene sentido prometer una entrega el mismo día de la salida (todavía no
-//     ha llegado a ningún lado) ni después de que el vehículo ya regresó.
-//     ruta.fechaLlegadaEstimada puede ser null en rutas viejas — ahí solo se
-//     exige el mínimo.
-//   - Si el destinatario está en una PARADA intermedia (Fase 1): la fecha debe
-//     ser exactamente el día en que el convoy pasa por esa parada
-//     (RutaParada.fechaLlegadaEstimada) — no hay ventana, es un solo día. Si esa
-//     parada todavía no tiene esa fecha cargada, no se puede prometer ninguna
-//     fecha todavía (se rechaza en vez de aceptar una fecha que podría no
-//     corresponder).
-const validarFechaEntrega = (fechaEstimadaEntrega, ruta, idDestinoDestinatario) => {
-  if (!fechaEstimadaEntrega) return;
-
-  const esDestinoFinal = !idDestinoDestinatario || idDestinoDestinatario === ruta.idDestino;
-
-  if (esDestinoFinal) {
-    if (!ruta.fechaSalida) return;
-    const minima = sumarDias(ruta.fechaSalida, 1);
-    if (fechaEstimadaEntrega < minima) {
-      throw new AppError(`La fecha estimada de entrega en sede debe ser al menos un día después de la salida de la ruta (mínimo el ${minima})`, 400);
-    }
-    if (ruta.fechaLlegadaEstimada) {
-      const maxima = sumarDias(ruta.fechaLlegadaEstimada, -1);
-      if (fechaEstimadaEntrega > maxima) {
-        throw new AppError(`La fecha estimada de entrega en sede debe ser al menos un día antes de la llegada de la ruta (máximo el ${maxima})`, 400);
-      }
+// La fecha estimada de entrega de un paquete no puede caer antes de que el vehículo
+// llegue a su destino — no tiene sentido prometer una entrega antes de que la ruta
+// esté físicamente allá. No hay tope superior: una vez el vehículo llegó, la entrega
+// (directa o vía repartidor local desde "En sede de destino") puede tardar cualquier
+// cantidad de días adicionales. Si ruta.fechaLlegadaEstimada es null (ruta creada antes
+// de esta validación), se cae al mínimo anterior de un día después de la salida.
+const validarFechaEntrega = (fechaEstimadaEntrega, ruta) => {
+  if (!fechaEstimadaEntrega || !ruta.fechaSalida) return;
+  if (ruta.fechaLlegadaEstimada) {
+    if (fechaEstimadaEntrega < ruta.fechaLlegadaEstimada) {
+      throw new AppError(`La fecha estimada de entrega debe ser igual o posterior a la llegada de la ruta (mínimo el ${ruta.fechaLlegadaEstimada})`, 400);
     }
     return;
   }
-
-  const parada = (ruta.paradas || []).find(p => p.idDestino === idDestinoDestinatario);
-  if (!parada) {
-    // El municipio del destinatario no es ni el destino final ni una parada
-    // conocida de esta ruta — dato inconsistente (el frontend ya avisa de esto
-    // en PasoEnvio.jsx), no hay ninguna fecha que se le pueda validar aquí.
-    return;
-  }
-  if (!parada.fechaLlegadaEstimada) {
-    throw new AppError('Esta ruta todavía no tiene una fecha estimada de paso por el municipio del destinatario — no se puede prometer una fecha de entrega en sede hasta que se cargue.', 400);
-  }
-  if (fechaEstimadaEntrega !== parada.fechaLlegadaEstimada) {
-    throw new AppError(`Para este municipio (parada intermedia), la fecha estimada de entrega en sede debe ser exactamente el ${parada.fechaLlegadaEstimada} — el día en que la ruta pasa por ahí.`, 400);
+  const minima = sumarDias(ruta.fechaSalida, 1);
+  if (fechaEstimadaEntrega < minima) {
+    throw new AppError(`La fecha estimada de entrega debe ser al menos un día después de la salida de la ruta (mínimo el ${minima})`, 400);
   }
 };
 
@@ -311,6 +279,17 @@ const validarCapacidadPares = async (idRuta, paquetes, transaction, excluirIdEnc
   }
 };
 
+// El municipio de destino de la venta tiene que ser el destino final de la ruta o una de
+// sus paradas intermedias — misma regla que bloquea el frontend (rutaLlegaAlDestino en
+// ventaValidation.js / PasoEnvio.jsx).
+const validarRutaLlegaAlDestino = async (ruta, idDestinoVenta, transaction) => {
+  if (!idDestinoVenta || idDestinoVenta === ruta.idDestino) return;
+  const parada = await RutaParada.findOne({ where: { idRuta: ruta.idRuta, idDestino: idDestinoVenta }, transaction });
+  if (!parada) {
+    throw new AppError('La ruta elegida no llega al municipio de destino de la venta ni pasa por él', 400);
+  }
+};
+
 const create = async (data) => {
   const transaction = await sequelize.transaction();
 
@@ -320,7 +299,7 @@ const create = async (data) => {
       idRuta,
       fechaEstimadaEntrega,
       observaciones,
-      valorServicio,
+      total,
       metodoPago,
       estadoPago,
       destinatario,
@@ -335,10 +314,11 @@ const create = async (data) => {
     if (!idRuta) {
       throw new AppError('La ruta es obligatoria', 400);
     }
-    const ruta = await Ruta.findByPk(idRuta, { include: [{ model: RutaParada, as: 'paradas' }] });
+    const ruta = await Ruta.findByPk(idRuta);
     if (!ruta) {
       throw new AppError('Ruta no encontrada', 400);
     }
+    validarFechaEntrega(fechaEstimadaEntrega, ruta);
 
     if (!destinatario || !destinatario.idDestino) {
       throw new AppError('El municipio de destino del destinatario es obligatorio', 400);
@@ -347,7 +327,7 @@ const create = async (data) => {
     if (!destinoDestinatario) {
       throw new AppError('El destino del destinatario no existe', 400);
     }
-    validarFechaEntrega(fechaEstimadaEntrega, ruta, destinatario.idDestino);
+    await validarRutaLlegaAlDestino(ruta, destinatario.idDestino, transaction);
 
     if (paquetes && paquetes.length > 0) {
       for (const pkg of paquetes) {
@@ -372,8 +352,6 @@ const create = async (data) => {
       throw new AppError(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
     }
 
-    const total = valorServicio || 0;
-
     const metodoPagoResuelto = metodoPago
       ? (METODOS_PAGO_VALIDOS.find((v) => v.toLowerCase() === metodoPago.toLowerCase()) || null)
       : null;
@@ -390,8 +368,7 @@ const create = async (data) => {
         idRuta,
         fechaEstimadaEntrega: fechaEstimadaEntrega || null,
         observaciones: observaciones || null,
-        valorServicio: valorServicio || 0,
-        total,
+        total: total || 0,
         metodoPago: metodoPagoResuelto,
         estadoPago: estadoPagoResuelto,
         estado: 'Programada',
@@ -460,7 +437,7 @@ const update = async (id, data) => {
       idRuta,
       fechaEstimadaEntrega,
       observaciones,
-      valorServicio,
+      total,
       metodoPago,
       estadoPago,
       habilitado,
@@ -497,11 +474,10 @@ const update = async (id, data) => {
       return typeof value === 'number' ? value : parseFloat(String(value).replace(',', '.')) || 0;
     };
 
-    const nuevoValorServicio =
-      valorServicio !== undefined
-        ? parseDecimal(valorServicio)
-        : parseDecimal(encomienda.valorServicio);
-    const nuevoTotal = nuevoValorServicio;
+    const nuevoTotal =
+      total !== undefined
+        ? parseDecimal(total)
+        : parseDecimal(encomienda.total);
 
     // La ruta es obligatoria siempre — una venta nunca puede quedar sin ruta.
     // Si se manda idRuta en la petición tiene que ser un id válido; si no se
@@ -515,16 +491,20 @@ const update = async (id, data) => {
       }
     }
 
-    const rutaNueva = await Ruta.findByPk(nuevoIdRuta, { include: [{ model: RutaParada, as: 'paradas' }], transaction });
+    const rutaNueva = await Ruta.findByPk(nuevoIdRuta, { transaction });
     if (!rutaNueva) {
       throw new AppError('Ruta no encontrada', 400);
     }
     const nuevaFechaEstimadaEntrega = fechaEstimadaEntrega !== undefined ? fechaEstimadaEntrega : encomienda.fechaEstimadaEntrega;
-    // El destinatario puede no venir en este payload (edición parcial) — en ese
-    // caso el municipio efectivo sigue siendo el que ya tenía la venta.
+    validarFechaEntrega(nuevaFechaEstimadaEntrega, rutaNueva);
     const destinatarioExistente = await Destinatario.findOne({ where: { idEncomiendaVenta: id }, transaction });
-    const idDestinoEfectivo = destinatario?.idDestino !== undefined ? destinatario.idDestino : destinatarioExistente?.idDestino;
-    validarFechaEntrega(nuevaFechaEstimadaEntrega, rutaNueva, idDestinoEfectivo);
+
+    // El destino efectivo (el que llega en el body, o el ya guardado) tiene que caer en
+    // la ruta nueva — su destino final o una de sus paradas.
+    const idDestinoEfectivo = (destinatario && destinatario.idDestino !== undefined)
+      ? destinatario.idDestino
+      : (destinatarioExistente ? destinatarioExistente.idDestino : null);
+    await validarRutaLlegaAlDestino(rutaNueva, idDestinoEfectivo, transaction);
 
     if (paquetes && paquetes.length > 0) {
       for (const pkg of paquetes) {
@@ -545,7 +525,6 @@ const update = async (id, data) => {
         idRuta: nuevoIdRuta,
         fechaEstimadaEntrega: nuevaFechaEstimadaEntrega,
         observaciones: observaciones !== undefined ? observaciones : encomienda.observaciones,
-        valorServicio: nuevoValorServicio,
         total: nuevoTotal,
         metodoPago: metodoPago !== undefined ? (metodoPago ? METODOS_PAGO_VALIDOS.find(v => v.toLowerCase() === metodoPago.toLowerCase()) || encomienda.metodoPago : null) : encomienda.metodoPago,
         estadoPago: estadoPago !== undefined ? (ESTADOS_PAGO_VALIDOS.find(v => v.toLowerCase() === estadoPago.toLowerCase()) || encomienda.estadoPago) : encomienda.estadoPago,
