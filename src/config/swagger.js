@@ -58,7 +58,7 @@ const options = {
           type: 'object',
           required: ['tipoIdentificacion','numeroIdentificacion','nombre','apellido','email','password','idRol'],
           properties: {
-            tipoIdentificacion:  { type: 'string', enum: ['CC','CE','TI','PP'], example: 'CC' },
+            tipoIdentificacion:  { type: 'string', enum: ['CC','CE','PPT'], example: 'CC' },
             numeroIdentificacion:{ type: 'string', example: '1001234567' },
             nombre:              { type: 'string', example: 'Juan' },
             apellido:            { type: 'string', example: 'Pérez' },
@@ -87,7 +87,7 @@ const options = {
           type: 'object',
           required: ['tipoIdentificacion','numeroIdentificacion','nombre','apellido','email','password'],
           properties: {
-            tipoIdentificacion:   { type: 'string', enum: ['CC','CE','TI','PP'] },
+            tipoIdentificacion:   { type: 'string', enum: ['CC','CE','PPT'] },
             numeroIdentificacion: { type: 'string', example: '1002345678' },
             nombre:               { type: 'string', example: 'Pedro' },
             apellido:             { type: 'string', example: 'López' },
@@ -103,7 +103,7 @@ const options = {
           type: 'object',
           required: ['tipoIdentificacion','numeroIdentificacion','nombre','apellido','email'],
           properties: {
-            tipoIdentificacion:   { type: 'string', enum: ['CC','CE','TI','PP'] },
+            tipoIdentificacion:   { type: 'string', enum: ['CC','NIT','CE','PAS','PPT'] },
             numeroIdentificacion: { type: 'string' },
             nombre:               { type: 'string' },
             apellido:             { type: 'string' },
@@ -131,11 +131,11 @@ const options = {
         // ── Destino ──────────────────────────────────────────────────────────
         DestinoCreate: {
           type: 'object',
-          required: ['departamento','ciudad'],
+          required: ['departamento','municipio'],
           properties: {
-            departamento: { type: 'string', example: 'Antioquia' },
-            ciudad:       { type: 'string', example: 'Caucasia' },
-            tarifaBase:   { type: 'number', example: 0 },
+            departamento:  { type: 'string', example: 'Antioquia' },
+            municipio:     { type: 'string', example: 'Caucasia' },
+            tarifaBase:    { type: 'number', example: 0 },
           },
         },
         // ── Ruta ─────────────────────────────────────────────────────────────
@@ -169,7 +169,7 @@ const options = {
           properties: {
             idCliente:          { type: 'integer' },
             idRuta:             { type: 'integer' },
-            valorServicio:      { type: 'number', example: 25000 },
+            total:              { type: 'number', example: 25000 },
             metodoPago:         { type: 'string', enum: ['efectivo','transferencia','contraentrega'] },
             observaciones:      { type: 'string' },
           },
@@ -179,7 +179,7 @@ const options = {
           type: 'object',
           required: ['tipoIdentificacion','numeroIdentificacion','nombre','apellido'],
           properties: {
-            tipoIdentificacion:   { type: 'string', enum: ['CC','CE','TI','PP','NIT'] },
+            tipoIdentificacion:   { type: 'string', enum: ['CC','NIT','CE','PAS'] },
             numeroIdentificacion: { type: 'string' },
             nombre:               { type: 'string' },
             apellido:             { type: 'string' },
