@@ -2,7 +2,7 @@ const { body } = require('express-validator');
 const r = require('./commonRules');
 
 // Debe coincidir con SOLO_LETRAS_REGEX en RegistrarRol.jsx/ActualizarRol.jsx
-const SOLO_LETRAS_REGEX = /^[a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+$/;
+const SOLO_LETRAS_REGEX = /^[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ\s]+$/;
 // Debe coincidir con esSoloRelleno en shared/utils/formatters.js — SOLO_LETRAS_REGEX ya
 // prohíbe dígitos/guiones/guiones bajos, pero \s sigue permitido (para "Asesor comercial"),
 // así que un valor de puros espacios pasaba esa validación igual. Este chequeo aparte
@@ -18,7 +18,7 @@ const createValidation = [
   body('descripcion').optional({ checkFalsy: true }).isLength({ max: 200 }).withMessage('La descripción no puede exceder 200 caracteres')
     .matches(SOLO_LETRAS_REGEX).withMessage('La descripción solo puede contener letras')
     .custom(noSoloEspacios).withMessage('La descripción no puede contener solo espacios'),
-  body('permisos').optional().isArray().withMessage('Los permisos deben ser un array de IDs'),
+  body('permisos').isArray({ min: 1 }).withMessage('Debes seleccionar al menos un permiso'),
   r.habilitado.optional(),
 ];
 
@@ -30,7 +30,7 @@ const updateValidation = [
   body('descripcion').optional({ checkFalsy: true }).isLength({ max: 200 }).withMessage('La descripción no puede exceder 200 caracteres')
     .matches(SOLO_LETRAS_REGEX).withMessage('La descripción solo puede contener letras')
     .custom(noSoloEspacios).withMessage('La descripción no puede contener solo espacios'),
-  body('permisos').optional().isArray().withMessage('Los permisos deben ser un array de IDs'),
+  body('permisos').optional().isArray({ min: 1 }).withMessage('Debes seleccionar al menos un permiso'),
   r.habilitado.optional(),
 ];
 

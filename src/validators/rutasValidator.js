@@ -1,6 +1,11 @@
 const { body } = require('express-validator');
 const r = require('./commonRules');
 
+// Mismo alfabeto que filtran en vivo RegistrarRutaProgramacion.jsx/ActualizarRutaProgramacion.jsx
+// y que valida rutaValidation.js en el frontend (letras + espacios + guion/guion bajo).
+const ORIGEN_REGEX = /^[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ\s\-_]+$/;
+const ORIGEN_MAX_LEN = 100;
+
 const noSoloRelleno = (mensaje) => (value) => {
   if (value && r.soloRelleno(value)) throw new Error(mensaje);
   return true;
@@ -12,9 +17,12 @@ const createValidation = [
   body('pares.*.idConductor').notEmpty().isInt().withMessage('Conductor es requerido en cada par'),
   body('idDestino').notEmpty().withMessage('Destino es requerido'),
   body('origen').notEmpty().withMessage('El origen de la ruta es requerido')
-    .custom(noSoloRelleno('El origen de la ruta no puede contener solo espacios o guiones')),
+    .custom(noSoloRelleno('El origen de la ruta no puede contener solo espacios o guiones'))
+    .matches(ORIGEN_REGEX).withMessage('El origen contiene caracteres no permitidos')
+    .isLength({ max: ORIGEN_MAX_LEN }).withMessage(`El origen no puede exceder ${ORIGEN_MAX_LEN} caracteres`),
   body('observaciones').optional({ nullable: true }).isString()
-    .custom(noSoloRelleno('Las observaciones no pueden contener solo espacios o guiones')),
+    .isLength({ max: 500 }).withMessage('Las observaciones no pueden exceder 500 caracteres')
+    .custom(r.validarObservacionesRutaFormato),
   body('fechaSalida').optional().isDate().withMessage('Fecha de salida inválida'),
   body('fechaLlegadaEstimada').optional().isDate().withMessage('Fecha de llegada inválida'),
   body('horaSalida').optional().matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/).withMessage('Hora de salida inválida'),
@@ -24,13 +32,11 @@ const createValidation = [
   // fuera obligatorio.
   body('horaLlegadaEstimada').optional({ nullable: true, checkFalsy: true }).matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/).withMessage('Hora de llegada inválida'),
   body('estado').optional().isIn(['Programada', 'En Ruta', 'Completada', 'Cancelada']).withMessage('Estado de ruta inválido'),
-  // Paradas intermedias del corredor — opcionales, ver rutaService.validarParadas
-  // (el "orden" que se guarda al final es la posición en el array, no lo que
-  // mande el cliente, así que no se valida acá).
+  // Paradas intermedias — opcionales, ver rutaService.validarParadas (el "orden"
+  // que se guarda al final es la posición en el array, no lo que mande el
+  // cliente, así que no se valida acá).
   body('paradas').optional().isArray({ max: 20 }).withMessage('No puedes agregar más de 20 paradas a una misma ruta'),
   body('paradas.*.idDestino').notEmpty().isInt().withMessage('Cada parada necesita un destino'),
-  body('paradas.*.fechaLlegadaEstimada').optional({ nullable: true, checkFalsy: true }).isDate().withMessage('Fecha estimada de paso inválida en una parada'),
-  body('paradas.*.horaLlegadaEstimada').optional({ nullable: true, checkFalsy: true }).matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/).withMessage('Hora estimada de paso inválida en una parada'),
   body('idRutaIda').optional({ nullable: true }).isInt().withMessage('ID de ruta de ida debe ser un número entero'),
 ];
 
@@ -40,9 +46,12 @@ const updateValidation = [
   body('pares.*.idConductor').optional().isInt().withMessage('ID de conductor debe ser un número entero'),
   body('idDestino').optional().isInt().withMessage('ID de destino debe ser un número entero'),
   body('origen').optional().notEmpty().withMessage('El origen de la ruta no puede estar vacío')
-    .custom(noSoloRelleno('El origen de la ruta no puede contener solo espacios o guiones')),
+    .custom(noSoloRelleno('El origen de la ruta no puede contener solo espacios o guiones'))
+    .matches(ORIGEN_REGEX).withMessage('El origen contiene caracteres no permitidos')
+    .isLength({ max: ORIGEN_MAX_LEN }).withMessage(`El origen no puede exceder ${ORIGEN_MAX_LEN} caracteres`),
   body('observaciones').optional({ nullable: true }).isString()
-    .custom(noSoloRelleno('Las observaciones no pueden contener solo espacios o guiones')),
+    .isLength({ max: 500 }).withMessage('Las observaciones no pueden exceder 500 caracteres')
+    .custom(r.validarObservacionesRutaFormato),
   body('fechaSalida').optional().isDate().withMessage('Fecha de salida inválida'),
   body('fechaLlegadaEstimada').optional().isDate().withMessage('Fecha de llegada inválida'),
   body('horaSalida').optional().matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/).withMessage('Hora de salida inválida'),
@@ -54,8 +63,6 @@ const updateValidation = [
   body('estado').optional().isIn(['Programada', 'En Ruta', 'Completada', 'Cancelada']).withMessage('Estado de ruta inválido'),
   body('paradas').optional().isArray({ max: 20 }).withMessage('No puedes agregar más de 20 paradas a una misma ruta'),
   body('paradas.*.idDestino').notEmpty().isInt().withMessage('Cada parada necesita un destino'),
-  body('paradas.*.fechaLlegadaEstimada').optional({ nullable: true, checkFalsy: true }).isDate().withMessage('Fecha estimada de paso inválida en una parada'),
-  body('paradas.*.horaLlegadaEstimada').optional({ nullable: true, checkFalsy: true }).matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/).withMessage('Hora estimada de paso inválida en una parada'),
 ];
 
 module.exports = {

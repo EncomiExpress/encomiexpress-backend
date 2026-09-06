@@ -3,35 +3,37 @@ const r = require('./commonRules');
 
 const ESTADOS_VALIDOS = ['Disponible', 'En Ruta'];
 
-const numeroLicenciaRule = body('numeroLicencia').optional().notEmpty().withMessage('Número de licencia es requerido')
-  .custom((value) => {
-    if (value && r.soloRelleno(value)) throw new Error('El número de licencia no puede contener solo espacios o guiones');
-    return true;
-  });
+// numeroLicencia no se valida: en Colombia siempre es el número de documento del titular
+// (Ley 769 de 2002 — ver CLAUDE.md). El backend lo recibe como espejo de
+// numeroIdentificacion, que ya se valida.
+
+const CATEGORIAS_VALIDAS = ['A1', 'A2', 'B1', 'B2', 'B3', 'C1', 'C2', 'C3'];
 
 const createValidation = [
-  r.tipoIdentificacion.required(),
+  r.tipoIdentificacion.required(r.TIPOS_DOC_CONDUCTOR),
   r.numeroIdentificacion.required(),
   r.nombre.required(),
   r.apellido.required(),
-  r.telefono.optional(),
+  r.telefono.required(),
   r.email.required(),
   r.password.required(),
-  numeroLicenciaRule,
   body('categoriasLicencia').isArray({ min: 1 }).withMessage('Debe registrar al menos una categoría de licencia'),
-  body('categoriasLicencia.*.categoria').notEmpty().withMessage('La categoría es obligatoria'),
+  body('categoriasLicencia.*.categoria').notEmpty().withMessage('La categoría es obligatoria')
+    .bail().isIn(CATEGORIAS_VALIDAS).withMessage(`Categoría de licencia inválida. Opciones: ${CATEGORIAS_VALIDAS.join(', ')}`),
   body('categoriasLicencia.*.vencimiento').isDate().withMessage('Fecha de vencimiento inválida'),
 ];
 
 const updateValidation = [
+  r.tipoIdentificacion.optional(r.TIPOS_DOC_CONDUCTOR),
+  r.numeroIdentificacion.optional(),
   r.nombre.optional(),
   r.apellido.optional(),
   r.telefono.optional(),
   r.email.optional(),
   r.password.optional(),
-  numeroLicenciaRule,
   body('categoriasLicencia').optional().isArray({ min: 1 }).withMessage('Debe registrar al menos una categoría de licencia'),
-  body('categoriasLicencia.*.categoria').notEmpty().withMessage('La categoría es obligatoria'),
+  body('categoriasLicencia.*.categoria').notEmpty().withMessage('La categoría es obligatoria')
+    .bail().isIn(CATEGORIAS_VALIDAS).withMessage(`Categoría de licencia inválida. Opciones: ${CATEGORIAS_VALIDAS.join(', ')}`),
   body('categoriasLicencia.*.vencimiento').isDate().withMessage('Fecha de vencimiento inválida'),
 ];
 
