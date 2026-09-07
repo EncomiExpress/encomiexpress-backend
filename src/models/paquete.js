@@ -73,6 +73,25 @@ const Paquete = sequelize.define('Paquete', {
   fotoEntrega: {
     type: DataTypes.TEXT,
     allowNull: true
+  },
+  // Usuario con rol 'distribuidor' (persona de la sede) que hizo la entrega final
+  // al destinatario desde "En sede de destino" — distinto de idConductorEntrega
+  // (repartidor local que sí es un conductor). Ver LOGICA.md, "Entrega en dos fases".
+  idUsuarioEntrega: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  // "Insistidera": nº de intentos fallidos del distribuidor de entregar al
+  // destinatario (el paquete sigue "En sede de destino"). No cuenta la entrega
+  // exitosa ni la marca final de no-entregado ("Devuelto").
+  intentosEntrega: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0
+  },
+  fechaUltimoIntento: {
+    type: DataTypes.DATE,
+    allowNull: true
   }
 }, {
   tableName: 'paquete',

@@ -1,5 +1,5 @@
 const bcrypt = require('bcryptjs');
-const { Usuario, Rol, Permiso, Conductor } = require('../models');
+const { Usuario, Rol, Permiso, Conductor, UsuarioSede, Destino } = require('../models');
 const { generateToken, generateRefreshToken, verifyRefreshToken, generateResetPasswordToken, verifyResetPasswordToken } = require('../middlewares/auth');
 const AppError = require('../errors/appError');
 
@@ -88,6 +88,24 @@ const login = async (email, password) => {
     }
   }
 
+  // Para el rol 'distribuidor' (encargado de sede, solo app móvil) se adjuntan las
+  // sedes (municipios) que cubre — la app las usa para pedir "sus" paquetes en
+  // sede. Análogo a `conductor` de arriba. null para cualquier otro rol.
+  let sedesData = null;
+  if (usuario.rol?.nombre === 'distribuidor') {
+    const sedes = await UsuarioSede.findAll({
+      where: { idUsuario: usuario.idUsuario, habilitado: true },
+      include: [{ model: Destino, as: 'destino', attributes: ['idDestino', 'municipio', 'departamento'] }],
+    });
+    sedesData = sedes
+      .filter((s) => s.destino)
+      .map((s) => ({
+        idDestino: s.idDestino,
+        municipio: s.destino.municipio,
+        departamento: s.destino.departamento,
+      }));
+  }
+
   return {
     token,
     refreshToken,
@@ -101,7 +119,8 @@ const login = async (email, password) => {
       rol: usuario.rol?.nombre ?? null,
       permisos
     },
-    conductor: conductorData
+    conductor: conductorData,
+    sedes: sedesData
   };
 };
 

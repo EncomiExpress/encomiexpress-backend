@@ -314,6 +314,14 @@ const update = async (id, data) => {
     fechaEntregaExcedente: cleanedFechaEntregaExcedente !== undefined ? cleanedFechaEntregaExcedente : anticipo.fechaEntregaExcedente
   });
 
+  // Al legalizar el anticipo (queda "Excedente pendiente"/"Completado") puede que
+  // la ruta ya no tenga nada pendiente y se pueda auto-completar — el otro
+  // disparador es dejarPaquetesEnSede. Best-effort; require lazy para no atar el
+  // orden de carga.
+  if (autoEstado) {
+    await require('./rutaService').intentarAutoCompletar(anticipo.idRuta);
+  }
+
   return getAnticipoCompleto(id);
 };
 

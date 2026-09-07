@@ -1,5 +1,5 @@
 const bcrypt = require('bcryptjs');
-const { sequelize, Usuario, Rol, Conductor, Cliente } = require('../models');
+const { sequelize, Usuario, Rol, Conductor, Cliente, UsuarioSede, Destino } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { tieneRutasActivas, tieneAnticiposPendientes, tieneEncomiendasActivasPorCliente } = require('../middlewares/validateDependencies');
@@ -43,7 +43,15 @@ const getAll = async ({ habilitado, idRol, q, page = 1, limit = 10, sortBy } = {
 
   const offset = (page - 1) * limit;
 
-  const include = [{ model: Rol, as: 'rol' }];
+  const include = [
+    { model: Rol, as: 'rol' },
+    // separate: true -> consulta aparte, no infla el LIMIT/distinct del listado.
+    // Solo trae filas para distribuidores; vacío para cualquier otro rol.
+    {
+      model: UsuarioSede, as: 'sedes', separate: true, where: { habilitado: true }, required: false,
+      include: [{ model: Destino, as: 'destino', attributes: ['idDestino', 'municipio', 'departamento'] }],
+    },
+  ];
   const order = buildOrder(sortBy);
 
   const { count, rows: data } = await Usuario.findAndCountAll({
@@ -67,7 +75,15 @@ const getAll = async ({ habilitado, idRol, q, page = 1, limit = 10, sortBy } = {
 
 const getById = async (id) => {
   const usuario = await Usuario.findByPk(id, {
-    include: [{ model: Rol, as: 'rol' }],
+    include: [
+      { model: Rol, as: 'rol' },
+      // Sedes que cubre, si es un distribuidor (vacío para cualquier otro rol) —
+      // para precargar el multiselect de sedes en "Actualizar Usuario".
+      {
+        model: UsuarioSede, as: 'sedes', required: false, where: { habilitado: true },
+        include: [{ model: Destino, as: 'destino', attributes: ['idDestino', 'municipio', 'departamento'] }],
+      },
+    ],
     attributes: { exclude: ['password'] }
   });
 
@@ -78,8 +94,26 @@ const getById = async (id) => {
   return usuario;
 };
 
+// Normaliza el array de ids de sede que llega del cliente y valida que sean
+// destinos reales y habilitados. Solo aplica cuando el rol del usuario es
+// 'distribuidor' — para cualquier otro rol el campo se ignora.
+const resolverSedes = async (rolNombre, sedes) => {
+  if (rolNombre !== 'distribuidor') return [];
+  const limpias = Array.isArray(sedes)
+    ? [...new Set(sedes.map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))]
+    : [];
+  if (limpias.length === 0) {
+    throw new AppError('Un distribuidor debe tener al menos una sede asignada', 400);
+  }
+  const existentes = await Destino.count({ where: { idDestino: { [Op.in]: limpias }, habilitado: true } });
+  if (existentes !== limpias.length) {
+    throw new AppError('Una o más de las sedes indicadas no existen o están inhabilitadas', 400);
+  }
+  return limpias;
+};
+
 const create = async (data) => {
-  const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, password, idRol } = data;
+  const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, password, idRol, sedes } = data;
 
   const existingEmail = await Usuario.findOne({ where: { email } });
   if (existingEmail) {
@@ -91,17 +125,33 @@ const create = async (data) => {
     throw new AppError('El número de identificación ya está registrado', 400);
   }
 
+  const rol = await Rol.findByPk(idRol);
+  if (!rol) {
+    throw new AppError('El rol indicado no existe', 400);
+  }
+  const sedesLimpias = await resolverSedes(rol.nombre, sedes);
+
   const hashedPassword = await bcrypt.hash(password, 10);
 
-  const usuario = await Usuario.create({
-    tipoIdentificacion,
-    numeroIdentificacion,
-    nombre,
-    apellido,
-    telefono,
-    email,
-    password: hashedPassword,
-    idRol
+  const usuario = await sequelize.transaction(async (t) => {
+    const creado = await Usuario.create({
+      tipoIdentificacion,
+      numeroIdentificacion,
+      nombre,
+      apellido,
+      telefono,
+      email,
+      password: hashedPassword,
+      idRol
+    }, { transaction: t });
+
+    if (sedesLimpias.length > 0) {
+      await UsuarioSede.bulkCreate(
+        sedesLimpias.map((idDestino) => ({ idUsuario: creado.idUsuario, idDestino })),
+        { transaction: t }
+      );
+    }
+    return creado;
   });
 
   return {
@@ -112,7 +162,7 @@ const create = async (data) => {
 };
 
 const update = async (id, data, currentUserId) => {
-  const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, idRol, habilitado, password } = data;
+  const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, idRol, habilitado, password, sedes } = data;
 
   // El admin id=1 solo puede editar su propia información — ningún otro admin
   // puede modificarle nombre, correo, rol, contraseña, etc. Ver misma nota en
@@ -121,7 +171,7 @@ const update = async (id, data, currentUserId) => {
     throw new AppError('Esta cuenta administradora solo puede editarse a sí misma', 400);
   }
 
-  const usuario = await Usuario.findByPk(id);
+  const usuario = await Usuario.findByPk(id, { include: [{ model: Rol, as: 'rol' }] });
 
   if (!usuario) {
     throw new AppError('Usuario no encontrado', 404);
@@ -156,7 +206,38 @@ const update = async (id, data, currentUserId) => {
     datosActualizados.password = await bcrypt.hash(password, 10);
   }
 
-  await usuario.update(datosActualizados);
+  // Resolver el rol final (el que llega, o el que ya tenía) para decidir qué hacer
+  // con las sedes. Se tocan solo si: (a) llega el array `sedes` en el body, o
+  // (b) el usuario pasa a ser distribuidor y hay que exigirle al menos una.
+  const rolCambia = idRol && parseInt(idRol, 10) !== usuario.idRol;
+  const rolFinal = rolCambia ? await Rol.findByPk(idRol) : usuario.rol;
+  const esDistribuidorFinal = rolFinal?.nombre === 'distribuidor';
+
+  let sedesLimpias = null; // null = no tocar; [] = borrar todas
+  if (esDistribuidorFinal) {
+    if (sedes !== undefined) {
+      sedesLimpias = await resolverSedes('distribuidor', sedes);
+    } else if (rolCambia) {
+      throw new AppError('Un distribuidor debe tener al menos una sede asignada', 400);
+    }
+  } else if (rolCambia || sedes !== undefined) {
+    // Dejó de ser distribuidor (o nunca lo fue y mandaron sedes por error): se
+    // limpian las coberturas, ya no aplican.
+    sedesLimpias = [];
+  }
+
+  await sequelize.transaction(async (t) => {
+    await usuario.update(datosActualizados, { transaction: t });
+    if (sedesLimpias !== null) {
+      await UsuarioSede.destroy({ where: { idUsuario: usuario.idUsuario }, transaction: t });
+      if (sedesLimpias.length > 0) {
+        await UsuarioSede.bulkCreate(
+          sedesLimpias.map((idDestino) => ({ idUsuario: usuario.idUsuario, idDestino })),
+          { transaction: t }
+        );
+      }
+    }
+  });
 
   return {
     idUsuario: usuario.idUsuario,

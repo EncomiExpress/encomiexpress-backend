@@ -87,10 +87,10 @@ const sendPaqueteDevueltoEmail = async (email, { nombreCliente = '', numeroGuia 
       icon: ICONS.paquete,
       heading: 'No fue posible entregar tu paquete',
       bodyHtml: `
-        Hola${nombreCliente ? ` <b>${nombreCliente}</b>` : ''}, no fue posible completar la entrega de tu
-        paquete con guía <b>${numeroGuia}</b> y quedó marcado como devuelto.
-        ${motivo ? `<br><br>Motivo: ${motivo}` : ''}
-        <br><br>Nos pondremos en contacto contigo para coordinar una nueva entrega o la devolución del envío.
+        Hola${nombreCliente ? ` <b>${nombreCliente}</b>` : ''}, por ahora no fue posible entregar tu
+        paquete con guía <b>${numeroGuia}</b> al destinatario. Quedó retenido en la sede de destino.
+        ${motivo ? `<br><br>Novedad: ${motivo}` : ''}
+        <br><br>Seguiremos intentando la entrega y nos pondremos en contacto contigo para coordinar los pasos a seguir.
       `,
     }),
   });

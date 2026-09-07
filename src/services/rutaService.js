@@ -1,10 +1,89 @@
-const { Ruta, RutaVehiculoConductor, RutaParada, Vehiculo, Conductor, Destino, EncomiendaVenta, Usuario, AnticipoExcedente, Paquete, sequelize } = require('../models');
+const { Ruta, RutaVehiculoConductor, RutaParada, Vehiculo, Conductor, Destino, EncomiendaVenta, Destinatario, Usuario, AnticipoExcedente, Paquete, sequelize } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { verificarDependenciasRuta } = require('../middlewares/validateDependencies');
 const { tieneLicenciaVigente } = require('../utils/licenciaHelper');
 const { esDomingo, getRangoHorario, horaDentroDeRango, MIN_DIAS_SALIDA_LLEGADA, DIAS_MARGEN_ENTRE_RUTAS, MAX_DIAS_ANTICIPACION } = require('../utils/horarioLaboral');
-const { normalizarEstadoPaquete, determinarEstadoEncomienda } = require('./paqueteStateUtils');
+const { determinarEstadoEncomienda, paqueteLiberaRuta, resumenSedes } = require('./paqueteStateUtils');
+
+// "Sedes de una ruta" = TODOS los municipios estructurales del recorrido (paradas
+// + destino final). Devuelve { total, completadas } — una sede está completada
+// cuando no le queda ningún paquete "Por entregar" (una parada sin carga cuenta
+// como completada de entrada). Ver LOGICA.md, "Entrega en dos fases".
+//
+// Consultas planas a propósito: un include con `attributes: []` sobre
+// EncomiendaVenta le quita la PK a Sequelize y deja de hidratar la asociación
+// (bug que hacía que esto devolviera { total: 0 } y la ruta nunca se
+// auto-completara). Sin includes anidados no hay ese riesgo.
+const calcularSedesRuta = async (idRuta) => {
+  const ruta = await Ruta.findByPk(idRuta, { attributes: ['idRuta', 'idDestino'] });
+  if (!ruta) return { total: 0, completadas: 0 };
+
+  const paradas = await RutaParada.findAll({ where: { idRuta }, attributes: ['idDestino'] });
+  const sedesRuta = [...new Set([...paradas.map((p) => p.idDestino), ruta.idDestino])];
+  if (sedesRuta.length === 0) return { total: 0, completadas: 0 };
+
+  const pares = await RutaVehiculoConductor.findAll({
+    where: { idRuta, habilitado: true },
+    attributes: ['idRutaVehiculoConductor'],
+  });
+  const parIds = pares.map((p) => p.idRutaVehiculoConductor);
+
+  // Municipios que todavía tienen al menos un paquete "Por entregar" (de una venta
+  // activa) — esas sedes NO están completadas.
+  let sedesConPendiente = [];
+  if (parIds.length > 0) {
+    const pendientes = await Paquete.findAll({
+      where: { idRutaVehiculoConductor: { [Op.in]: parIds }, estado: 'Por entregar' },
+      attributes: ['idEncomiendaVenta'],
+    });
+    const ventaIds = [...new Set(pendientes.map((p) => p.idEncomiendaVenta))];
+    if (ventaIds.length > 0) {
+      const ventasActivas = await EncomiendaVenta.findAll({
+        where: { idEncomiendaVenta: { [Op.in]: ventaIds }, habilitado: true, estado: { [Op.ne]: 'Cancelada' } },
+        attributes: ['idEncomiendaVenta'],
+      });
+      const activaSet = new Set(ventasActivas.map((v) => v.idEncomiendaVenta));
+      const dests = await Destinatario.findAll({
+        where: { idEncomiendaVenta: { [Op.in]: ventaIds } },
+        attributes: ['idEncomiendaVenta', 'idDestino'],
+      });
+      sedesConPendiente = dests
+        .filter((d) => activaSet.has(d.idEncomiendaVenta))
+        .map((d) => d.idDestino);
+    }
+  }
+
+  return resumenSedes(sedesRuta, sedesConPendiente);
+};
+
+// Best-effort: pasa la ruta a "Completada" automáticamente cuando ya no falta
+// nada — todas las sedes con paquetes están completadas y no hay anticipo "En
+// Legalización" sin cerrar. Si updateEstado rechaza (condición de carrera u otra
+// validación), se deja la ruta "En Ruta" y NO se propaga el error: el admin
+// siempre puede completarla a mano. La llaman encomiendaService.dejarPaquetesEnSede
+// y anticipoService.update tras cada legalización.
+const intentarAutoCompletar = async (idRuta) => {
+  try {
+    const ruta = await Ruta.findByPk(idRuta, { attributes: ['idRuta', 'estado'] });
+    if (!ruta || ruta.estado !== 'En Ruta') return { completada: false, motivo: 'estado' };
+
+    const { total, completadas } = await calcularSedesRuta(idRuta);
+    if (total === 0 || completadas < total) return { completada: false, motivo: 'sedes' };
+
+    const anticipoPendiente = await AnticipoExcedente.findOne({
+      where: { idRuta, habilitado: true, estado: 'En Legalización' },
+      attributes: ['idAnticipoExcedente'],
+    });
+    if (anticipoPendiente) return { completada: false, motivo: 'anticipo' };
+
+    await updateEstado(idRuta, 'Completada');
+    return { completada: true };
+  } catch (error) {
+    console.error(`Auto-completar ruta #${idRuta} no procedió: ${error.message}`);
+    return { completada: false, motivo: 'error' };
+  }
+};
 
 // Máximo de pares vehículo+conductor por ruta — igual que MAX_PAQUETES en Ventas,
 // un tope razonable para no dejar el array crecer sin límite en el formulario.
@@ -148,8 +227,10 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
     data.forEach(r => { r.dataValues.pendienteLegalizacion = pendientesSet.has(r.idRuta); });
 
     // Mismo mecanismo que pendienteLegalizacion, pero mirando los paquetes: si algún
-    // paquete de los pares de esta ruta no llegó a un estado final, la ruta no se
-    // puede completar todavía (ver la validación PACKAGES_PENDING en updateEstado).
+    // paquete de los pares de esta ruta sigue "Por entregar", el conductor todavía
+    // no lo dejó en la sede y la ruta no se puede completar (ver la validación
+    // PACKAGES_PENDING en updateEstado). "En sede de destino" ya NO cuenta como
+    // pendiente: es trabajo del distribuidor, con la ruta ya cerrada.
     const pares = await RutaVehiculoConductor.findAll({
       where: { idRuta: { [Op.in]: enCursoIds }, habilitado: true },
       attributes: ['idRutaVehiculoConductor', 'idRuta'],
@@ -159,12 +240,23 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
       const pendientesPaquete = await Paquete.findAll({
         where: {
           idRutaVehiculoConductor: { [Op.in]: [...rutaDelPar.keys()] },
-          estado: { [Op.notIn]: ['Entregado', 'Devuelto'] },
+          estado: 'Por entregar',
         },
         attributes: ['idRutaVehiculoConductor'],
       });
       const rutasConPaquetesPendientes = new Set(pendientesPaquete.map(p => rutaDelPar.get(p.idRutaVehiculoConductor)));
       data.forEach(r => { r.dataValues.paquetesPendientes = rutasConPaquetesPendientes.has(r.idRuta); });
+    }
+
+    // Indicador "X de N sedes completadas" para las rutas En Ruta — el conductor
+    // avanza por sede (parada o destino final), no por paquete. Al llegar a N/N
+    // (+ anticipo cerrado) la ruta se auto-completa; ver intentarAutoCompletar.
+    for (const r of data) {
+      if (r.estado === 'En Ruta') {
+        const { total, completadas } = await calcularSedesRuta(r.idRuta);
+        r.dataValues.sedesTotales = total;
+        r.dataValues.sedesCompletadas = completadas;
+      }
     }
   }
 
@@ -432,12 +524,94 @@ const validarRutaIda = async (idRutaIda) => {
   }
 };
 
+// El origen de una ruta no lo elige el usuario (el campo va bloqueado en el
+// wizard): una ruta normal siempre sale de "Medellín" (la oficina principal); un
+// viaje de regreso (idRutaIda) sale del municipio de destino de la ida — el
+// conductor está físicamente allá. Ver LOGICA.md, "Rutas — origen y fuera de base".
+const resolverOrigenRuta = async (idRutaIda, transaction) => {
+  if (!idRutaIda) return 'Medellín';
+  const rutaIda = await Ruta.findByPk(idRutaIda, {
+    // Incluir la PK (idDestino) además de municipio — sin la PK, Sequelize no
+    // asocia la fila del include con la ruta y `rutaIda.destino` vuelve null.
+    include: [{ model: Destino, as: 'destino', attributes: ['idDestino', 'municipio'] }],
+    transaction,
+  });
+  return rutaIda?.destino?.municipio || 'Medellín';
+};
+
+// "Fuera de base": un conductor/vehículo que quedó en otro municipio tras
+// completar o cancelar una ruta que no volvió a Medellín (conductor.idDestinoActual
+// / vehiculo.idDestinoActual != null) no se puede asignar a una ruta NUEVA desde
+// Medellín hasta que se le programe el regreso. Para un REGRESO es al revés: solo
+// se pueden asignar los que quedaron justo en el destino de la ida.
+const validarUbicacionParaRuta = async ({ pares, idRutaIda }) => {
+  const idsVehiculo = pares.map((p) => parseInt(p.idVehiculo));
+  const idsConductor = pares.map((p) => parseInt(p.idConductor));
+
+  const vehiculos = await Vehiculo.findAll({
+    where: { idVehiculo: { [Op.in]: idsVehiculo } },
+    attributes: ['idVehiculo', 'placa', 'idDestinoActual'],
+    include: [{ model: Destino, as: 'destinoActual', attributes: ['idDestino', 'municipio'] }],
+  });
+  const conductores = await Conductor.findAll({
+    where: { idConductor: { [Op.in]: idsConductor } },
+    attributes: ['idConductor', 'idDestinoActual'],
+    include: [
+      { model: Usuario, as: 'usuario', attributes: ['idUsuario', 'nombre', 'apellido'] },
+      { model: Destino, as: 'destinoActual', attributes: ['idDestino', 'municipio'] },
+    ],
+  });
+
+  let idaIdDestino = null;
+  if (idRutaIda) {
+    const rutaIda = await Ruta.findByPk(idRutaIda, { attributes: ['idDestino'] });
+    idaIdDestino = rutaIda?.idDestino ?? null;
+  }
+
+  const vehFuera = [];
+  const condFuera = [];
+
+  for (const v of vehiculos) {
+    if (idRutaIda) {
+      if (v.idDestinoActual !== idaIdDestino) {
+        vehFuera.push({ tipo: 'Vehículo', id: v.idVehiculo, descripcion: `El vehículo ${v.placa} no está en el municipio desde el que sale el regreso${v.destinoActual ? ` (quedó en ${v.destinoActual.municipio})` : ' (está en base)'}` });
+      }
+    } else if (v.idDestinoActual) {
+      vehFuera.push({ tipo: 'Vehículo', id: v.idVehiculo, descripcion: `El vehículo ${v.placa} quedó en ${v.destinoActual?.municipio || 'otro municipio'}: necesita un viaje de regreso antes de una ruta nueva desde Medellín` });
+    }
+  }
+  for (const c of conductores) {
+    const nom = c.usuario ? `${c.usuario.nombre} ${c.usuario.apellido}` : `Conductor #${c.idConductor}`;
+    if (idRutaIda) {
+      if (c.idDestinoActual !== idaIdDestino) {
+        condFuera.push({ tipo: 'Conductor', id: c.idConductor, descripcion: `${nom} no está en el municipio desde el que sale el regreso${c.destinoActual ? ` (quedó en ${c.destinoActual.municipio})` : ' (está en base)'}` });
+      }
+    } else if (c.idDestinoActual) {
+      condFuera.push({ tipo: 'Conductor', id: c.idConductor, descripcion: `${nom} quedó en ${c.destinoActual?.municipio || 'otro municipio'}: necesita un viaje de regreso antes de una ruta nueva desde Medellín` });
+    }
+  }
+
+  if (vehFuera.length > 0) {
+    throw new AppError(
+      idRutaIda ? 'Uno o más vehículos no están en el municipio desde el que sale el regreso' : 'Uno o más vehículos quedaron fuera de base y necesitan un viaje de regreso',
+      409, vehFuera, 'VEHICULO_FUERA_DE_BASE'
+    );
+  }
+  if (condFuera.length > 0) {
+    throw new AppError(
+      idRutaIda ? 'Uno o más conductores no están en el municipio desde el que sale el regreso' : 'Uno o más conductores quedaron fuera de base y necesitan un viaje de regreso',
+      409, condFuera, 'CONDUCTOR_FUERA_DE_BASE'
+    );
+  }
+};
+
 const create = async (data) => {
   const { idDestino, origen, fechaSalida, horaSalida, horaLlegadaEstimada, fechaLlegadaEstimada, estado, observaciones, pares, paradas, idRutaIda } = data;
 
   validarHorarioRuta({ fechaSalida, horaSalida, fechaLlegadaEstimada, horaLlegadaEstimada });
   validarPares(pares);
   await validarRutaIda(idRutaIda);
+  await validarUbicacionParaRuta({ pares, idRutaIda });
 
   const destino = await Destino.findByPk(idDestino);
   if (!destino) throw new AppError('Destino no encontrado', 404);
@@ -462,7 +636,7 @@ const create = async (data) => {
   let idRutaCreada;
   try {
     const ruta = await Ruta.create({
-      origen: origen || 'Medellín',
+      origen: await resolverOrigenRuta(idRutaIda, transaction),
       idDestino,
       idRutaIda: idRutaIda || null,
       fechaSalida: fechaSalida || null,
@@ -514,10 +688,26 @@ const update = async (id, data) => {
     if (!destinoNuevo) throw new AppError('Destino no encontrado', 404);
   }
 
-  const nuevaFechaSalida = fechaSalida !== undefined ? fechaSalida : ruta.fechaSalida;
-  const nuevaHoraSalida = horaSalida !== undefined ? horaSalida : ruta.horaSalida;
-  const nuevaFechaLlegadaEstimada = fechaLlegadaEstimada !== undefined ? fechaLlegadaEstimada : ruta.fechaLlegadaEstimada;
-  const nuevaHoraLlegadaEstimada = horaLlegadaEstimada !== undefined ? horaLlegadaEstimada : ruta.horaLlegadaEstimada;
+  // Si se manda un juego de pares nuevo, revalidar "fuera de base" con el mismo
+  // criterio que create (una ruta Cancelada que se reprograma también pasa por acá).
+  if (Array.isArray(pares) && pares.length > 0) {
+    await validarUbicacionParaRuta({ pares, idRutaIda: ruta.idRutaIda });
+  }
+
+  // undefined = el campo no vino en el body -> conservar el valor actual.
+  // '' / null = vino vacío (ej. `horaLlegadaEstimada` es opcional y el form lo
+  // manda como "") -> guardar NULL. Sin esto, Postgres reventaba con
+  // "invalid input syntax for type time: ''" al editar una ruta con hora de
+  // llegada en blanco (create ya normalizaba con `|| null`, update no).
+  const conservarOLimpiar = (valor, actual) => {
+    if (valor === undefined) return actual;
+    if (valor === '' || valor === null) return null;
+    return valor;
+  };
+  const nuevaFechaSalida = conservarOLimpiar(fechaSalida, ruta.fechaSalida);
+  const nuevaHoraSalida = conservarOLimpiar(horaSalida, ruta.horaSalida);
+  const nuevaFechaLlegadaEstimada = conservarOLimpiar(fechaLlegadaEstimada, ruta.fechaLlegadaEstimada);
+  const nuevaHoraLlegadaEstimada = conservarOLimpiar(horaLlegadaEstimada, ruta.horaLlegadaEstimada);
   // El nombre se quedó de cuando solo existía fechaSalida — hoy dispara la revalidación
   // de choque (validarChoqueVehiculoConductor) ante cualquier cambio que afecte el rango
   // ocupado por la ruta, incluida la nueva fechaLlegadaEstimada.
@@ -659,7 +849,8 @@ const update = async (id, data) => {
     }
 
     await ruta.update({
-      origen:                origen                !== undefined ? origen                : ruta.origen,
+      // El origen no se edita: normal -> "Medellín"; regreso -> destino de la ida.
+      origen:                await resolverOrigenRuta(ruta.idRutaIda, transaction),
       idDestino:             idDestino             !== undefined ? idDestino             : ruta.idDestino,
       fechaSalida:           nuevaFechaSalida,
       fechaLlegadaEstimada:          nuevaFechaLlegadaEstimada,
@@ -765,8 +956,51 @@ const updateEstado = async (id, estado) => {
     const encomiendaCount = await EncomiendaVenta.count({
       where: { idRuta: parseInt(id), habilitado: true }
     });
-    if (encomiendaCount === 0) {
+    // Un viaje de regreso (idRutaIda) puede arrancar vacío — el camión igual tiene
+    // que volver a base, y hoy no hay forma de cargarlo (ver "cargar el regreso"
+    // en LOGICA.md). Para el resto de rutas, ningún tramo puede ir vacío:
+    if (encomiendaCount === 0 && !ruta.idRutaIda) {
       throw new AppError('No se puede iniciar la ruta sin encomiendas asignadas. Registra al menos una encomienda antes de poner la ruta En Ruta.', 400);
+    }
+
+    if (!ruta.idRutaIda) {
+      // (a) Ninguna sede del recorrido (parada o destino final) puede quedar sin
+      //     carga — si no, sería una "parada basura" y un tramo vacío.
+      const paradasRuta = await RutaParada.findAll({ where: { idRuta: parseInt(id) }, attributes: ['idDestino'] });
+      const sedesRuta = [...new Set([...paradasRuta.map((p) => p.idDestino), ruta.idDestino])];
+      const destsConCarga = await Destinatario.findAll({
+        attributes: ['idDestino'],
+        include: [{
+          model: EncomiendaVenta, as: 'encomienda', required: true, attributes: ['idEncomiendaVenta'],
+          where: { idRuta: parseInt(id), habilitado: true, estado: { [Op.ne]: 'Cancelada' } },
+        }],
+      });
+      const conCarga = new Set(destsConCarga.map((d) => d.idDestino));
+      const sedesVacias = sedesRuta.filter((s) => !conCarga.has(s));
+      if (sedesVacias.length > 0) {
+        const nombres = await Destino.findAll({ where: { idDestino: { [Op.in]: sedesVacias } }, attributes: ['idDestino', 'municipio'] });
+        throw new AppError(
+          'Cada parada y el destino final deben tener al menos una encomienda asignada antes de poner la ruta En Ruta.',
+          409,
+          nombres.map((n) => ({ tipo: 'sede', id: n.idDestino, descripcion: `${n.municipio}: sin paquetes en esta ruta` })),
+          'SEDE_SIN_CARGA'
+        );
+      }
+
+      // (b) Ningún vehículo del convoy puede salir vacío.
+      const paresVacios = [];
+      for (const par of pares) {
+        const n = await Paquete.count({ where: { idRutaVehiculoConductor: par.idRutaVehiculoConductor } });
+        if (n === 0) paresVacios.push(par);
+      }
+      if (paresVacios.length > 0) {
+        throw new AppError(
+          'Todos los vehículos del convoy deben llevar al menos un paquete antes de poner la ruta En Ruta.',
+          409,
+          paresVacios.map((par) => ({ tipo: 'vehiculo', id: par.idVehiculo, descripcion: `${par.vehiculo?.placa || 'Vehículo'}: sin paquetes asignados` })),
+          'VEHICULO_SIN_CARGA'
+        );
+      }
     }
 
     const ventasSinFecha = await EncomiendaVenta.findAll({
@@ -789,8 +1023,11 @@ const updateEstado = async (id, estado) => {
     }
 
     for (const par of pares) {
-      await Vehiculo.update({ estado: 'En Ruta' }, { where: { idVehiculo: par.idVehiculo } });
-      await Conductor.update({ estado: 'En Ruta' }, { where: { idConductor: par.idConductor } });
+      // Al arrancar, la ubicación pasa a "en tránsito" (idDestinoActual = null).
+      // dejarPaquetesEnSede la va rellenando sede por sede a medida que el
+      // conductor descarga. Ver LOGICA.md "Entrega en dos fases".
+      await Vehiculo.update({ estado: 'En Ruta', idDestinoActual: null }, { where: { idVehiculo: par.idVehiculo } });
+      await Conductor.update({ estado: 'En Ruta', idDestinoActual: null }, { where: { idConductor: par.idConductor } });
     }
     await AnticipoExcedente.update(
       { estado: 'En Legalización' },
@@ -825,20 +1062,21 @@ const updateEstado = async (id, estado) => {
       include: [{ model: Paquete, as: 'paquetes' }],
     });
 
-    // No se puede completar la ruta si a alguna venta le quedó un paquete sin estado
-    // final (Entregado/Devuelto) — si no, la venta terminaría en "Entregada"/"Completada
-    // con novedades" sin que ese paquete realmente haya llegado a un desenlace.
+    // No se puede completar la ruta mientras a alguna venta le quede un paquete
+    // "Por entregar": el conductor todavía no lo dejó en la sede. "En sede de
+    // destino" sí deja completar — de ahí en adelante la entrega final la resuelve
+    // el distribuidor y la venta se cierra sola en ese momento (no aquí).
     const ventasConPendientes = ventasActivas.filter((venta) =>
-      (venta.paquetes || []).some((p) => !['Entregado', 'Devuelto'].includes(normalizarEstadoPaquete(p.estado)))
+      (venta.paquetes || []).some((p) => !paqueteLiberaRuta(p.estado))
     );
     if (ventasConPendientes.length > 0) {
       throw new AppError(
-        'Hay ventas con paquetes que aún no tienen un estado final (Entregado o Devuelto). Actualiza el estado de todos los paquetes antes de completar la ruta.',
+        'Hay ventas con paquetes que el conductor todavía no ha dejado en la sede. Debe legalizar la entrega en sede de todos los paquetes antes de completar la ruta.',
         409,
         ventasConPendientes.map((venta) => ({
           tipo: 'venta',
           id: venta.idEncomiendaVenta,
-          descripcion: `La venta con guía ${venta.paquetes?.[0]?.numeroGuia || 'sin guía'} tiene paquetes sin estado final`,
+          descripcion: `La venta con guía ${venta.paquetes?.[0]?.numeroGuia || 'sin guía'} tiene paquetes sin dejar en la sede`,
         })),
         'PACKAGES_PENDING'
       );
@@ -847,31 +1085,58 @@ const updateEstado = async (id, estado) => {
     for (const venta of ventasActivas) {
       await venta.update({ estado: determinarEstadoEncomienda(venta.paquetes, venta.estado) });
     }
+
+    // Al completar, el conductor y el vehículo quedaron físicamente en el destino
+    // de la ruta — salvo que ESTA sea un viaje de regreso (idRutaIda), en cuyo caso
+    // volvieron a la base y se limpia la marca. Más adelante (workstream 8) esto
+    // bloquea asignarlos a una ruta nueva desde Medellín hasta programarles el
+    // regreso. Ver LOGICA.md, "Entrega en dos fases — fuera de base".
+    if (ruta.estado === 'En Ruta') {
+      const idDestinoActual = ruta.idRutaIda ? null : ruta.idDestino;
+      for (const par of pares) {
+        await Vehiculo.update({ idDestinoActual }, { where: { idVehiculo: par.idVehiculo } });
+        await Conductor.update({ idDestinoActual }, { where: { idConductor: par.idConductor } });
+      }
+    }
   }
 
   if (estado === 'Cancelada') {
-    const ventasAReasignar = await EncomiendaVenta.findAll({
+    // Cancelación (a mitad de ruta o antes). Por venta:
+    //  A) Venta SIN ningún paquete en sede (todos "Por entregar"): vuelve a
+    //     "Programada" para reasignarla completa a otra ruta; sus paquetes vuelven
+    //     a "Por entregar".
+    //  B) Venta CON al menos un paquete ya en sede: NO se toca — sigue "En Ruta"
+    //     y el distribuidor termina lo que llegó. Los paquetes que el conductor no
+    //     alcanzó a dejar se quedan "Por entregar" (el admin debe reasignarlos a
+    //     una ruta nueva). NO se marcan como "no entregados": esa marca es
+    //     exclusiva del distribuidor de sede.
+    const ventas = await EncomiendaVenta.findAll({
       where: { idRuta: ruta.idRuta, habilitado: true, estado: { [Op.in]: ['Programada', 'En Ruta'] } },
-      attributes: ['idEncomiendaVenta'],
+      include: [{ model: Paquete, as: 'paquetes' }],
     });
-    const idsVentasAReasignar = ventasAReasignar.map((v) => v.idEncomiendaVenta);
 
-    // Las ventas quedan pendientes de reasignación a otra ruta (no se cancelan):
-    // pueden seguir su curso una vez se les asigne una ruta activa.
-    await EncomiendaVenta.update(
-      { estado: 'Programada' },
-      { where: { idEncomiendaVenta: { [Op.in]: idsVentasAReasignar } } }
-    );
+    const idsVentasAReasignar = ventas
+      .filter((venta) => !(venta.paquetes || []).some((p) => paqueteLiberaRuta(p.estado)))
+      .map((venta) => venta.idEncomiendaVenta);
 
-    // Los paquetes también se reinician: si la ruta ya había arrancado y algún
-    // conductor llegó a marcar entregas, esas marcas dejan de aplicar — la venta
-    // va a salir de nuevo, completa, en la próxima ruta que se le asigne.
     if (idsVentasAReasignar.length > 0) {
+      await EncomiendaVenta.update(
+        { estado: 'Programada' },
+        { where: { idEncomiendaVenta: { [Op.in]: idsVentasAReasignar } } }
+      );
       await Paquete.update(
         { estado: 'Por entregar' },
         { where: { idEncomiendaVenta: { [Op.in]: idsVentasAReasignar } } }
       );
     }
+
+    // Ubicación al cancelar: NO se fuerza nada. Si el conductor ya había dejado
+    // carga en alguna sede, idDestinoActual ya trae ese municipio (lo puso
+    // dejarPaquetesEnSede) y se respeta. Si no descargó nada, quedó en null ("en
+    // tránsito / en base") — si el vehículo quedó tirado en el camino es un tema
+    // operativo: el admin lo pone en "Mantenimiento" si se dañó y le arma la ruta
+    // que corresponda cuando esté listo. Ver LOGICA.md.
+
     // El excedente se calcula aquí (no solo se fuerza el estado) porque la ruta se
     // cancela antes de que el conductor legalice: si se dejara en 0, "Confirmar
     // devolución" quedaría bloqueado para siempre (exige excedente > 0) y esa plata
@@ -1017,4 +1282,6 @@ module.exports = {
   getPageOf,
   getAniosDisponibles,
   getDisponibilidad,
+  calcularSedesRuta,
+  intentarAutoCompletar,
 };

@@ -1,4 +1,4 @@
-const { EncomiendaVenta, Destinatario, Paquete, Cliente, Ruta, RutaParada, RutaVehiculoConductor, Vehiculo, Conductor, Destino, Usuario, ConductorSede, sequelize } = require('../models');
+const { EncomiendaVenta, Destinatario, Paquete, Cliente, Ruta, RutaParada, RutaVehiculoConductor, Vehiculo, Conductor, Destino, Usuario, ConductorSede, UsuarioSede, sequelize } = require('../models');
 const AppError = require('../errors/appError');
 const crypto = require('crypto');
 const { normalizarEstadoPaquete, determinarEstadoEncomienda } = require('./paqueteStateUtils');
@@ -777,6 +777,241 @@ const asignarRepartidorLocal = async (idPaquete, idConductor) => {
   });
 };
 
+// El conductor del tramo troncal legaliza DE UNA SOLA VEZ todos los paquetes que
+// dejó en la sede de un municipio (una parada intermedia o el destino final):
+// pasan de "Por entregar" -> "En sede de destino". La entrega final al
+// destinatario la hace después el distribuidor de esa sede (rol 'distribuidor'),
+// con la ruta ya cerrada. Foto y novedades son opcionales — el conductor solo
+// deja constancia de que descargó el lote. Ver LOGICA.md, "Entrega en dos fases".
+const dejarPaquetesEnSede = async (idConductor, { idRuta, idDestino, novedades = '', fotoEntrega = null } = {}) => {
+  const { Op } = sequelize.Sequelize;
+
+  if (!idRuta || !idDestino) {
+    throw new AppError('Faltan datos de la ruta o de la sede', 400);
+  }
+
+  const ruta = await Ruta.findByPk(idRuta, { attributes: ['idRuta', 'estado', 'idDestino'] });
+  if (!ruta) throw new AppError('Ruta no encontrada', 404);
+  if (ruta.estado !== 'En Ruta') {
+    throw new AppError('Solo se pueden dejar paquetes en sede mientras la ruta está "En Ruta"', 409);
+  }
+
+  // La sede tiene que ser el destino final de la ruta o una de sus paradas.
+  const esDestinoFinal = ruta.idDestino === idDestino;
+  const esParada = !esDestinoFinal && (await RutaParada.count({ where: { idRuta, idDestino } })) > 0;
+  if (!esDestinoFinal && !esParada) {
+    throw new AppError('Esa sede no pertenece al recorrido de esta ruta', 409);
+  }
+
+  // Pares (vehículo+conductor) de ESTE conductor en ESTA ruta.
+  const pares = await RutaVehiculoConductor.findAll({
+    where: { idRuta, idConductor, habilitado: true },
+    attributes: ['idRutaVehiculoConductor', 'idVehiculo'],
+  });
+  if (pares.length === 0) {
+    throw new AppError('No tienes ningún vehículo asignado en esta ruta', 403);
+  }
+  const parIds = pares.map((p) => p.idRutaVehiculoConductor);
+  const vehiculoIds = [...new Set(pares.map((p) => p.idVehiculo))];
+
+  // Paquetes "Por entregar" de esos pares cuya venta va dirigida a esta sede
+  // (Destinatario.idDestino) y no está cancelada.
+  const candidatos = await Paquete.findAll({
+    where: { idRutaVehiculoConductor: { [Op.in]: parIds }, estado: 'Por entregar' },
+    include: [{
+      model: EncomiendaVenta, as: 'encomienda', required: true,
+      where: { estado: { [Op.ne]: 'Cancelada' } },
+      include: [{ model: Destinatario, as: 'destinatario', required: true, where: { idDestino } }],
+    }],
+  });
+  if (candidatos.length === 0) {
+    throw new AppError('No hay paquetes pendientes por dejar en esta sede', 409);
+  }
+
+  const idsPaquete = candidatos.map((p) => p.idPaquete);
+  const ventaIds = [...new Set(candidatos.map((p) => p.idEncomiendaVenta))];
+
+  await sequelize.transaction(async (t) => {
+    await Paquete.update(
+      {
+        estado: 'En sede de destino',
+        fechaUltimoEstado: new Date(),
+        ...(novedades ? { observacionEstado: novedades } : {}),
+        ...(fotoEntrega ? { fotoEntrega } : {}),
+      },
+      { where: { idPaquete: { [Op.in]: idsPaquete } }, transaction: t }
+    );
+
+    // Recalcular el estado de cada venta afectada. Con todos sus paquetes en "En
+    // sede de destino" (no terminal) la venta SIGUE "En Ruta" — el cierre lo
+    // dispara el distribuidor al resolver la entrega final.
+    for (const idEncomiendaVenta of ventaIds) {
+      const venta = await EncomiendaVenta.findByPk(idEncomiendaVenta, { transaction: t });
+      if (!venta) continue;
+      const paquetesVenta = await Paquete.findAll({ where: { idEncomiendaVenta }, transaction: t });
+      await venta.update({ estado: determinarEstadoEncomienda(paquetesVenta, venta.estado) }, { transaction: t });
+    }
+
+    // Trazabilidad en vivo: el conductor (y su vehículo) acaba de dejar carga en
+    // esta sede, así que su "ubicación actual" pasa a ser este municipio. Se va
+    // actualizando sede por sede a medida que avanza el recorrido; al completar la
+    // ruta ya coincide con el destino final. Ver LOGICA.md "Entrega en dos fases".
+    await Conductor.update({ idDestinoActual: idDestino }, { where: { idConductor }, transaction: t });
+    if (vehiculoIds.length > 0) {
+      await Vehiculo.update({ idDestinoActual: idDestino }, { where: { idVehiculo: { [Op.in]: vehiculoIds } }, transaction: t });
+    }
+  });
+
+  // Con esta sede lista, la ruta puede quedar completa (todas las sedes + anticipo
+  // cerrado). Best-effort tras el commit — si aún falta algo no hace nada.
+  // require lazy para no atar el orden de carga de módulos.
+  const autoCompletar = require('./rutaService').intentarAutoCompletar;
+  const autoResult = await autoCompletar(idRuta);
+
+  return {
+    actualizados: candidatos.length,
+    idRuta,
+    idDestino,
+    ventasAfectadas: ventaIds.length,
+    rutaCompletada: autoResult.completada === true,
+  };
+};
+
+// Paquetes "En sede de destino" que le tocan a un distribuidor — los de las
+// sedes (municipios) que ese usuario cubre (usuario_sede). El idUsuario sale del
+// token, no del query. Ver getPorSede en paqueteController.
+const getPaquetesEnSede = async (idUsuarioDistribuidor) => {
+  const { Op } = sequelize.Sequelize;
+
+  const sedes = await UsuarioSede.findAll({
+    where: { idUsuario: idUsuarioDistribuidor, habilitado: true },
+    attributes: ['idDestino'],
+  });
+  const idsDestino = sedes.map((s) => s.idDestino);
+  if (idsDestino.length === 0) return [];
+
+  return Paquete.findAll({
+    where: { estado: 'En sede de destino' },
+    include: [
+      {
+        model: EncomiendaVenta, as: 'encomienda', required: true,
+        where: { estado: { [Op.ne]: 'Cancelada' }, habilitado: true },
+        include: [
+          { model: Cliente, as: 'cliente', attributes: ['idCliente', 'nombre', 'apellido', 'telefono'] },
+          {
+            model: Destinatario, as: 'destinatario', required: true,
+            where: { idDestino: { [Op.in]: idsDestino } },
+            include: [{ model: Destino, as: 'destino', attributes: ['idDestino', 'municipio', 'departamento'] }],
+          },
+        ],
+      },
+      {
+        model: RutaVehiculoConductor, as: 'asignacion',
+        include: [{ model: Ruta, as: 'ruta', attributes: ['idRuta', 'origen', 'estado'], include: [{ model: Destino, as: 'destino', attributes: ['municipio'] }] }],
+      },
+    ],
+    order: [['fechaUltimoEstado', 'DESC'], ['idPaquete', 'DESC']],
+  });
+};
+
+const ACCIONES_ENTREGA_FINAL = ['Entregado', 'Devuelto', 'Intento'];
+
+// Entrega final al destinatario, desde "En sede de destino" — la registra el
+// distribuidor de la sede (rol 'distribuidor', un Usuario), no un conductor.
+//   - 'Entregado' / 'Devuelto': estado terminal. En la UI 'Devuelto' se muestra
+//     como "No entregado" (el valor interno no cambia). Novedad obligatoria para
+//     'Devuelto'.
+//   - 'Intento': NO cambia el estado (sigue "En sede de destino") — solo suma al
+//     contador de insistidera (intentosEntrega) y actualiza fechaUltimoIntento.
+//     Novedad obligatoria.
+// Foto opcional en las tres. Ver LOGICA.md, "Entrega en dos fases".
+const registrarEntregaFinal = async (idPaquete, { accion, novedad = '', fotoEntrega = null, idUsuarioDistribuidor } = {}) => {
+  if (!ACCIONES_ENTREGA_FINAL.includes(accion)) {
+    throw new AppError(`Acción inválida. Debe ser una de: ${ACCIONES_ENTREGA_FINAL.join(', ')}`, 400);
+  }
+
+  const paquete = await Paquete.findByPk(idPaquete, {
+    include: [{ model: EncomiendaVenta, as: 'encomienda', include: [{ model: Destinatario, as: 'destinatario' }] }],
+  });
+  if (!paquete) throw new AppError('Paquete no encontrado', 404);
+
+  if (paquete.estado !== 'En sede de destino') {
+    throw new AppError('Solo se puede gestionar la entrega final de un paquete que esté "En sede de destino"', 409);
+  }
+
+  const encomienda = paquete.encomienda;
+  if (encomienda?.estado === 'Cancelada') {
+    throw new AppError('No se puede gestionar un paquete de una venta cancelada', 409);
+  }
+
+  const idDestinoVenta = encomienda?.destinatario?.idDestino;
+  if (!idDestinoVenta) {
+    throw new AppError('Esta venta no tiene un municipio de destino registrado', 409);
+  }
+  const cubreSede = await UsuarioSede.findOne({
+    where: { idUsuario: idUsuarioDistribuidor, idDestino: idDestinoVenta, habilitado: true },
+  });
+  if (!cubreSede) {
+    throw new AppError('No tienes asignada la sede de este paquete', 403);
+  }
+
+  if ((accion === 'Devuelto' || accion === 'Intento') && !novedad.trim()) {
+    throw new AppError('La novedad es obligatoria para registrar un intento fallido o marcar un paquete como no entregado', 400);
+  }
+
+  const esIntento = accion === 'Intento';
+
+  await sequelize.transaction(async (t) => {
+    if (esIntento) {
+      await paquete.update({
+        intentosEntrega: (paquete.intentosEntrega || 0) + 1,
+        fechaUltimoIntento: new Date(),
+        observacionEstado: novedad || paquete.observacionEstado || '',
+        idUsuarioEntrega: idUsuarioDistribuidor,
+        ...(fotoEntrega ? { fotoEntrega } : {}),
+      }, { transaction: t });
+    } else {
+      await paquete.update({
+        estado: accion, // 'Entregado' | 'Devuelto'
+        observacionEstado: novedad || paquete.observacionEstado || '',
+        fechaUltimoEstado: new Date(),
+        idUsuarioEntrega: idUsuarioDistribuidor,
+        ...(fotoEntrega ? { fotoEntrega } : {}),
+      }, { transaction: t });
+
+      // Cierre de la venta si ya ningún paquete queda pendiente.
+      if (encomienda) {
+        const paquetes = await Paquete.findAll({ where: { idEncomiendaVenta: paquete.idEncomiendaVenta }, transaction: t });
+        await encomienda.update({ estado: determinarEstadoEncomienda(paquetes, encomienda.estado) }, { transaction: t });
+      }
+    }
+  });
+
+  // Correo al cliente cuando el paquete queda "Devuelto" (no entregado) — solo en
+  // la transición, sin bloquear la operación si el envío falla.
+  if (accion === 'Devuelto' && encomienda) {
+    try {
+      const cliente = await Cliente.findByPk(encomienda.idCliente);
+      if (cliente?.email) {
+        await sendPaqueteDevueltoEmail(cliente.email, {
+          nombreCliente: `${cliente.nombre} ${cliente.apellido}`.trim(),
+          numeroGuia: paquete.numeroGuia,
+          motivo: novedad || '',
+        });
+      }
+    } catch (error) {
+      console.error(`No se pudo enviar el correo de paquete no entregado (paquete #${idPaquete}):`, error.message);
+    }
+  }
+
+  return Paquete.findByPk(idPaquete, {
+    include: [
+      { model: EncomiendaVenta, as: 'encomienda', include: [{ model: Destinatario, as: 'destinatario' }] },
+      { model: Usuario, as: 'usuarioEntrega', attributes: ['idUsuario', 'nombre', 'apellido'] },
+    ],
+  });
+};
+
 const getPaquetesDevueltos = async ({ q, anio, mes, habilitado, page = 1, limit = 10 } = {}) => {
   const { Op } = sequelize.Sequelize;
   const where = { estado: 'Devuelto' };
@@ -955,6 +1190,9 @@ module.exports = {
   getRangoFechas,
   actualizarEstadoPaquete,
   asignarRepartidorLocal,
+  dejarPaquetesEnSede,
+  getPaquetesEnSede,
+  registrarEntregaFinal,
   getPaquetesDevueltos,
   getAniosDisponiblesPaquetesDevueltos,
 };

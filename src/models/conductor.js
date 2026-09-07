@@ -26,6 +26,13 @@ const Conductor = sequelize.define('Conductor', {
     type: DataTypes.STRING(30),
     defaultValue: 'Disponible'
   },
+  // Municipio donde quedó el conductor tras completar/cancelar una ruta cuyo
+  // destino no es la base (Medellín). NULL = en base. Bloquea asignarlo a una
+  // ruta nueva desde Medellín hasta que se programe su viaje de regreso.
+  idDestinoActual: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
   habilitado: {
     type: DataTypes.BOOLEAN,
     defaultValue: true

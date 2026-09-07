@@ -19,6 +19,7 @@ const Ruta = require('./ruta');
 const RutaVehiculoConductor = require('./rutaVehiculoConductor');
 const RutaParada = require('./rutaParada');
 const ConductorSede = require('./conductorSede');
+const UsuarioSede = require('./usuarioSede');
 const AnticipoExcedente = require('./anticipoExcedente');
 const EncomiendaVenta = require('./encomiendaVenta');
 const Destinatario = require('./destinatario');
@@ -55,6 +56,13 @@ Permiso.hasMany(RolPermiso, { foreignKey: 'idPermiso', as: 'rolesPermisos' });
 Usuario.hasOne(Conductor, { foreignKey: 'idUsuario', as: 'conductor' });
 Conductor.belongsTo(Usuario, { foreignKey: 'idUsuario', as: 'usuario' });
 
+// Usuario - UsuarioSede (1:N) — sedes (municipios) que cubre un distribuidor.
+// Destino - UsuarioSede (1:N) — qué distribuidores atienden ese municipio.
+Usuario.hasMany(UsuarioSede, { foreignKey: 'idUsuario', as: 'sedes' });
+UsuarioSede.belongsTo(Usuario, { foreignKey: 'idUsuario', as: 'usuario' });
+Destino.hasMany(UsuarioSede, { foreignKey: 'idDestino', as: 'distribuidores' });
+UsuarioSede.belongsTo(Destino, { foreignKey: 'idDestino', as: 'destino' });
+
 // PropietarioVehiculo - Vehiculo (1:N)
 PropietarioVehiculo.hasMany(Vehiculo, { foreignKey: 'idPropietario', as: 'vehiculos' });
 Vehiculo.belongsTo(PropietarioVehiculo, { foreignKey: 'idPropietario', as: 'propietario' });
@@ -83,6 +91,12 @@ Paquete.belongsTo(RutaVehiculoConductor, { foreignKey: 'idRutaVehiculoConductor'
 Conductor.hasMany(Paquete, { foreignKey: 'idConductorEntrega', as: 'paquetesEntregaLocal' });
 Paquete.belongsTo(Conductor, { foreignKey: 'idConductorEntrega', as: 'conductorEntrega' });
 
+// Usuario - Paquete (1:N) — distribuidor de sede (rol 'distribuidor') que hizo la
+// entrega final (Entregado/Devuelto) desde "En sede de destino". Distinto del
+// repartidor local conductor de idConductorEntrega (camino previo que se conserva).
+Usuario.hasMany(Paquete, { foreignKey: 'idUsuarioEntrega', as: 'paquetesEntregaSede' });
+Paquete.belongsTo(Usuario, { foreignKey: 'idUsuarioEntrega', as: 'usuarioEntrega' });
+
 // Conductor - ConductorSede (1:N) — municipios donde ese conductor ha hecho de
 // repartidor local. Destino - ConductorSede (1:N) — qué conductores han repartido
 // en ese municipio.
@@ -94,6 +108,13 @@ ConductorSede.belongsTo(Destino, { foreignKey: 'idDestino', as: 'destino' });
 // Destino - Ruta (1:N)
 Destino.hasMany(Ruta, { foreignKey: 'idDestino', as: 'rutas' });
 Ruta.belongsTo(Destino, { foreignKey: 'idDestino', as: 'destino' });
+
+// Destino - Conductor / Vehiculo (1:N) — municipio donde quedó el conductor o el
+// vehículo tras una ruta que no volvió a base (idDestinoActual). NULL = en base.
+Destino.hasMany(Conductor, { foreignKey: 'idDestinoActual', as: 'conductoresEnSede' });
+Conductor.belongsTo(Destino, { foreignKey: 'idDestinoActual', as: 'destinoActual' });
+Destino.hasMany(Vehiculo, { foreignKey: 'idDestinoActual', as: 'vehiculosEnSede' });
+Vehiculo.belongsTo(Destino, { foreignKey: 'idDestinoActual', as: 'destinoActual' });
 
 // Ruta - Ruta (auto-referencia 1:1) — el viaje de regreso de una ruta es otra fila
 // de Ruta, enlazada por idRutaIda. "rutaIda": desde el regreso, la ida que le dio
@@ -161,6 +182,7 @@ module.exports = {
   RutaVehiculoConductor,
   RutaParada,
   ConductorSede,
+  UsuarioSede,
   AnticipoExcedente,
   EncomiendaVenta,
   Destinatario,

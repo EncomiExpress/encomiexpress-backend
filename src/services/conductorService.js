@@ -52,7 +52,12 @@ const getAll = async ({ estado, habilitado, q, page = 1, limit = 10, sortBy } = 
 
   const { count, rows: data } = await Conductor.findAndCountAll({
     where,
-    include: [{ model: Usuario, as: 'usuario' }],
+    include: [
+      { model: Usuario, as: 'usuario' },
+      // Municipio donde quedó "fuera de base" / donde dejó la última carga (se va
+      // actualizando sede por sede durante la ruta). NULL = en base / en tránsito.
+      { model: Destino, as: 'destinoActual', attributes: ['idDestino', 'municipio', 'departamento'], required: false },
+    ],
     limit,
     offset,
     order: order.length > 0 ? order : [['idConductor', 'DESC']],
@@ -65,7 +70,10 @@ const getAll = async ({ estado, habilitado, q, page = 1, limit = 10, sortBy } = 
 
 const getById = async (id) => {
   const conductor = await Conductor.findByPk(id, {
-    include: [{ model: Usuario, as: 'usuario' }]
+    include: [
+      { model: Usuario, as: 'usuario' },
+      { model: Destino, as: 'destinoActual', attributes: ['idDestino', 'municipio', 'departamento'], required: false },
+    ]
   });
 
   if (!conductor) {

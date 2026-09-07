@@ -1,4 +1,4 @@
-const { Vehiculo, PropietarioVehiculo } = require('../models');
+const { Vehiculo, PropietarioVehiculo, Destino } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { verificarDependenciasVehiculo } = require('../middlewares/validateDependencies');
@@ -55,7 +55,10 @@ const getAll = async ({ estado, tipo, habilitado, q, idPropietario, page = 1, li
 
   const offset = (page - 1) * limit;
   const include = [
-    { model: PropietarioVehiculo, as: 'propietario' }
+    { model: PropietarioVehiculo, as: 'propietario' },
+    // Municipio donde quedó "fuera de base" / donde el conductor dejó la última
+    // carga durante la ruta. NULL = en base / en tránsito.
+    { model: Destino, as: 'destinoActual', attributes: ['idDestino', 'municipio', 'departamento'], required: false },
   ];
   const order = buildOrder(sortBy);
 
@@ -74,7 +77,8 @@ const getAll = async ({ estado, tipo, habilitado, q, idPropietario, page = 1, li
 const getById = async (id) => {
   const vehiculo = await Vehiculo.findByPk(id, {
     include: [
-      { model: PropietarioVehiculo, as: 'propietario' }
+      { model: PropietarioVehiculo, as: 'propietario' },
+      { model: Destino, as: 'destinoActual', attributes: ['idDestino', 'municipio', 'departamento'], required: false },
     ]
   });
 

@@ -49,6 +49,12 @@ const Vehiculo = sequelize.define('Vehiculo', {
     type: DataTypes.STRING(30),
     defaultValue: 'Disponible'
   },
+  // Igual que Conductor.idDestinoActual — municipio donde quedó el vehículo tras
+  // una ruta que no volvió a base. NULL = en base (Medellín).
+  idDestinoActual: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
   habilitado: {
     type: DataTypes.BOOLEAN,
     defaultValue: true
