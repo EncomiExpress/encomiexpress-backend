@@ -403,7 +403,7 @@ const validarChoqueVehiculoConductor = async ({ idVehiculo, idConductor, fechaSa
 // mismo día, ej. rutas cortas). Concepto separado de validarChoqueVehiculoConductor
 // (esa función es sobre choque de vehículo/conductor entre rutas distintas, esta es
 // sobre el horario de UNA sola ruta) — no se mezclan.
-const validarHorarioRuta = ({ fechaSalida, horaSalida, fechaLlegadaEstimada, horaLlegadaEstimada }) => {
+const validarHorarioRuta = ({ fechaSalida, horaSalida, fechaLlegadaEstimada, horaLlegadaEstimada, exigirFechaSalidaFutura = false }) => {
   // "Hoy" en hora Colombia — mismo patrón que validarDocumentosVehiculo, para que el
   // límite no dependa de en qué zona horaria corre el servidor (Render corre en UTC).
   const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
@@ -415,6 +415,17 @@ const validarHorarioRuta = ({ fechaSalida, horaSalida, fechaLlegadaEstimada, hor
   // combinación puntual, el usuario lo ve explicado, en vez de que el campo de salida
   // le reduzca el rango sin avisar por qué.
   const maxPermitido = sumarDias(hoy, MAX_DIAS_ANTICIPACION);
+
+  // Piso: la salida puede ser hoy mismo (una ruta puede salir en la tarde aunque se
+  // haya programado en la mañana — ej. reprogramar una ruta Cancelada para más tarde
+  // el mismo día), nunca antes de hoy. `exigirFechaSalidaFutura` solo lo pide create()
+  // (siempre una ruta nueva) y update() cuando la fechaSalida efectivamente CAMBIA de
+  // valor — así una ruta Cancelada con fecha ya vencida se puede seguir editando en
+  // otros campos (conductor, observaciones) sin que esto la bloquee, mientras nadie
+  // intente dejarle o ponerle una fecha de salida en el pasado.
+  if (exigirFechaSalidaFutura && fechaSalida && fechaSalida < hoy) {
+    throw new AppError(`La fecha de salida no puede ser anterior a hoy (mínimo el ${hoy})`, 400);
+  }
 
   if (fechaSalida && esDomingo(fechaSalida)) {
     throw new AppError('No se puede programar una salida en domingo (la empresa permanece cerrada)', 400);
@@ -633,7 +644,7 @@ const validarUbicacionParaRuta = async ({ pares, idRutaIda }) => {
 const create = async (data) => {
   const { idDestino, origen, fechaSalida, horaSalida, horaLlegadaEstimada, fechaLlegadaEstimada, estado, observaciones, pares, paradas, idRutaIda } = data;
 
-  validarHorarioRuta({ fechaSalida, horaSalida, fechaLlegadaEstimada, horaLlegadaEstimada });
+  validarHorarioRuta({ fechaSalida, horaSalida, fechaLlegadaEstimada, horaLlegadaEstimada, exigirFechaSalidaFutura: true });
   validarPares(pares);
   await validarRutaIda(idRutaIda);
   await validarUbicacionParaRuta({ pares, idRutaIda });
@@ -745,39 +756,57 @@ const update = async (id, data) => {
   const fechaHoraCambio = fechaSalida !== undefined || horaSalida !== undefined
     || fechaLlegadaEstimada !== undefined || horaLlegadaEstimada !== undefined;
 
+  // Reprogramar solo = editarle la fecha/hora a una ruta Cancelada — nadie entra a
+  // tocarle la fecha/hora a una ruta Cancelada más que para volver a ponerla en curso
+  // (decisión de la usuaria, ver LOGICA.md). Si esta edición cambia la fechaSalida u
+  // horaSalida (TIME de Postgres viene con segundos, ".slice(0,5)" normaliza antes de
+  // comparar) y el resultado ya no está vencido, se reactiva sola en vez de obligar a
+  // un segundo paso manual por el menú de estado. Si el caller manda `estado` explícito
+  // (ej. alguien cancelándola de nuevo en la misma edición), ese manda siempre.
+  const normHora = (h) => (h ? h.slice(0, 5) : h);
+  const salidaCambio = nuevaFechaSalida !== ruta.fechaSalida || normHora(nuevaHoraSalida) !== normHora(ruta.horaSalida);
+  const reactivarAutomaticamente = estado === undefined && ruta.estado === 'Cancelada' && salidaCambio
+    && motivoSalidaVencida({ fechaSalida: nuevaFechaSalida, horaSalida: nuevaHoraSalida }) === null;
+
   validarHorarioRuta({
     fechaSalida: nuevaFechaSalida, horaSalida: nuevaHoraSalida,
     fechaLlegadaEstimada: nuevaFechaLlegadaEstimada, horaLlegadaEstimada: nuevaHoraLlegadaEstimada,
+    // Solo exige salida futura si la fechaSalida efectivamente CAMBIA de valor — el
+    // form del frontend reenvía el objeto completo en cada edición, así que comparar
+    // contra el valor ya guardado (no solo si el campo vino en el body) es lo que
+    // distingue "la estoy corrigiendo" de "no la toqué". Sin esto, no se podría editar
+    // ningún otro campo de una ruta Cancelada cuya fecha ya quedó en el pasado.
+    exigirFechaSalidaFutura: nuevaFechaSalida !== ruta.fechaSalida,
   });
 
-  // Si se mueve la fecha de salida y/o llegada, cualquier venta que ya tenga una
-  // fechaEstimadaEntrega prometida sobre esta ruta podría dejar de caer dentro del
-  // nuevo mínimo permitido (llegada, o salida+1 si la ruta no tiene llegada — mismo
-  // criterio que validarFechaEntrega en encomiendaService.js). Bloquear la edición no
-  // sirve aquí: exigiría corregir esas ventas ANTES de saber a qué fechas se va a
-  // mover la ruta, un problema circular (ver discusión con la usuaria). En vez de eso,
-  // se deja mover la ruta y se vacía la fechaEstimadaEntrega solo de las ventas que
-  // quedaron por debajo del nuevo mínimo — el campo admite null — para que quien las
-  // vea sepa que hay que ponerles una fecha nueva (el listado de Ventas marca
-  // visualmente cuáles quedaron así). Se excluyen las ventas Canceladas (no prometen
+  // Si se mueve la fecha de salida y/o llegada, la fechaEstimadaEntrega que ya tenía
+  // prometida cada venta de esta ruta deja de tener sentido — ya sea porque quedó por
+  // debajo del nuevo mínimo permitido (llegada, o salida+1 si la ruta no tiene llegada
+  // — mismo criterio que validarFechaEntrega en encomiendaService.js), o porque sigue
+  // siendo técnicamente válida pero ya no refleja la fecha real de la ruta (ej. la
+  // ruta se adelantó y la venta se quedó prometiendo una entrega más tardía de lo que
+  // ahora hace falta). Bloquear la edición no sirve aquí: exigiría corregir esas
+  // ventas ANTES de saber a qué fechas se va a mover la ruta, un problema circular
+  // (ver discusión con la usuaria). En vez de eso, se deja mover la ruta libremente y
+  // se SINCRONIZA la fechaEstimadaEntrega de todas las ventas activas de esta ruta a
+  // la nueva fecha mínima (decisión explícita de la usuaria: se prefiere perder un
+  // ajuste manual con margen extra que hubiera puesto alguien, a dejar fechas
+  // desactualizadas silenciosamente). Se excluyen las ventas Canceladas (no prometen
   // nada real); el resto (incluidas las "huérfanas" de una ruta que se canceló y se
-  // está reprogramando, ver updateEstado) si siguen atadas a esta ruta, se revisan
-  // igual.
-  let ventasSinFechaEntrega = [];
+  // está reprogramando, ver updateEstado) si siguen atadas a esta ruta, se sincronizan
+  // igual — esto de paso resuelve el caso que antes dejaba el campo en null.
+  let ventasSincronizadas = [];
+  let minimaEntregaNueva = null;
   if (fechaHoraCambio) {
-    const ventasConEntrega = await EncomiendaVenta.findAll({
+    minimaEntregaNueva = nuevaFechaLlegadaEstimada || sumarDias(nuevaFechaSalida, 1);
+    ventasSincronizadas = await EncomiendaVenta.findAll({
       where: {
         idRuta: id,
         habilitado: true,
         estado: { [Op.ne]: 'Cancelada' },
-        fechaEstimadaEntrega: { [Op.ne]: null },
       },
-      attributes: ['idEncomiendaVenta', 'fechaEstimadaEntrega'],
+      attributes: ['idEncomiendaVenta'],
     });
-    if (ventasConEntrega.length > 0) {
-      const minimaEntrega = nuevaFechaLlegadaEstimada || sumarDias(nuevaFechaSalida, 1);
-      ventasSinFechaEntrega = ventasConEntrega.filter(v => v.fechaEstimadaEntrega < minimaEntrega);
-    }
   }
 
   if (pares !== undefined) validarPares(pares);
@@ -896,15 +925,15 @@ const update = async (id, data) => {
       fechaLlegadaEstimada:          nuevaFechaLlegadaEstimada,
       horaSalida:            nuevaHoraSalida,
       horaLlegadaEstimada:   nuevaHoraLlegadaEstimada,
-      estado:                estado                !== undefined ? estado                : ruta.estado,
+      estado:                estado !== undefined ? estado : (reactivarAutomaticamente ? 'Programada' : ruta.estado),
       observaciones:         observaciones         !== undefined ? observaciones         : ruta.observaciones,
       habilitado:            habilitado            !== undefined ? habilitado            : ruta.habilitado
     }, { transaction });
 
-    if (ventasSinFechaEntrega.length > 0) {
+    if (ventasSincronizadas.length > 0) {
       await EncomiendaVenta.update(
-        { fechaEstimadaEntrega: null },
-        { where: { idEncomiendaVenta: { [Op.in]: ventasSinFechaEntrega.map(v => v.idEncomiendaVenta) } }, transaction }
+        { fechaEstimadaEntrega: minimaEntregaNueva },
+        { where: { idEncomiendaVenta: { [Op.in]: ventasSincronizadas.map(v => v.idEncomiendaVenta) } }, transaction }
       );
     }
 
@@ -914,7 +943,21 @@ const update = async (id, data) => {
     throw error;
   }
 
-  return { ruta: await getById(id), ventasSinFechaEntrega };
+  return { ruta: await getById(id), ventasSincronizadas, reactivada: reactivarAutomaticamente };
+};
+
+// Mismo cálculo que yaDebioSalir() en jobs/autoIniciarRutas.js (offset fijo -05:00
+// para Colombia) — se duplica acá en vez de importarlo porque ese archivo ya importa
+// rutaService, y hacerlo al revés crearía una dependencia circular. Devuelve el
+// motivo ('fecha'/'hora'/null) para armar un mensaje más útil: "hora" solo aplica
+// cuando la fecha sigue siendo hoy pero la hora de salida ya pasó.
+const motivoSalidaVencida = (ruta) => {
+  if (!ruta.fechaSalida || !ruta.horaSalida) return 'fecha';
+  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+  if (ruta.fechaSalida < hoy) return 'fecha';
+  if (ruta.fechaSalida > hoy) return null;
+  const salida = new Date(`${ruta.fechaSalida}T${ruta.horaSalida}-05:00`);
+  return (isNaN(salida.getTime()) || salida <= new Date()) ? 'hora' : null;
 };
 
 const updateEstado = async (id, estado) => {
@@ -932,6 +975,24 @@ const updateEstado = async (id, estado) => {
 
   if (estado === 'Programada' && ruta.estado === 'En Ruta') {
     throw new AppError('No se puede revertir el estado de una ruta en curso a Programada', 400);
+  }
+
+  // Solo llega acá el caso Cancelada -> Programada (En Ruta -> Programada ya se
+  // bloqueó arriba). Si la fecha/hora de salida que la ruta ya tenía guardada quedó
+  // en el pasado, dejarla pasar a "Programada" así abre una ventana de carrera real:
+  // el job de auto-inicio (jobs/autoIniciarRutas.js) revisa cada minuto y la agarraría
+  // de inmediato, pasándola a "En Ruta" con la fecha vieja antes de que alguien
+  // alcance a editarla con una fecha nueva. Se obliga a corregir la fecha PRIMERO
+  // (edición permitida en Cancelada, ver update() más abajo) y solo después cambiar
+  // el estado.
+  if (estado === 'Programada') {
+    const motivo = motivoSalidaVencida(ruta);
+    if (motivo === 'fecha') {
+      throw new AppError('La fecha de salida de esta ruta ya pasó. Edítala con una fecha futura antes de volver a ponerla en Programada.', 400);
+    }
+    if (motivo === 'hora') {
+      throw new AppError('La hora de salida de esta ruta ya pasó (sigue siendo hoy). Edítala con una hora futura antes de volver a ponerla en Programada.', 400);
+    }
   }
 
   if (estado === 'Cancelada' && ruta.estado === 'Programada') {
@@ -1234,9 +1295,22 @@ const toggleHabilitado = async (id) => {
     }
   }
 
+  // Al REHABILITAR (false -> true) una ruta que quedó `Programada` con la fecha/hora
+  // ya vencida (pudo pasar mientras estuvo inhabilitada, sin que nadie la revisara —
+  // el job de auto-inicio SÍ actúa sobre una Programada vencida, es justo su
+  // disparador, no lo contrario), dejarla `habilitado:true` así la vuelve a exponer al
+  // job (que filtra `habilitado:true`) y la agarraría de inmediato en su próximo tick.
+  // Se cancela sola en vez de eso — mismo tratamiento que cualquier Programada vencida
+  // — y queda editable: al corregirle la fecha, `update()` ya la reactiva sola cuando
+  // vuelve a quedar válida (ver esa función). Nunca aplica al revés (Cancelada no le
+  // importa al job, esté habilitada o no) ni al inhabilitar.
+  const seCancelaPorFechaVencida = ruta.habilitado === false && ruta.estado === 'Programada'
+    && motivoSalidaVencida(ruta) !== null;
+
   ruta.habilitado = !ruta.habilitado;
+  if (seCancelaPorFechaVencida) ruta.estado = 'Cancelada';
   await ruta.save();
-  return ruta;
+  return { ruta, seCancelaPorFechaVencida };
 };
 
 const getAniosDisponibles = async () => {

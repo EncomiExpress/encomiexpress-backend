@@ -44,20 +44,6 @@ exports.update = async (req, res, next) => {
   }
 };
 
-exports.cambiarEstado = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const { estado } = req.body;
-    if (!estado) {
-      return next(new AppError('El campo "estado" es requerido', 400));
-    }
-    const anticipo = await anticipoService.cambiarEstado(id, estado);
-    res.json({ success: true, message: `Estado actualizado a "${anticipo.estado}"`, data: anticipo });
-  } catch (error) {
-    next(error);
-  }
-};
-
 exports.entregarExcedente = async (req, res, next) => {
   try {
     const { id } = req.params;

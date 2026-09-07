@@ -150,34 +150,6 @@ router.post('/:id/soporte', authenticate, authorize('admin', 'conductor'),
 
 /**
  * @swagger
- * /anticipos/{id}/estado:
- *   patch:
- *     summary: Cambiar estado del anticipo
- *     tags: [Anticipos]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema: { type: integer }
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [estado]
- *             properties:
- *               estado:
- *                 type: string
- *                 enum: [pendiente, aprobado, rechazado]
- *     responses:
- *       200:
- *         description: Estado actualizado
- */
-router.patch('/:id/estado', authenticate, authorize('admin', 'conductor'), authorizePermission('actualizar_anticipo'), anticipoController.cambiarEstado);
-
-/**
- * @swagger
  * /anticipos/{id}/entregar-excedente:
  *   patch:
  *     summary: Confirmar que el conductor devolvió el excedente (solo admin) — pasa a Completado y registra la fecha de entrega del excedente como hoy

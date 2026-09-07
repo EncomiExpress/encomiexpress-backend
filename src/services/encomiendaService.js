@@ -4,13 +4,6 @@ const crypto = require('crypto');
 const { normalizarEstadoPaquete, determinarEstadoEncomienda } = require('./paqueteStateUtils');
 const { sendPaqueteDevueltoEmail } = require('../config/email');
 
-const ESTADOS_VALIDOS = [
-  'Programada',
-  'En Ruta',
-  'Entregada',
-  'Completada con novedades',
-  'Cancelada',
-];
 const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia'];
 const ESTADOS_PAGO_VALIDOS = ['Pendiente', 'Pagado'];
 
@@ -39,6 +32,14 @@ const validarFechaEntrega = (fechaEstimadaEntrega, ruta) => {
     throw new AppError(`La fecha estimada de entrega debe ser al menos un día después de la salida de la ruta (mínimo el ${minima})`, 400);
   }
 };
+
+// Una venta solo puede quedar asignada/reactivada sobre una ruta que de verdad la
+// pueda transportar: tiene que seguir "Programada" (no haber salido, terminado o sido
+// cancelada) Y seguir habilitada (una ruta puede quedar inhabilitada — soft-delete —
+// sin que su `estado` deje de decir "Programada", son dos campos independientes). Usado
+// en create()/update() y en toggleHabilitado() al rehabilitar — ver LOGICA.md, "Ventas
+// — Cancelada e inhabilitar/habilitar".
+const rutaSigueSirviendo = (ruta) => !!ruta && ruta.estado === 'Programada' && ruta.habilitado !== false;
 
 // Una ruta ahora puede tener varios pares vehículo+conductor (convoy) — este include
 // se reutiliza en todas las consultas que devuelven una venta con su ruta, para que el
@@ -318,7 +319,20 @@ const create = async (data) => {
     if (!ruta) {
       throw new AppError('Ruta no encontrada', 400);
     }
-    validarFechaEntrega(fechaEstimadaEntrega, ruta);
+    // Mismo criterio que update(): una venta nueva solo puede nacer asignada a una
+    // ruta que siga sirviendo (Programada Y habilitada).
+    if (!rutaSigueSirviendo(ruta)) {
+      throw new AppError('Solo se puede asignar la venta a una ruta que esté Programada', 400);
+    }
+    // Si no mandan fecha estimada de entrega, se autocompleta con la llegada de la
+    // ruta (o salida+1 si no tiene llegada) — el mínimo permitido de todos modos, así
+    // que siempre es válida. El frontend ya la autocompleta igual al elegir la ruta
+    // (PasoEnvio.jsx) y la deja editable; esto es una red de seguridad para quien cree
+    // la venta directo por API sin mandar el campo.
+    const fechaEstimadaEntregaFinal = fechaEstimadaEntrega
+      || ruta.fechaLlegadaEstimada
+      || (ruta.fechaSalida ? sumarDias(ruta.fechaSalida, 1) : null);
+    validarFechaEntrega(fechaEstimadaEntregaFinal, ruta);
 
     if (!destinatario || !destinatario.idDestino) {
       throw new AppError('El municipio de destino del destinatario es obligatorio', 400);
@@ -366,7 +380,7 @@ const create = async (data) => {
       {
         idCliente,
         idRuta,
-        fechaEstimadaEntrega: fechaEstimadaEntrega || null,
+        fechaEstimadaEntrega: fechaEstimadaEntregaFinal || null,
         observaciones: observaciones || null,
         total: total || 0,
         metodoPago: metodoPagoResuelto,
@@ -451,7 +465,10 @@ const update = async (id, data) => {
       throw new AppError('Encomienda no encontrada', 404);
     }
 
-    if (encomienda.estado !== 'Programada') {
+    // Cancelada sí se puede editar (a diferencia de antes) — es la forma de
+    // reasignarle ruta/fecha, igual que una ruta Cancelada. Ver LOGICA.md, "Ventas —
+    // Cancelada e inhabilitar/habilitar".
+    if (!['Programada', 'Cancelada'].includes(encomienda.estado)) {
       throw new AppError(`Esta venta ya está en estado "${encomienda.estado}": no se puede editar`, 400);
     }
 
@@ -495,6 +512,14 @@ const update = async (id, data) => {
     if (!rutaNueva) {
       throw new AppError('Ruta no encontrada', 400);
     }
+    // Una venta solo puede quedar asignada a una ruta que siga sirviendo — sin esto,
+    // reactivar una Cancelada (o simplemente editar una Programada) podría dejarla
+    // apuntando a una ruta que ya salió, se completó, se canceló o quedó inhabilitada,
+    // sin que nadie lo note (el frontend ya filtra el selector de ruta igual, esto es
+    // la fuente de verdad del backend). Ver LOGICA.md.
+    if (!rutaSigueSirviendo(rutaNueva)) {
+      throw new AppError('Solo se puede asignar la venta a una ruta que esté Programada', 400);
+    }
     const nuevaFechaEstimadaEntrega = fechaEstimadaEntrega !== undefined ? fechaEstimadaEntrega : encomienda.fechaEstimadaEntrega;
     validarFechaEntrega(nuevaFechaEstimadaEntrega, rutaNueva);
     const destinatarioExistente = await Destinatario.findOne({ where: { idEncomiendaVenta: id }, transaction });
@@ -520,6 +545,10 @@ const update = async (id, data) => {
       : await Paquete.findAll({ where: { idEncomiendaVenta: id }, attributes: ['peso', 'idRutaVehiculoConductor'], transaction });
     await validarCapacidadPares(nuevoIdRuta, paquetesParaValidar, transaction, parseInt(id));
 
+    // Si llegó hasta acá sin lanzar error, la ruta/fecha nuevas ya son válidas (ruta
+    // Programada, fechaEstimadaEntrega dentro de rango) — una venta Cancelada se
+    // reactiva sola a Programada en la misma operación, sin pedir un segundo paso
+    // manual. Ver LOGICA.md, "Ventas — Cancelada e inhabilitar/habilitar".
     await encomienda.update(
       {
         idRuta: nuevoIdRuta,
@@ -529,6 +558,7 @@ const update = async (id, data) => {
         metodoPago: metodoPago !== undefined ? (metodoPago ? METODOS_PAGO_VALIDOS.find(v => v.toLowerCase() === metodoPago.toLowerCase()) || encomienda.metodoPago : null) : encomienda.metodoPago,
         estadoPago: estadoPago !== undefined ? (ESTADOS_PAGO_VALIDOS.find(v => v.toLowerCase() === estadoPago.toLowerCase()) || encomienda.estadoPago) : encomienda.estadoPago,
         habilitado: habilitado !== undefined ? habilitado : encomienda.habilitado,
+        estado: encomienda.estado === 'Cancelada' ? 'Programada' : encomienda.estado,
       },
       { transaction }
     );
@@ -632,22 +662,6 @@ const update = async (id, data) => {
     await transaction.rollback();
     throw error;
   }
-};
-
-const cambiarEstado = async (id, estado) => {
-  const encomienda = await EncomiendaVenta.findByPk(id);
-
-  if (!encomienda) {
-    throw new AppError('Encomienda no encontrada', 404);
-  }
-
-  if (!ESTADOS_VALIDOS.includes(estado)) {
-    throw new AppError(`Estado inválido. Opciones: ${ESTADOS_VALIDOS.join(', ')}`, 400);
-  }
-
-  await encomienda.update({ estado });
-
-  return encomienda;
 };
 
 // Dos caminos válidos para un paquete, según si pasa o no por una sede intermedia
@@ -1114,20 +1128,50 @@ const toggleHabilitado = async (id) => {
     throw new AppError('Encomienda no encontrada', 404);
   }
 
+  let pasoACancelada = false;
+
   if (encomienda.habilitado) {
-    const ESTADOS_FINALES = ['Entregada', 'Completada con novedades', 'Cancelada'];
-    if (!ESTADOS_FINALES.includes(encomienda.estado)) {
+    // Inhabilitar: solo bloquea una venta "En Ruta" (paquetes físicamente en tránsito
+    // en este momento) — a diferencia de antes, ya NO exige pasar primero por
+    // "Cancelada" para poder inhabilitar una Programada (ver LOGICA.md, "Ventas —
+    // Cancelada e inhabilitar/habilitar"). El estado no se toca acá; el filtro
+    // `habilitado:true` que usan las cascadas de Ruta (ver rutaService.js) ya
+    // protege a una venta inhabilitada de ser arrastrada mientras está oculta.
+    if (encomienda.estado === 'En Ruta') {
       throw new AppError(
-        `No se puede inhabilitar la encomienda porque está en estado "${encomienda.estado}"`,
+        'No se puede inhabilitar una venta que está en tránsito',
         409,
-        [{ tipo: 'Estado activo', id: encomienda.idEncomiendaVenta, descripcion: `Esta venta está en estado "${encomienda.estado}" y no ha finalizado` }],
+        [{ tipo: 'Estado activo', id: encomienda.idEncomiendaVenta, descripcion: 'Esta venta está "En Ruta" y no ha finalizado' }],
         'DEPENDENCY_CONFLICT'
       );
     }
+  } else if (encomienda.estado === 'Programada') {
+    // Rehabilitar una Programada: mientras estuvo inhabilitada, su ruta pudo haber
+    // avanzado (salió, se completó, se canceló) sin que la sincronización de fechas de
+    // rutaService.update() la tocara (esa sincronización solo alcanza a las ventas
+    // habilitadas). Se revisa acá, en el único momento en que vuelve a quedar "viva".
+    const ruta = await Ruta.findByPk(encomienda.idRuta);
+    if (!rutaSigueSirviendo(ruta)) {
+      // La ruta ya no sirve para esta venta (salió/terminó/se canceló, o quedó
+      // inhabilitada) — queda Cancelada para forzar la reasignación (editable, ver
+      // update() más abajo).
+      encomienda.estado = 'Cancelada';
+      pasoACancelada = true;
+    } else {
+      // La ruta sigue Programada — se corrige la fecha SOLO si ya no alcanza el
+      // mínimo actual (no se pisa un margen manual que sigue siendo válido, distinto
+      // del "sincronizar siempre" de rutaService.update(): ahí el disparador es que
+      // la ruta cambió; acá el disparador es que la venta se reactiva, la ruta pudo
+      // no haber cambiado en absoluto — ver LOGICA.md).
+      const minimaEntrega = ruta.fechaLlegadaEstimada || sumarDias(ruta.fechaSalida, 1);
+      if (!encomienda.fechaEstimadaEntrega || encomienda.fechaEstimadaEntrega < minimaEntrega) {
+        encomienda.fechaEstimadaEntrega = minimaEntrega;
+      }
+    }
   }
 
-  const nuevoEstado = !encomienda.habilitado;
-  await encomienda.update({ habilitado: nuevoEstado });
+  encomienda.habilitado = !encomienda.habilitado;
+  await encomienda.save();
 
   const encomiendaActualizada = await EncomiendaVenta.findByPk(id, {
     include: [
@@ -1138,7 +1182,7 @@ const toggleHabilitado = async (id) => {
     ],
   });
 
-  return encomiendaActualizada;
+  return { encomienda: encomiendaActualizada, pasoACancelada };
 };
 
 // El orden por defecto de getAll es [fechaRegistro DESC, idEncomiendaVenta DESC] —
@@ -1183,7 +1227,6 @@ module.exports = {
   getById,
   create,
   update,
-  cambiarEstado,
   cambiarEstadoPago,
   toggleHabilitado,
   getPageOf,

@@ -9,14 +9,6 @@ const noSoloRelleno = (mensaje) => (value) => {
 const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia'];
 const ESTADOS_PAGO_VALIDOS = ['Pendiente', 'Pagado'];
 
-const ESTADOS_ENCOMIENDA_VALIDOS = [
-  'Programada',
-  'En Ruta',
-  'Entregada',
-  'Completada con novedades',
-  'Cancelada',
-];
-
 const createValidation = [
   body('idCliente').notEmpty().withMessage('Cliente es requerido'),
   body('idCliente').isInt().withMessage('ID de cliente debe ser un número entero'),
@@ -176,14 +168,6 @@ const updateValidation = [
     .isInt().withMessage('ID de vehículo/conductor de ruta debe ser un número entero'),
 ];
 
-const cambiarEstadoValidation = [
-  body('estado')
-    .notEmpty()
-    .withMessage('Estado es requerido')
-    .isIn(ESTADOS_ENCOMIENDA_VALIDOS)
-    .withMessage(`Estado inválido. Opciones: ${ESTADOS_ENCOMIENDA_VALIDOS.join(', ')}`),
-];
-
 const cambiarEstadoPagoValidation = [
   body('estadoPago')
     .notEmpty()
@@ -195,6 +179,5 @@ const cambiarEstadoPagoValidation = [
 module.exports = {
   createValidation,
   updateValidation,
-  cambiarEstadoValidation,
   cambiarEstadoPagoValidation,
 };

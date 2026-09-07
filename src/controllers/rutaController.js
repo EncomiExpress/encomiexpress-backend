@@ -47,14 +47,12 @@ exports.create = async (req, res) => {
 exports.update = async (req, res) => {
   try {
     const { id } = req.params;
-    const { ruta, ventasSinFechaEntrega } = await rutaService.update(id, req.body);
-    // Si mover la fecha de la ruta dejó ventas sin una fecha de entrega válida
-    // (se les vació el campo — ver rutaService.update), se avisa en el mismo mensaje
-    // de éxito para que quien edita la ruta se entere de una y las revise después.
-    const aviso = ventasSinFechaEntrega.length > 0
-      ? ` Se vació la fecha estimada de entrega de ${ventasSinFechaEntrega.length === 1 ? '1 venta' : `${ventasSinFechaEntrega.length} ventas`} porque quedó fuera del nuevo rango — asígnale${ventasSinFechaEntrega.length === 1 ? '' : 'n'} una fecha nueva.`
-      : '';
-    res.json({ success: true, message: `Ruta actualizada exitosamente.${aviso}`, data: ruta });
+    // ventasSincronizadas/reactivada ya no se anuncian en el mensaje de éxito (decisión
+    // de la usuaria: el toast quedaba muy largo) — la sincronización de fechas ya se
+    // avisa de antemano en el formulario (PasoHorario.jsx) y la reactivación se ve
+    // directo en la columna Estado; no hace falta repetirlo en el toast.
+    const { ruta } = await rutaService.update(id, req.body);
+    res.json({ success: true, message: 'Ruta actualizada exitosamente.', data: ruta });
   } catch (error) {
     res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al actualizar ruta' });
   }
@@ -82,7 +80,10 @@ exports.updateEstado = async (req, res) => {
 exports.toggleHabilitado = async (req, res) => {
   try {
     const { id } = req.params;
-    const ruta = await rutaService.toggleHabilitado(id);
+    // seCancelaPorFechaVencida ya no se anuncia en el mensaje de éxito (decisión de la
+    // usuaria: el toast quedaba muy largo) — ese aviso ahora se muestra de antemano en
+    // el modal de confirmar (ModalInhabilitarRuta.jsx), antes de confirmar la acción.
+    const { ruta } = await rutaService.toggleHabilitado(id);
     res.json({ success: true, message: `Ruta ${ruta.habilitado ? 'habilitada' : 'inhabilitada'} exitosamente`, data: ruta });
   } catch (error) {
     res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al cambiar estado de la ruta' });

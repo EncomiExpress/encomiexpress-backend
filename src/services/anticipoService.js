@@ -364,27 +364,6 @@ const entregarExcedente = async (id, { soporte }) => {
 };
 
 
-const cambiarEstado = async (id, estado) => {
-  const estadosValidos = ['Entregado', 'En Legalización', 'Excedente pendiente', 'Completado'];
-  if (!estadosValidos.includes(estado)) {
-    throw new AppError(`Estado inválido. Debe ser uno de: ${estadosValidos.join(', ')}`, 400);
-  }
-  const anticipo = await AnticipoExcedente.findByPk(id);
-  if (!anticipo) throw new AppError('Anticipo no encontrado', 404);
-
-  const noRevertibles = ['En Legalización', 'Excedente pendiente', 'Completado'];
-  if (noRevertibles.includes(anticipo.estado) && estado === 'Entregado') {
-    throw new AppError(
-      `No se puede revertir a "entregado" desde el estado "${anticipo.estado}". Este cambio es irreversible.`,
-      400
-    );
-  }
-
-  anticipo.estado = estado;
-  await anticipo.save();
-  return getAnticipoCompleto(id);
-};
-
 // fileUrls: array de URLs recién subidas a Cloudinary — se agregan a las que
 // ya tenía el anticipo (nunca se pisan las anteriores).
 const updateSoporte = async (id, fileUrls) => {
@@ -452,7 +431,6 @@ module.exports = {
   update,
   entregarExcedente,
   updateSoporte,
-  cambiarEstado,
   toggleHabilitado,
   getPageOf,
   getAniosDisponibles,

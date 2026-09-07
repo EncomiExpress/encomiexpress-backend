@@ -98,9 +98,17 @@ const verificarDependenciasCliente = async (clienteId) => {
 };
 
 const verificarDependenciasRuta = async (rutaId) => {
+  // habilitado:true a propósito — una venta YA inhabilitada no debe seguir bloqueando
+  // que se inhabilite su ruta: en la práctica ya no está operativamente asociada a
+  // ella mientras esté oculta. Si más adelante alguien la rehabilita, ahí entra el
+  // mecanismo de encomiendaService.toggleHabilitado()/rutaSigueSirviendo() (ver
+  // LOGICA.md, "Ventas — Cancelada e inhabilitar/habilitar") — la deja Cancelada si
+  // la ruta ya no sirve (incluida una ruta inhabilitada por este mismo camino), en vez
+  // de revivirla apuntando a algo que ya no es válido.
   const encomiendas = await EncomiendaVenta.findAll({
     where: {
       idRuta: rutaId,
+      habilitado: true,
       estado: { [Op.notIn]: ['Entregada', 'Completada con novedades', 'Cancelada'] }
     },
     attributes: ['idEncomiendaVenta', 'estado'],
