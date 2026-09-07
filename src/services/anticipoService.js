@@ -286,6 +286,22 @@ const update = async (id, data) => {
   let newExcedente;
 
   if (valorGastado !== undefined) {
+    // Candado: legalizar = subir valorGastado + soporte, y eso solo lo hace el
+    // conductor desde el móvil (el panel admin no ofrece la acción una vez el
+    // anticipo pasa a "En Legalización"). No puede hacerlo hasta dejar TODOS los
+    // paquetes en las sedes de la ruta — no tiene forma de reunir los soportes
+    // del viaje antes de llegar al destino final. Ver LOGICA.md, "Entrega en dos
+    // fases". require lazy para no atar el orden de carga de módulos.
+    const { total, completadas } = await require('./rutaService').calcularSedesRuta(anticipo.idRuta);
+    if (total > 0 && completadas < total) {
+      throw new AppError(
+        `Aún no puedes legalizar el anticipo: faltan ${total - completadas} de ${total} sedes por completar. Deja todos los paquetes en las sedes de la ruta primero.`,
+        409,
+        null,
+        'SEDES_INCOMPLETAS'
+      );
+    }
+
     // El gasto puede superar lo entregado — queda un excedente negativo (la
     // empresa le debe reponer la diferencia al conductor) en vez de bloquearlo.
     // `excedente` positivo = a favor de la empresa, negativo = a favor del

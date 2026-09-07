@@ -207,7 +207,9 @@ CREATE TABLE destinatario (
   tipo_identificacion_destinatario   VARCHAR(20),
   numero_identificacion_destinatario VARCHAR(20),
   telefono_destinatario  VARCHAR(20),
-  correo_destinatario    VARCHAR(150),
+  -- Obligatorio: canal de contacto para la insistidera del distribuidor cuando
+  -- no logra la entrega (ver LOGICA.md, "Entrega en dos fases").
+  correo_destinatario    VARCHAR(150) NOT NULL,
   direccion_destinatario VARCHAR(255)
 );
 

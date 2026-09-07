@@ -1099,7 +1099,7 @@ const cambiarEstadoPago = async (id, estadoPago) => {
     encomienda.metodoPago === 'Contraentrega' &&
     !['Entregada', 'Completada con novedades'].includes(encomienda.estado)
   ) {
-    throw new AppError('Esta venta es Contraentrega: el pago solo se puede confirmar cuando ya fue entregada', 400);
+    throw new AppError('Esta venta es Contraentrega: el pago solo se puede confirmar cuando el distribuidor haya legalizado todos los paquetes de la venta', 400);
   }
 
   await encomienda.update({ estadoPago });

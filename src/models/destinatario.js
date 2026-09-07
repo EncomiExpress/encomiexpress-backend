@@ -41,8 +41,9 @@ const Destinatario = sequelize.define('Destinatario', {
     allowNull: true
   },
   correoDestinatario: {
+    // Obligatorio: canal de contacto para la insistidera del distribuidor.
     type: DataTypes.STRING(150),
-    allowNull: true
+    allowNull: false
   },
   direccionDestinatario: {
     type: DataTypes.STRING(255),

@@ -539,6 +539,31 @@ const resolverOrigenRuta = async (idRutaIda, transaction) => {
   return rutaIda?.destino?.municipio || 'Medellín';
 };
 
+// El origen (Medellín en una ruta normal, o el destino de la ida en un regreso)
+// no puede ser también el destino final ni una de las paradas — sería un tramo
+// de longitud cero. El origen no lo elige el usuario, así que esto atrapa el
+// caso en el que se selecciona como destino/parada el mismo municipio del que
+// sale la ruta. `paradasIdDestino` solo se valida cuando llega un juego nuevo de
+// paradas (en una edición que no las toca, se dejan como estaban).
+const validarOrigenDistinto = async ({ idDestino, paradasIdDestino, idRutaIda, transaction }) => {
+  const origen = await resolverOrigenRuta(idRutaIda, transaction);
+
+  if (idDestino !== undefined && idDestino !== null) {
+    const destino = await Destino.findByPk(idDestino, { attributes: ['idDestino', 'municipio'], transaction });
+    if (destino && destino.municipio === origen) {
+      throw new AppError(`El destino de la ruta no puede ser ${origen}: es el municipio de origen.`, 400, null, 'DESTINO_IGUAL_ORIGEN');
+    }
+  }
+
+  const ids = (paradasIdDestino || []).filter((v) => v !== null && v !== undefined);
+  if (ids.length > 0) {
+    const paradas = await Destino.findAll({ where: { idDestino: { [Op.in]: ids } }, attributes: ['idDestino', 'municipio'], transaction });
+    if (paradas.some((p) => p.municipio === origen)) {
+      throw new AppError(`Una parada no puede ser ${origen}: es el municipio de origen de la ruta.`, 400, null, 'PARADA_IGUAL_ORIGEN');
+    }
+  }
+};
+
 // "Fuera de base": un conductor/vehículo que quedó en otro municipio tras
 // completar o cancelar una ruta que no volvió a Medellín (conductor.idDestinoActual
 // / vehiculo.idDestinoActual != null) no se puede asignar a una ruta NUEVA desde
@@ -631,6 +656,12 @@ const create = async (data) => {
   }
 
   const paradasNormalizadas = await validarParadas(paradas);
+
+  await validarOrigenDistinto({
+    idDestino,
+    paradasIdDestino: (paradasNormalizadas || []).map((p) => p.idDestino),
+    idRutaIda,
+  });
 
   const transaction = await sequelize.transaction();
   let idRutaCreada;
@@ -751,6 +782,15 @@ const update = async (id, data) => {
 
   if (pares !== undefined) validarPares(pares);
   const paradasNormalizadas = await validarParadas(paradas);
+
+  await validarOrigenDistinto({
+    // idDestino efectivo: el que llega, o el que ya tenía la ruta.
+    idDestino: idDestino !== undefined ? idDestino : ruta.idDestino,
+    // Solo se revisan las paradas si llega un juego nuevo (paradasNormalizadas
+    // !== null); si la edición no las toca, se dejan como estaban.
+    paradasIdDestino: paradasNormalizadas ? paradasNormalizadas.map((p) => p.idDestino) : [],
+    idRutaIda: ruta.idRutaIda,
+  });
 
   const transaction = await sequelize.transaction();
   try {

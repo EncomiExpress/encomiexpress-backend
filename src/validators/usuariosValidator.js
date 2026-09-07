@@ -1,12 +1,13 @@
 const { body } = require('express-validator');
 const r = require('./commonRules');
 
-// Sedes (municipios) del distribuidor — la exigencia de "al menos una si el rol es
-// distribuidor" vive en usuarioService (necesita resolver idRol -> nombre); aquí
-// solo se valida la forma del dato.
+// Sede del distribuidor — un distribuidor cubre UNA sola sede, pero el campo viaja
+// como array (contrato con usuario_sede). La exigencia de "exactamente una si el
+// rol es distribuidor" vive en usuarioService (necesita resolver idRol -> nombre);
+// aquí solo se valida la forma del dato.
 const sedesRule = body('sedes')
   .optional()
-  .isArray().withMessage('Las sedes deben enviarse como una lista');
+  .isArray({ max: 1 }).withMessage('Un distribuidor cubre una sola sede');
 const sedesItemRule = body('sedes.*')
   .isInt({ min: 1 }).withMessage('Cada sede debe ser un id de destino válido');
 

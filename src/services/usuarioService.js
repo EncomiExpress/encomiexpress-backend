@@ -94,20 +94,25 @@ const getById = async (id) => {
   return usuario;
 };
 
-// Normaliza el array de ids de sede que llega del cliente y valida que sean
-// destinos reales y habilitados. Solo aplica cuando el rol del usuario es
-// 'distribuidor' — para cualquier otro rol el campo se ignora.
+// Normaliza el array de ids de sede que llega del cliente y valida que sea un
+// destino real y habilitado. Solo aplica cuando el rol del usuario es
+// 'distribuidor' — para cualquier otro rol el campo se ignora. Un distribuidor
+// cubre UNA sola sede; el campo sigue viajando como array (contrato con el
+// front y con usuario_sede) pero se rechaza si trae más de un id.
 const resolverSedes = async (rolNombre, sedes) => {
   if (rolNombre !== 'distribuidor') return [];
   const limpias = Array.isArray(sedes)
     ? [...new Set(sedes.map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))]
     : [];
   if (limpias.length === 0) {
-    throw new AppError('Un distribuidor debe tener al menos una sede asignada', 400);
+    throw new AppError('Un distribuidor debe tener una sede asignada', 400);
+  }
+  if (limpias.length > 1) {
+    throw new AppError('Un distribuidor cubre una sola sede', 400);
   }
   const existentes = await Destino.count({ where: { idDestino: { [Op.in]: limpias }, habilitado: true } });
   if (existentes !== limpias.length) {
-    throw new AppError('Una o más de las sedes indicadas no existen o están inhabilitadas', 400);
+    throw new AppError('La sede indicada no existe o está inhabilitada', 400);
   }
   return limpias;
 };

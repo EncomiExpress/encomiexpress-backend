@@ -370,6 +370,16 @@ const getMisAnticipos = async (idUsuario, rolNombre) => {
         include: [{ model: Vehiculo, as: 'vehiculo' }],
       });
       anticipo.ruta.dataValues.vehiculo = par?.vehiculo || null;
+
+      // Avance de sedes de la ruta — el móvil lo usa para deshabilitar el botón
+      // "legalizar" hasta que el conductor haya dejado todos los paquetes (mismo
+      // candado que aplica anticipoService.update). Solo tiene sentido con la
+      // ruta en curso. require lazy para evitar el ciclo de módulos.
+      if (anticipo.ruta.estado === 'En Ruta') {
+        const { total, completadas } = await require('./rutaService').calcularSedesRuta(anticipo.idRuta);
+        anticipo.ruta.dataValues.sedesTotales = total;
+        anticipo.ruta.dataValues.sedesCompletadas = completadas;
+      }
     }
   }
 

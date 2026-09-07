@@ -64,7 +64,10 @@ const createValidation = [
     .notEmpty().withMessage('El municipio de destino del destinatario es obligatorio')
     .isInt().withMessage('ID de destino debe ser un número entero'),
   body('destinatario.correoDestinatario')
-    .optional({ nullable: true, checkFalsy: true })
+    // Obligatorio: es el canal de contacto para la insistidera del distribuidor
+    // cuando no logra la entrega (ver LOGICA.md, "Entrega en dos fases").
+    .notEmpty().withMessage('El correo del destinatario es obligatorio')
+    .bail()
     .isEmail().withMessage('El correo del destinatario no es válido')
     .isLength({ max: 150 }).withMessage('El correo del destinatario es demasiado largo'),
   body('destinatario.direccionDestinatario')
@@ -141,7 +144,10 @@ const updateValidation = [
     .notEmpty().withMessage('El municipio de destino del destinatario es obligatorio')
     .isInt().withMessage('ID de destino debe ser un número entero'),
   body('destinatario.correoDestinatario')
-    .optional({ nullable: true, checkFalsy: true })
+    .if(body('destinatario').exists())
+    // Obligatorio: canal de contacto para la insistidera del distribuidor.
+    .notEmpty().withMessage('El correo del destinatario es obligatorio')
+    .bail()
     .isEmail().withMessage('El correo del destinatario no es válido')
     .isLength({ max: 150 }).withMessage('El correo del destinatario es demasiado largo'),
   body('destinatario.direccionDestinatario')
