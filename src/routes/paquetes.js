@@ -20,6 +20,14 @@ router.get('/', paqueteController.getByConductor);
 router.get('/sede', authorize('distribuidor'), paqueteController.getPorSede);
 
 /**
+ * GET /paquetes/sede/historial  (solo rol distribuidor)
+ * Paquetes que el distribuidor autenticado ya cerró (Entregado/Devuelto) — su
+ * propio historial. Declarada antes de las rutas con ":id" por la misma razón
+ * que "/sede". Ver getHistorialSedeDistribuidor().
+ */
+router.get('/sede/historial', authorize('distribuidor'), paqueteController.getHistorialSede);
+
+/**
  * PATCH /paquetes/sede  (solo rol conductor, form-data opcional: file + novedades)
  * El conductor del tramo troncal marca DE UNA SOLA VEZ todos los paquetes que
  * dejó en la sede de un municipio (parada o destino final): "Por entregar" ->
@@ -35,18 +43,21 @@ router.patch('/sede', authorize('conductor'), upload.single('file'), paqueteCont
 router.patch('/:id/evidencia', upload.single('file'), paqueteController.subirEvidencia);
 
 /**
- * PATCH /paquetes/:id/entrega-final  (solo rol distribuidor, form-data opcional: file)
+ * PATCH /paquetes/:id/entrega-final  (solo rol distribuidor, form-data file
+ * OBLIGATORIO + body novedad OBLIGATORIA)
  * Entrega final al destinatario desde "En sede de destino": accion =
  * 'Entregado' | 'Devuelto' | 'Intento'. Ver registrarEntregaFinal().
  */
 router.patch('/:id/entrega-final', authorize('distribuidor'), upload.single('file'), paqueteController.registrarEntregaFinal);
 
 /**
- * PATCH /paquetes/:id/repartidor-local
- * Asignar el repartidor local que hace la entrega puerta a puerta en el
- * municipio de destino — solo admin, solo aplica a un paquete "En sede de
- * destino" (ver encomiendaService.asignarRepartidorLocal).
+ * GET /paquetes/:id/historial-entrega  (panel web -- módulo Ventas -- Y móvil
+ * del distribuidor)
+ * Historial completo de la entrega final de un paquete — una fila por cada
+ * intento/entrega/devolución registrada. Sin authorize/authorizePermission
+ * acá: la autorización (admin con permiso, o distribuidor dueño de la sede)
+ * se resuelve dentro del controller — ver getHistorialEntrega().
  */
-router.patch('/:id/repartidor-local', authorize('admin'), paqueteController.asignarRepartidorLocal);
+router.get('/:id/historial-entrega', paqueteController.getHistorialEntrega);
 
 module.exports = router;

@@ -47,13 +47,10 @@ exports.subirEvidencia = async (req, res, next) => {
     if (!paquete) {
       return res.status(404).json({ success: false, message: 'Paquete no encontrado' });
     }
-    // Dos conductores distintos pueden tocar este paquete según en qué punto del
-    // flujo esté: el del tramo troncal (asignacion.idConductor, para "Por entregar"
-    // y para la entrega directa de siempre) o el repartidor local ya asignado
-    // (idConductorEntrega, solo aplica una vez el paquete está "En sede de destino").
+    // Solo el conductor del tramo troncal puede tocar este paquete por esta vía
+    // (el flujo viejo de "repartidor local" se retiró — ver LOGICA.md).
     const esConductorTroncal = paquete.asignacion?.idConductor === conductor.idConductor;
-    const esRepartidorLocal = paquete.idConductorEntrega === conductor.idConductor;
-    if (!esConductorTroncal && !esRepartidorLocal) {
+    if (!esConductorTroncal) {
       return res.status(403).json({ success: false, message: 'Este paquete no está asignado a tu cuenta' });
     }
 
@@ -122,9 +119,27 @@ exports.getPorSede = async (req, res, next) => {
   }
 };
 
+// GET /api/paquetes/sede/historial — paquetes que el distribuidor autenticado ya
+// cerró (Entregado/Devuelto). Ver getHistorialSedeDistribuidor().
+exports.getHistorialSede = async (req, res, next) => {
+  try {
+    if (req.usuario.rol?.nombre !== 'distribuidor') {
+      return res.status(403).json({ success: false, message: 'Solo los distribuidores pueden acceder a su historial de entregas' });
+    }
+    const paquetes = await encomiendaService.getHistorialSedeDistribuidor(req.usuario.idUsuario);
+    res.json({ success: true, data: paquetes });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // PATCH /api/paquetes/:id/entrega-final — el distribuidor de la sede registra la
-// entrega final: accion = 'Entregado' | 'Devuelto' | 'Intento'. Foto opcional,
-// novedad obligatoria para 'Devuelto'/'Intento' (ver registrarEntregaFinal).
+// entrega final: accion = 'Entregado' | 'Devuelto' | 'Intento'. Foto y novedad
+// OBLIGATORIAS en las 3 (a diferencia del conductor en dejarEnSede, que sigue
+// opcional — ver LOGICA.md, "Evidencia de entrega final obligatoria"): este es
+// el momento de cara al cliente final, el que importaría en una disputa. La
+// validación de longitud de "novedad" vive en encomiendaService.registrarEntregaFinal;
+// acá solo se valida la presencia (forma de la petición).
 exports.registrarEntregaFinal = async (req, res, next) => {
   try {
     if (req.usuario.rol?.nombre !== 'distribuidor') {
@@ -136,27 +151,57 @@ exports.registrarEntregaFinal = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'El campo "accion" es requerido' });
     }
     const fotoEntrega = req.file?.secure_url || null;
+    if (!fotoEntrega) {
+      return res.status(400).json({ success: false, message: 'La foto de evidencia es obligatoria' });
+    }
     const paquete = await encomiendaService.registrarEntregaFinal(id, {
       accion,
       novedad: req.body.novedad || '',
       fotoEntrega,
       idUsuarioDistribuidor: req.usuario.idUsuario,
     });
-    res.json({ success: true, message: 'Entrega registrada', data: paquete });
+    // Mensaje según la acción real -- antes decía "Entrega registrada" siempre,
+    // aunque el distribuidor hubiera marcado "No entregado" o solo un intento
+    // fallido, lo cual sonaba a que sí se entregó.
+    const MENSAJES = {
+      Entregado: 'Entrega registrada',
+      Devuelto: 'Paquete marcado como no entregado',
+      Intento: 'Intento registrado',
+    };
+    res.json({ success: true, message: MENSAJES[accion] || 'Registro actualizado', data: paquete });
   } catch (error) {
     next(error);
   }
 };
 
-exports.asignarRepartidorLocal = async (req, res, next) => {
+// GET /api/paquetes/:id/historial-entrega — panel web (módulo Ventas, modal
+// "Ver historial") Y móvil del distribuidor (ambas pestañas de su pantalla
+// Paquetes). Sin authorize/authorizePermission en la ruta a propósito -- dos
+// caminos de acceso distintos que no se pueden expresar con un solo
+// middleware: admin con permiso 'consultar_venta' (sin restricción de sede) o
+// distribuidor que cubra la sede de este paquete específico
+// (distribuidorCubrePaquete, mismo criterio que registrarEntregaFinal). Ver
+// encomiendaService.getHistorialEntregaFinal y LOGICA.md, "Historial de
+// entrega final — también en el móvil".
+exports.getHistorialEntrega = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { idConductor } = req.body;
-    if (!idConductor) {
-      return res.status(400).json({ success: false, message: 'El campo "idConductor" es requerido' });
+    const permisos = req.usuario.rol?.permisos?.map((p) => p.nombre) || [];
+    const esAdmin = permisos.includes('consultar_venta');
+    const esDistribuidor = req.usuario.rol?.nombre === 'distribuidor';
+
+    if (!esAdmin && !esDistribuidor) {
+      return res.status(403).json({ success: false, message: 'Acceso denegado' });
     }
-    const paquete = await encomiendaService.asignarRepartidorLocal(id, parseInt(idConductor));
-    res.json({ success: true, message: 'Repartidor local asignado exitosamente', data: paquete });
+    if (!esAdmin) {
+      const cubre = await encomiendaService.distribuidorCubrePaquete(id, req.usuario.idUsuario);
+      if (!cubre) {
+        return res.status(403).json({ success: false, message: 'No tienes acceso al historial de este paquete' });
+      }
+    }
+
+    const historial = await encomiendaService.getHistorialEntregaFinal(id);
+    res.json({ success: true, data: historial });
   } catch (error) {
     next(error);
   }

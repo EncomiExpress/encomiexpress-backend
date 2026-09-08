@@ -1,11 +1,11 @@
 const AppError = require('../errors/appError');
 
 // "En sede de destino" es el estado intermedio de un paquete que el conductor del
-// tramo troncal ya dejó en la sede de su municipio, a la espera (o ya con) un
-// repartidor local asignado (idConductorEntrega en Paquete) para la entrega puerta
-// a puerta — ver encomiendaService.actualizarEstadoPaquete/asignarRepartidorLocal.
-// No es terminal: determinarEstadoEncomienda de abajo lo trata igual que "Por
-// entregar" (la venta no se cierra hasta que el paquete llegue a Entregado/Devuelto).
+// tramo troncal ya dejó en la sede de su municipio, a la espera de que el
+// distribuidor de esa sede registre la entrega final — ver
+// encomiendaService.registrarEntregaFinal. No es terminal: determinarEstadoEncomienda
+// de abajo lo trata igual que "Por entregar" (la venta no se cierra hasta que el
+// paquete llegue a Entregado/Devuelto).
 const ESTADOS_PAQUETE = ['Por entregar', 'En sede de destino', 'Entregado', 'Devuelto'];
 
 const ESTADO_ALIASES = {

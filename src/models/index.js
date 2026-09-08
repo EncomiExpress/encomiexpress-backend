@@ -18,12 +18,12 @@ const Destino = require('./destino');
 const Ruta = require('./ruta');
 const RutaVehiculoConductor = require('./rutaVehiculoConductor');
 const RutaParada = require('./rutaParada');
-const ConductorSede = require('./conductorSede');
 const UsuarioSede = require('./usuarioSede');
 const AnticipoExcedente = require('./anticipoExcedente');
 const EncomiendaVenta = require('./encomiendaVenta');
 const Destinatario = require('./destinatario');
 const Paquete = require('./paquete');
+const PaqueteEntregaFinal = require('./paqueteEntregaFinal');
 const Configuracion = require('./configuracion');
 
 // ============================================
@@ -86,24 +86,17 @@ RutaVehiculoConductor.belongsTo(Conductor, { foreignKey: 'idConductor', as: 'con
 RutaVehiculoConductor.hasMany(Paquete, { foreignKey: 'idRutaVehiculoConductor', as: 'paquetes' });
 Paquete.belongsTo(RutaVehiculoConductor, { foreignKey: 'idRutaVehiculoConductor', as: 'asignacion' });
 
-// Conductor - Paquete (1:N) — repartidor local de entrega puerta a puerta, distinto
-// del conductor del tramo troncal de arriba (ver comentario en models/paquete.js).
-Conductor.hasMany(Paquete, { foreignKey: 'idConductorEntrega', as: 'paquetesEntregaLocal' });
-Paquete.belongsTo(Conductor, { foreignKey: 'idConductorEntrega', as: 'conductorEntrega' });
-
 // Usuario - Paquete (1:N) — distribuidor de sede (rol 'distribuidor') que hizo la
-// entrega final (Entregado/Devuelto) desde "En sede de destino". Distinto del
-// repartidor local conductor de idConductorEntrega (camino previo que se conserva).
+// entrega final (Entregado/Devuelto) desde "En sede de destino".
 Usuario.hasMany(Paquete, { foreignKey: 'idUsuarioEntrega', as: 'paquetesEntregaSede' });
 Paquete.belongsTo(Usuario, { foreignKey: 'idUsuarioEntrega', as: 'usuarioEntrega' });
 
-// Conductor - ConductorSede (1:N) — municipios donde ese conductor ha hecho de
-// repartidor local. Destino - ConductorSede (1:N) — qué conductores han repartido
-// en ese municipio.
-Conductor.hasMany(ConductorSede, { foreignKey: 'idConductor', as: 'sedesReparto' });
-ConductorSede.belongsTo(Conductor, { foreignKey: 'idConductor', as: 'conductor' });
-Destino.hasMany(ConductorSede, { foreignKey: 'idDestino', as: 'repartidoresLocales' });
-ConductorSede.belongsTo(Destino, { foreignKey: 'idDestino', as: 'destino' });
+// Paquete - PaqueteEntregaFinal (1:N) — historial completo de cada llamada a
+// registrarEntregaFinal (Entregado/Devuelto/Intento), ver models/paqueteEntregaFinal.js.
+Paquete.hasMany(PaqueteEntregaFinal, { foreignKey: 'idPaquete', as: 'historialEntrega' });
+PaqueteEntregaFinal.belongsTo(Paquete, { foreignKey: 'idPaquete', as: 'paquete' });
+Usuario.hasMany(PaqueteEntregaFinal, { foreignKey: 'idUsuarioDistribuidor', as: 'registrosEntregaFinal' });
+PaqueteEntregaFinal.belongsTo(Usuario, { foreignKey: 'idUsuarioDistribuidor', as: 'distribuidor' });
 
 // Destino - Ruta (1:N)
 Destino.hasMany(Ruta, { foreignKey: 'idDestino', as: 'rutas' });
@@ -181,11 +174,11 @@ module.exports = {
   Ruta,
   RutaVehiculoConductor,
   RutaParada,
-  ConductorSede,
   UsuarioSede,
   AnticipoExcedente,
   EncomiendaVenta,
   Destinatario,
   Paquete,
+  PaqueteEntregaFinal,
   Configuracion
 };

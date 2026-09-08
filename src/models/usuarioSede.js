@@ -3,9 +3,8 @@ const sequelize = require('../config/database');
 
 // Sedes (municipios) que cubre un usuario con rol 'distribuidor' — la persona de
 // la sede que hace la entrega final al destinatario, después de que el conductor
-// del tramo troncal dejó el paquete "En sede de destino". A diferencia de
-// ConductorSede (que se puebla solo al asignar un repartidor local), estas filas
-// se registran a mano desde el módulo Usuarios de la web al crear/editar un
+// del tramo troncal dejó el paquete "En sede de destino". Estas filas se
+// registran a mano desde el módulo Usuarios de la web al crear/editar un
 // distribuidor. Un distribuidor puede cubrir varias sedes.
 const UsuarioSede = sequelize.define('UsuarioSede', {
   idUsuarioSede: {

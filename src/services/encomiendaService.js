@@ -1,10 +1,17 @@
-const { EncomiendaVenta, Destinatario, Paquete, Cliente, Ruta, RutaParada, RutaVehiculoConductor, Vehiculo, Conductor, Destino, Usuario, ConductorSede, UsuarioSede, sequelize } = require('../models');
+const { EncomiendaVenta, Destinatario, Paquete, PaqueteEntregaFinal, Cliente, Ruta, RutaParada, RutaVehiculoConductor, Vehiculo, Conductor, Destino, Usuario, UsuarioSede, sequelize } = require('../models');
 const AppError = require('../errors/appError');
 const crypto = require('crypto');
 const { normalizarEstadoPaquete, determinarEstadoEncomienda } = require('./paqueteStateUtils');
 const { sendPaqueteDevueltoEmail } = require('../config/email');
+const { MAX_DIAS_ANTICIPACION } = require('../utils/horarioLaboral');
 
 const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia'];
+// Tope de la "novedad"/observación de un paquete en Entrega en dos fases — mismo
+// valor que ya usa "Observaciones" en Ruta/Venta (ver rutasValidator.js), aunque
+// acá no hay un validators/paquetesValidator.js: este módulo valida a mano en el
+// controller/servicio, no vía express-validator (gap preexistente, no se creó
+// uno nuevo solo para esto).
+const NOVEDAD_MAX_LENGTH = 500;
 const ESTADOS_PAGO_VALIDOS = ['Pendiente', 'Pagado'];
 
 const sumarDias = (fechaStr, dias) => {
@@ -15,12 +22,21 @@ const sumarDias = (fechaStr, dias) => {
 
 // La fecha estimada de entrega de un paquete no puede caer antes de que el vehículo
 // llegue a su destino — no tiene sentido prometer una entrega antes de que la ruta
-// esté físicamente allá. No hay tope superior: una vez el vehículo llegó, la entrega
-// (directa o vía repartidor local desde "En sede de destino") puede tardar cualquier
-// cantidad de días adicionales. Si ruta.fechaLlegadaEstimada es null (ruta creada antes
-// de esta validación), se cae al mínimo anterior de un día después de la salida.
+// esté físicamente allá. Tope superior: MAX_DIAS_ANTICIPACION (90) días desde hoy,
+// mismo horizonte y misma constante que ya limita fechaSalida/fechaLlegadaEstimada de
+// una Ruta (ver rutaService.validarHorarioRuta) — sin este tope alguien podía dejar
+// "prometida" una entrega a meses/años vista. Si ruta.fechaLlegadaEstimada es null
+// (ruta creada antes de esta validación), el mínimo se cae al de un día después de la
+// salida.
 const validarFechaEntrega = (fechaEstimadaEntrega, ruta) => {
   if (!fechaEstimadaEntrega || !ruta.fechaSalida) return;
+  // "Hoy" en hora Colombia — mismo patrón que rutaService.validarHorarioRuta, para que
+  // el tope no dependa de en qué zona horaria corre el servidor (Render corre en UTC).
+  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+  const maxPermitido = sumarDias(hoy, MAX_DIAS_ANTICIPACION);
+  if (fechaEstimadaEntrega > maxPermitido) {
+    throw new AppError(`La fecha estimada de entrega no puede ser más de ${MAX_DIAS_ANTICIPACION} días a partir de hoy (máximo el ${maxPermitido})`, 400);
+  }
   if (ruta.fechaLlegadaEstimada) {
     if (fechaEstimadaEntrega < ruta.fechaLlegadaEstimada) {
       throw new AppError(`La fecha estimada de entrega debe ser igual o posterior a la llegada de la ruta (mínimo el ${ruta.fechaLlegadaEstimada})`, 400);
@@ -664,14 +680,12 @@ const update = async (id, data) => {
   }
 };
 
-// Dos caminos válidos para un paquete, según si pasa o no por una sede intermedia
-// (ver ../../../LOGICA.md, "Paquetes — entrega en sede y reasignación local"):
-//   A) Por entregar -> Entregado/Devuelto directo — el mismo de siempre, lo marca
-//      el conductor del tramo troncal mientras su ruta sigue "En Ruta".
-//   B) Por entregar -> En sede de destino (troncal, ruta "En Ruta") -> [se asigna
-//      un repartidor local, ver asignarRepartidorLocal] -> Entregado/Devuelto,
-//      marcado por ESE repartidor — ya no depende de que la ruta troncal siga "En
-//      Ruta" (el camión grande ya pudo haberse ido a la siguiente parada).
+// Único camino válido hoy para este endpoint legacy (ver ../../../LOGICA.md,
+// "Repartidor local — retirado"): Por entregar -> Entregado/Devuelto directo,
+// lo marca el conductor del tramo troncal mientras su ruta sigue "En Ruta". Un
+// paquete que ya llegó a "En sede de destino" YA NO se puede marcar
+// Entregado/Devuelto por acá — eso es exclusivo del distribuidor de esa sede
+// (PATCH /paquetes/:id/entrega-final, ver registrarEntregaFinal()).
 const actualizarEstadoPaquete = async (idPaquete, estado, { observacion = '', fotoEntrega = null } = {}) => {
   const paquete = await Paquete.findByPk(idPaquete, {
     include: [{ model: RutaVehiculoConductor, as: 'asignacion', include: [{ model: Ruta, as: 'ruta' }] }],
@@ -700,11 +714,9 @@ const actualizarEstadoPaquete = async (idPaquete, estado, { observacion = '', fo
       throw new AppError('Solo se puede actualizar un paquete mientras su ruta está "En Ruta"', 409);
     }
   } else if (estadoAnterior === 'En sede de destino') {
-    // Entrega local (Entregado/Devuelto) — ya no depende del estado de la ruta
-    // troncal, depende de tener un repartidor local asignado.
-    if (!paquete.idConductorEntrega) {
-      throw new AppError('Este paquete todavía no tiene un repartidor local asignado', 409);
-    }
+    // Ya no aplica el flujo viejo de "repartidor local" (retirado, ver LOGICA.md)
+    // — un paquete que llegó a la sede solo lo cierra el distribuidor de esa sede.
+    throw new AppError('Este paquete ya está en sede de destino: la entrega final la registra el distribuidor de esa sede', 409);
   } else {
     // Entrega directa del tramo troncal (estadoAnterior === 'Por entregar') — mismo
     // comportamiento de siempre.
@@ -727,13 +739,13 @@ const actualizarEstadoPaquete = async (idPaquete, estado, { observacion = '', fo
     }
   });
 
-  // Este paquete acaba de salir de "Por entregar" (a "Entregado"/"Devuelto" directo,
-  // Camino A, o a "En sede de destino") — puede que con este último la ruta ya tenga
-  // todas sus sedes completas. Mismo disparador best-effort que dejarPaquetesEnSede
-  // (Camino B); sin esto, una ruta que se completa entera por Camino A (sin pasar
-  // nunca por dejarPaquetesEnSede) nunca dispara el auto-completado y se queda "En
-  // Ruta" para siempre aunque no le falte nada. require lazy para no atar el orden
-  // de carga de módulos.
+  // Este paquete acaba de salir de "Por entregar" a "Entregado"/"Devuelto" directo
+  // — puede que con eso la ruta ya tenga todas sus sedes completas. Mismo
+  // disparador best-effort que dejarPaquetesEnSede; sin esto, una ruta que se
+  // completa entera por esta vía directa (sin pasar nunca por
+  // dejarPaquetesEnSede) nunca dispara el auto-completado y se queda "En Ruta"
+  // para siempre aunque no le falte nada. require lazy para no atar el orden de
+  // carga de módulos.
   if (estadoAnterior === 'Por entregar' && paquete.asignacion?.idRuta) {
     const autoCompletar = require('./rutaService').intentarAutoCompletar;
     await autoCompletar(paquete.asignacion.idRuta);
@@ -760,49 +772,6 @@ const actualizarEstadoPaquete = async (idPaquete, estado, { observacion = '', fo
   return paquete;
 };
 
-// Asigna (o reemplaza) el repartidor local de un paquete que ya está "En sede de
-// destino" — acción exclusiva del admin (el conductor troncal no elige quién
-// entrega localmente). De paso registra en ConductorSede que este conductor ya
-// entregó en ese municipio, para que la próxima vez que se arme una lista de
-// repartidores disponibles ahí aparezca — no hace falta ninguna pantalla aparte
-// para dar de alta esa cobertura de antemano.
-const asignarRepartidorLocal = async (idPaquete, idConductor) => {
-  const paquete = await Paquete.findByPk(idPaquete, {
-    include: [{ model: EncomiendaVenta, as: 'encomienda', include: [{ model: Destinatario, as: 'destinatario' }] }],
-  });
-  if (!paquete) throw new AppError('Paquete no encontrado', 404);
-
-  if (paquete.estado !== 'En sede de destino') {
-    throw new AppError('Solo se puede asignar un repartidor local a un paquete que esté "En sede de destino"', 409);
-  }
-
-  const idDestino = paquete.encomienda?.destinatario?.idDestino;
-  if (!idDestino) {
-    throw new AppError('Esta venta no tiene un municipio de destino registrado', 409);
-  }
-
-  const conductor = await Conductor.findByPk(idConductor);
-  if (!conductor) throw new AppError('Conductor no encontrado', 404);
-  if (conductor.habilitado === false) {
-    throw new AppError('Este conductor está inhabilitado y no se puede asignar como repartidor', 400);
-  }
-
-  await sequelize.transaction(async (t) => {
-    await paquete.update({ idConductorEntrega: idConductor }, { transaction: t });
-
-    const cobertura = await ConductorSede.findOne({ where: { idConductor, idDestino }, transaction: t });
-    if (!cobertura) {
-      await ConductorSede.create({ idConductor, idDestino }, { transaction: t });
-    } else if (!cobertura.habilitado) {
-      await cobertura.update({ habilitado: true }, { transaction: t });
-    }
-  });
-
-  return Paquete.findByPk(idPaquete, {
-    include: [{ model: Conductor, as: 'conductorEntrega', include: [{ model: Usuario, as: 'usuario' }] }],
-  });
-};
-
 // El conductor del tramo troncal legaliza DE UNA SOLA VEZ todos los paquetes que
 // dejó en la sede de un municipio (una parada intermedia o el destino final):
 // pasan de "Por entregar" -> "En sede de destino". La entrega final al
@@ -814,6 +783,13 @@ const dejarPaquetesEnSede = async (idConductor, { idRuta, idDestino, novedades =
 
   if (!idRuta || !idDestino) {
     throw new AppError('Faltan datos de la ruta o de la sede', 400);
+  }
+  // Sigue siendo opcional (a diferencia de la novedad de registrarEntregaFinal,
+  // ver comentario ahí) — este es un traspaso interno masivo (camión -> sede),
+  // no la entrega real al destinatario, así que no se le exige evidencia. Solo
+  // se le pone tope de longitud si el conductor sí escribe algo.
+  if (novedades.length > NOVEDAD_MAX_LENGTH) {
+    throw new AppError(`La novedad no puede exceder ${NOVEDAD_MAX_LENGTH} caracteres`, 400);
   }
 
   const ruta = await Ruta.findByPk(idRuta, { attributes: ['idRuta', 'estado', 'idDestino'] });
@@ -940,17 +916,69 @@ const getPaquetesEnSede = async (idUsuarioDistribuidor) => {
   });
 };
 
+// Paquetes que ESTE distribuidor ya cerró (Entregado/Devuelto) — su propio
+// historial, a diferencia de getPaquetesEnSede (arriba) que solo trae lo
+// pendiente. Filtra por idUsuarioEntrega (quién lo cerró), no por sede — un
+// distribuidor solo puede cerrar paquetes de sus propias sedes de todos modos
+// (registrarEntregaFinal ya lo valida), así que equivale a lo mismo, pero es
+// más directo. Sin paginación de servidor a propósito, mismo patrón que
+// getByConductor/getMisAnticipos — el móvil pagina en el cliente ("Mostrar 5
+// más"). Ver LOGICA.md, "Historial de entrega final — tab del distribuidor".
+const getHistorialSedeDistribuidor = async (idUsuarioDistribuidor) => {
+  const { Op } = sequelize.Sequelize;
+
+  return Paquete.findAll({
+    where: { estado: { [Op.in]: ['Entregado', 'Devuelto'] }, idUsuarioEntrega: idUsuarioDistribuidor },
+    include: [
+      {
+        model: EncomiendaVenta, as: 'encomienda', required: true,
+        include: [
+          { model: Cliente, as: 'cliente', attributes: ['idCliente', 'nombre', 'apellido', 'telefono'] },
+          {
+            model: Destinatario, as: 'destinatario', required: true,
+            include: [{ model: Destino, as: 'destino', attributes: ['idDestino', 'municipio', 'departamento'] }],
+          },
+        ],
+      },
+      {
+        model: RutaVehiculoConductor, as: 'asignacion',
+        include: [{ model: Ruta, as: 'ruta', attributes: ['idRuta', 'origen', 'estado'], include: [{ model: Destino, as: 'destino', attributes: ['municipio'] }] }],
+      },
+    ],
+    order: [['fechaUltimoEstado', 'DESC'], ['idPaquete', 'DESC']],
+  });
+};
+
 const ACCIONES_ENTREGA_FINAL = ['Entregado', 'Devuelto', 'Intento'];
+
+// Tope de intentos fallidos por paquete (decisión de la usuaria, 2026-09-08):
+// un número fijo de intentos, sin ningún control de cada cuánto se puede
+// registrar uno -- el distribuidor decide libremente cuándo insistir, el
+// sistema no impone ninguna cadencia ni compara fechas entre intentos
+// (fechaUltimoIntento solo queda guardada como dato, nunca se usa para
+// bloquear). "No entregado" sigue disponible en cualquier momento (decisión
+// explícita: el distribuidor puede cerrarlo antes si ya sabe que es
+// imposible entregar, ej. dirección inexistente) -- el tope solo bloquea
+// seguir sumando 'Intento'. Ver LOGICA.md, "Tope de intentos de entrega".
+const MAX_INTENTOS_ENTREGA = 5;
 
 // Entrega final al destinatario, desde "En sede de destino" — la registra el
 // distribuidor de la sede (rol 'distribuidor', un Usuario), no un conductor.
 //   - 'Entregado' / 'Devuelto': estado terminal. En la UI 'Devuelto' se muestra
-//     como "No entregado" (el valor interno no cambia). Novedad obligatoria para
-//     'Devuelto'.
+//     como "No entregado" (el valor interno no cambia).
 //   - 'Intento': NO cambia el estado (sigue "En sede de destino") — solo suma al
 //     contador de insistidera (intentosEntrega) y actualiza fechaUltimoIntento.
-//     Novedad obligatoria.
-// Foto opcional en las tres. Ver LOGICA.md, "Entrega en dos fases".
+// Novedad y foto OBLIGATORIAS en las 3 (2026-09-08) — antes solo la novedad, y
+// solo para Devuelto/Intento; Entregado no pedía nada. Con eso, un "Entregado"
+// sin evidencia propia se guardaba con `novedad || paquete.observacionEstado`,
+// heredando en silencio la nota/foto que el CONDUCTOR dejó al llegar a la sede
+// (dejarPaquetesEnSede) — dos pasos distintos del proceso mezclados bajo el
+// mismo campo, sin ninguna marca de cuál es cuál. Exigir siempre novedad+foto
+// acá hace que el fallback nunca se dispare en la práctica: el registro que
+// queda siempre es la evidencia real del distribuidor, no algo heredado. La
+// foto se valida como obligatoria en el controller (paqueteController.js,
+// donde se lee req.file); acá solo la novedad — texto en el body. Ver
+// LOGICA.md, "Entrega en dos fases" y "Evidencia de entrega final obligatoria".
 const registrarEntregaFinal = async (idPaquete, { accion, novedad = '', fotoEntrega = null, idUsuarioDistribuidor } = {}) => {
   if (!ACCIONES_ENTREGA_FINAL.includes(accion)) {
     throw new AppError(`Acción inválida. Debe ser una de: ${ACCIONES_ENTREGA_FINAL.join(', ')}`, 400);
@@ -981,28 +1009,47 @@ const registrarEntregaFinal = async (idPaquete, { accion, novedad = '', fotoEntr
     throw new AppError('No tienes asignada la sede de este paquete', 403);
   }
 
-  if ((accion === 'Devuelto' || accion === 'Intento') && !novedad.trim()) {
-    throw new AppError('La novedad es obligatoria para registrar un intento fallido o marcar un paquete como no entregado', 400);
+  if (!novedad.trim()) {
+    throw new AppError('La novedad es obligatoria para registrar la entrega final', 400);
+  }
+  if (novedad.length > NOVEDAD_MAX_LENGTH) {
+    throw new AppError(`La novedad no puede exceder ${NOVEDAD_MAX_LENGTH} caracteres`, 400);
   }
 
   const esIntento = accion === 'Intento';
+  if (esIntento && (paquete.intentosEntrega || 0) >= MAX_INTENTOS_ENTREGA) {
+    throw new AppError(`Ya se registraron ${MAX_INTENTOS_ENTREGA} intentos para este paquete — no se pueden registrar más. Márcalo como Entregado o No entregado.`, 409);
+  }
 
   await sequelize.transaction(async (t) => {
+    // Historial completo -- una fila por cada llamada, sin importar la acción
+    // (ver models/paqueteEntregaFinal.js). novedad/fotoEntrega ya vienen
+    // garantizados no vacíos (validados arriba y en el controller), así que acá
+    // ya no hace falta el `|| valorAnterior` que sí tenía sentido cuando eran
+    // opcionales.
+    await PaqueteEntregaFinal.create({
+      idPaquete: paquete.idPaquete,
+      accion,
+      novedad,
+      foto: fotoEntrega,
+      idUsuarioDistribuidor,
+    }, { transaction: t });
+
     if (esIntento) {
       await paquete.update({
         intentosEntrega: (paquete.intentosEntrega || 0) + 1,
         fechaUltimoIntento: new Date(),
-        observacionEstado: novedad || paquete.observacionEstado || '',
+        observacionEstado: novedad,
+        fotoEntrega,
         idUsuarioEntrega: idUsuarioDistribuidor,
-        ...(fotoEntrega ? { fotoEntrega } : {}),
       }, { transaction: t });
     } else {
       await paquete.update({
         estado: accion, // 'Entregado' | 'Devuelto'
-        observacionEstado: novedad || paquete.observacionEstado || '',
+        observacionEstado: novedad,
+        fotoEntrega,
         fechaUltimoEstado: new Date(),
         idUsuarioEntrega: idUsuarioDistribuidor,
-        ...(fotoEntrega ? { fotoEntrega } : {}),
       }, { transaction: t });
 
       // Cierre de la venta si ya ningún paquete queda pendiente.
@@ -1036,6 +1083,40 @@ const registrarEntregaFinal = async (idPaquete, { accion, novedad = '', fotoEntr
       { model: Usuario, as: 'usuarioEntrega', attributes: ['idUsuario', 'nombre', 'apellido'] },
     ],
   });
+};
+
+// Historial completo de entrega final de un paquete (ver models/paqueteEntregaFinal.js)
+// -- todas las filas, en orden cronológico (más viejo primero, se lee como una
+// historia: intento 1, intento 2, ..., el cierre). Usado por el modal "Ver
+// historial" de ModalConsultarVenta.jsx (web) -- no existía antes de esta tabla,
+// así que un paquete cerrado antes de que se agregara simplemente no tiene filas.
+const getHistorialEntregaFinal = async (idPaquete) => {
+  const paquete = await Paquete.findByPk(idPaquete, { attributes: ['idPaquete'] });
+  if (!paquete) throw new AppError('Paquete no encontrado', 404);
+
+  return PaqueteEntregaFinal.findAll({
+    where: { idPaquete },
+    include: [{ model: Usuario, as: 'distribuidor', attributes: ['idUsuario', 'nombre', 'apellido'] }],
+    order: [['fecha', 'ASC'], ['idPaqueteEntregaFinal', 'ASC']],
+  });
+};
+
+// Autorización para GET /paquetes/:id/historial-entrega desde el móvil del
+// distribuidor -- mismo criterio que registrarEntregaFinal (cubreSede): solo
+// puede ver el historial de un paquete cuya sede (destino de la venta) cubra
+// vía usuario_sede. El admin (vía consultar_venta) no pasa por acá, tiene
+// acceso sin esta restricción -- ver paqueteController.getHistorialEntrega.
+const distribuidorCubrePaquete = async (idPaquete, idUsuarioDistribuidor) => {
+  const paquete = await Paquete.findByPk(idPaquete, {
+    include: [{ model: EncomiendaVenta, as: 'encomienda', include: [{ model: Destinatario, as: 'destinatario' }] }],
+  });
+  const idDestino = paquete?.encomienda?.destinatario?.idDestino;
+  if (!idDestino) return false;
+
+  const cubre = await UsuarioSede.findOne({
+    where: { idUsuario: idUsuarioDistribuidor, idDestino, habilitado: true },
+  });
+  return !!cubre;
 };
 
 const getPaquetesDevueltos = async ({ q, anio, mes, habilitado, page = 1, limit = 10 } = {}) => {
@@ -1292,10 +1373,12 @@ module.exports = {
   getPageOf,
   getRangoFechas,
   actualizarEstadoPaquete,
-  asignarRepartidorLocal,
   dejarPaquetesEnSede,
   getPaquetesEnSede,
+  getHistorialSedeDistribuidor,
   registrarEntregaFinal,
+  getHistorialEntregaFinal,
+  distribuidorCubrePaquete,
   getPaquetesDevueltos,
   getAniosDisponiblesPaquetesDevueltos,
 };
