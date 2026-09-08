@@ -57,12 +57,19 @@ const calcularSedesRuta = async (idRuta) => {
   return resumenSedes(sedesRuta, sedesConPendiente);
 };
 
-// Best-effort: pasa la ruta a "Completada" automáticamente cuando ya no falta
-// nada — todas las sedes con paquetes están completadas y no hay anticipo "En
-// Legalización" sin cerrar. Si updateEstado rechaza (condición de carrera u otra
-// validación), se deja la ruta "En Ruta" y NO se propaga el error: el admin
-// siempre puede completarla a mano. La llaman encomiendaService.dejarPaquetesEnSede
-// y anticipoService.update tras cada legalización.
+// Best-effort: pasa la ruta a "Completada" automáticamente en cuanto no falta
+// nada por entregar — todas las sedes con paquetes están completadas. El
+// anticipo YA NO es requisito (2026-09-07): la ruta y el anticipo son
+// independientes salvo por un solo sentido — la ruta dispara que el anticipo
+// pase a "En Legalización" al arrancar — nunca al revés. Si el conductor no ha
+// legalizado, el anticipo se queda "En Legalización" tal cual (updateEstado no
+// lo toca, ver la rama `Completada`) y lo legaliza después desde el móvil sin
+// que la ruta ya esté Completada le importe (anticipoService.update no depende
+// del estado de la ruta). Si updateEstado rechaza por otra razón (condición de
+// carrera, etc.), se deja la ruta "En Ruta" y NO se propaga el error: el admin
+// siempre puede completarla a mano. La llaman
+// encomiendaService.dejarPaquetesEnSede y encomiendaService.actualizarEstadoPaquete
+// (los dos caminos por los que un paquete puede salir de "Por entregar").
 const intentarAutoCompletar = async (idRuta) => {
   try {
     const ruta = await Ruta.findByPk(idRuta, { attributes: ['idRuta', 'estado'] });
@@ -70,12 +77,6 @@ const intentarAutoCompletar = async (idRuta) => {
 
     const { total, completadas } = await calcularSedesRuta(idRuta);
     if (total === 0 || completadas < total) return { completada: false, motivo: 'sedes' };
-
-    const anticipoPendiente = await AnticipoExcedente.findOne({
-      where: { idRuta, habilitado: true, estado: 'En Legalización' },
-      attributes: ['idAnticipoExcedente'],
-    });
-    if (anticipoPendiente) return { completada: false, motivo: 'anticipo' };
 
     await updateEstado(idRuta, 'Completada');
     return { completada: true };
@@ -219,18 +220,13 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
 
   const enCursoIds = data.filter(r => r.estado === 'En Ruta').map(r => r.idRuta);
   if (enCursoIds.length > 0) {
-    const pendientes = await AnticipoExcedente.findAll({
-      where: { idRuta: { [Op.in]: enCursoIds }, estado: 'En Legalización', habilitado: true },
-      attributes: ['idRuta'],
-    });
-    const pendientesSet = new Set(pendientes.map(a => a.idRuta));
-    data.forEach(r => { r.dataValues.pendienteLegalizacion = pendientesSet.has(r.idRuta); });
-
-    // Mismo mecanismo que pendienteLegalizacion, pero mirando los paquetes: si algún
-    // paquete de los pares de esta ruta sigue "Por entregar", el conductor todavía
-    // no lo dejó en la sede y la ruta no se puede completar (ver la validación
-    // PACKAGES_PENDING en updateEstado). "En sede de destino" ya NO cuenta como
-    // pendiente: es trabajo del distribuidor, con la ruta ya cerrada.
+    // Si algún paquete de los pares de esta ruta sigue "Por entregar", el conductor
+    // todavía no lo dejó en la sede y la ruta no se puede completar (ver la
+    // validación PACKAGES_PENDING en updateEstado). "En sede de destino" ya NO
+    // cuenta como pendiente: es trabajo del distribuidor, con la ruta ya cerrada.
+    // (El anticipo NO tiene un indicador acá a propósito — desde 2026-09-07 la
+    // ruta ya no depende de él para nada, ni para completarse manual ni
+    // automáticamente. Ver "Completar la ruta ya NO exige el anticipo legalizado".)
     const pares = await RutaVehiculoConductor.findAll({
       where: { idRuta: { [Op.in]: enCursoIds }, habilitado: true },
       attributes: ['idRutaVehiculoConductor', 'idRuta'],
@@ -249,8 +245,8 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
     }
 
     // Indicador "X de N sedes completadas" para las rutas En Ruta — el conductor
-    // avanza por sede (parada o destino final), no por paquete. Al llegar a N/N
-    // (+ anticipo cerrado) la ruta se auto-completa; ver intentarAutoCompletar.
+    // avanza por sede (parada o destino final), no por paquete. Al llegar a N/N la
+    // ruta se auto-completa; ver intentarAutoCompletar.
     for (const r of data) {
       if (r.estado === 'En Ruta') {
         const { total, completadas } = await calcularSedesRuta(r.idRuta);
@@ -1140,15 +1136,20 @@ const updateEstado = async (id, estado) => {
     );
   }
 
-  if (estado === 'Completada') {
-    const anticipoPendiente = await AnticipoExcedente.findOne({
-      where: { idRuta: ruta.idRuta, habilitado: true, estado: 'En Legalización' },
-      attributes: ['idAnticipoExcedente'],
-    });
-    if (anticipoPendiente) {
-      throw new AppError('El conductor aún no ha registrado los gastos del anticipo. Ingresa esa información antes de completar la ruta.', 409);
-    }
-  }
+  // Ya NO bloquea completar la ruta si el anticipo sigue "En Legalización" (antes sí
+  // lo hacía acá) — decisión de la usuaria: si el conductor se olvida de legalizar, la
+  // ruta quedaba atascada "En Ruta" para siempre (ni vehículo/conductor se liberaban,
+  // ni se podía programar el regreso), sin ninguna salida manual. El anticipo se queda
+  // "En Legalización" tal cual, sin tocarlo — a propósito no se calcula un excedente
+  // aquí como sí se hace al Cancelar (ver más abajo): asumir "gastó $0" tiene sentido
+  // en una ruta cancelada (probablemente casi no se gastó nada), pero en una ruta que
+  // sí se completó de verdad el conductor con certeza gastó algo — adivinar $0 ahí
+  // sería casi con seguridad incorrecto. El conductor sigue pudiendo legalizarlo
+  // después desde el móvil, sin importar que la ruta ya esté Completada (update() del
+  // anticipo no depende del estado de la ruta). intentarAutoCompletar() SÍ sigue
+  // esperando a que se legalice antes de auto-completar (tiene su propio chequeo
+  // aparte, antes de llamar a esta función) — este cambio solo abre la puerta manual
+  // para cuando el auto-completado nunca llega a pasar. Ver LOGICA.md.
 
   if ((estado === 'Completada' || estado === 'Cancelada') && ruta.estado === 'En Ruta') {
     for (const par of pares) {
@@ -1238,22 +1239,21 @@ const updateEstado = async (id, estado) => {
     // operativo: el admin lo pone en "Mantenimiento" si se dañó y le arma la ruta
     // que corresponda cuando esté listo. Ver LOGICA.md.
 
-    // El excedente se calcula aquí (no solo se fuerza el estado) porque la ruta se
-    // cancela antes de que el conductor legalice: si se dejara en 0, "Confirmar
-    // devolución" quedaría bloqueado para siempre (exige excedente > 0) y esa plata
-    // entregada quedaría huérfana, sin forma de cerrarse en el sistema.
-    const anticiposActivos = await AnticipoExcedente.findAll({
-      where: { idRuta: ruta.idRuta, habilitado: true, estado: { [Op.in]: ['Entregado', 'En Legalización'] } }
-    });
-    for (const anticipo of anticiposActivos) {
-      const excedenteCalculado = anticipo.valorAnticipo - anticipo.valorGastado;
-      anticipo.excedente = excedenteCalculado;
-      // Mismo criterio que anticipoService.update(): si no queda nada por
-      // resolver (valorAnticipo era 0, caso borde), no tiene sentido dejarlo
-      // "pendiente" — cierra directo.
-      anticipo.estado = excedenteCalculado === 0 ? 'Completado' : 'Excedente pendiente';
-      await anticipo.save();
-    }
+    // El anticipo NO se toca (2026-09-07, mismo criterio que "Completada ya no
+    // exige el anticipo legalizado" más arriba). Antes se calculaba acá el
+    // excedente asumiendo "gastó $0" — tenía sentido para una cancelación
+    // apenas arrancado el viaje, pero el candado SEDES_INCOMPLETAS de
+    // anticipoService.update() bloquea legalizar (registrar valorGastado)
+    // hasta dejar TODAS las sedes completas, así que un conductor que alcanzó
+    // a dejar carga en 1 o 2 de 3 sedes antes de que la ruta se cancelara
+    // NUNCA tuvo oportunidad de declarar lo que sí gastó (gasolina, peajes) —
+    // asumir $0 ahí le cobraría de vuelta plata que ya usó, casi seguro
+    // incorrecto. El anticipo se queda "Entregado"/"En Legalización" tal cual;
+    // anticipoService.update() ahora deja legalizarlo igual aunque la ruta ya
+    // esté "Cancelada" (se salta el candado de sedes en ese caso — ver ahí).
+    // Mismo "pendiente de decidir" que Completada: si el conductor nunca
+    // vuelve a abrir el móvil, este anticipo se queda sin cerrar (no hay vía
+    // admin para legalizar en su nombre). Ver LOGICA.md.
   }
 
   ruta.estado = estado;

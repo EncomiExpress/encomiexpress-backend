@@ -177,4 +177,21 @@ router.patch('/:id/estado-pago', cambiarEstadoPagoValidation, validate, encomien
  */
 router.patch('/:id/toggle-habilitado', authorizePermission('inhabilitar_venta'), encomiendaVentaController.toggleHabilitado);
 
+/**
+ * @swagger
+ * /encomiendas/{id}/reactivar:
+ *   patch:
+ *     summary: Reactiva una venta "Cancelada" a "Programada" sin editar ningún dato — solo para cuando la ruta ya volvió a servir sola
+ *     tags: [Encomiendas]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Venta reactivada
+ */
+router.patch('/:id/reactivar', authorizePermission('actualizar_venta'), encomiendaVentaController.reactivar);
+
 module.exports = router;

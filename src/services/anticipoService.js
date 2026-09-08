@@ -292,14 +292,24 @@ const update = async (id, data) => {
     // paquetes en las sedes de la ruta — no tiene forma de reunir los soportes
     // del viaje antes de llegar al destino final. Ver LOGICA.md, "Entrega en dos
     // fases". require lazy para no atar el orden de carga de módulos.
-    const { total, completadas } = await require('./rutaService').calcularSedesRuta(anticipo.idRuta);
-    if (total > 0 && completadas < total) {
-      throw new AppError(
-        `Aún no puedes legalizar el anticipo: faltan ${total - completadas} de ${total} sedes por completar. Deja todos los paquetes en las sedes de la ruta primero.`,
-        409,
-        null,
-        'SEDES_INCOMPLETAS'
-      );
+    //
+    // Excepción: ruta "Cancelada" (2026-09-07) — un viaje cancelado a mitad de
+    // camino nunca va a llegar a "todas las sedes completas" (el viaje ya no
+    // sigue), así que el candado se salta: el conductor puede legalizar lo que
+    // sí alcanzó a gastar hasta donde llegó. rutaService.updateEstado ya NO
+    // fuerza el excedente al cancelar justamente para dejarle esta puerta
+    // abierta (ver ahí, rama `estado === 'Cancelada'`).
+    const rutaDelAnticipo = await Ruta.findByPk(anticipo.idRuta, { attributes: ['idRuta', 'estado'] });
+    if (rutaDelAnticipo?.estado !== 'Cancelada') {
+      const { total, completadas } = await require('./rutaService').calcularSedesRuta(anticipo.idRuta);
+      if (total > 0 && completadas < total) {
+        throw new AppError(
+          `Aún no puedes legalizar el anticipo: faltan ${total - completadas} de ${total} sedes por completar. Deja todos los paquetes en las sedes de la ruta primero.`,
+          409,
+          null,
+          'SEDES_INCOMPLETAS'
+        );
+      }
     }
 
     // El gasto puede superar lo entregado — queda un excedente negativo (la
@@ -330,10 +340,13 @@ const update = async (id, data) => {
     fechaEntregaExcedente: cleanedFechaEntregaExcedente !== undefined ? cleanedFechaEntregaExcedente : anticipo.fechaEntregaExcedente
   });
 
-  // Al legalizar el anticipo (queda "Excedente pendiente"/"Completado") puede que
-  // la ruta ya no tenga nada pendiente y se pueda auto-completar — el otro
-  // disparador es dejarPaquetesEnSede. Best-effort; require lazy para no atar el
-  // orden de carga.
+  // Llamada defensiva/best-effort: en la práctica casi siempre es un no-op, porque
+  // legalizar ya exige sedes completas (SEDES_INCOMPLETAS arriba) salvo que la ruta
+  // esté "Cancelada" — y en ambos casos la ruta normalmente ya se auto-completó
+  // antes (por dejarPaquetesEnSede/actualizarEstadoPaquete) o no aplica (Cancelada
+  // no es "En Ruta", intentarAutoCompletar sale de una). Se deja de todos modos por
+  // si acaso (ej. el otro disparador falló por una condición de carrera). require
+  // lazy para no atar el orden de carga.
   if (autoEstado) {
     await require('./rutaService').intentarAutoCompletar(anticipo.idRuta);
   }

@@ -81,6 +81,16 @@ exports.toggleHabilitado = async (req, res, next) => {
   }
 };
 
+exports.reactivar = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const encomienda = await encomiendaService.reactivar(id);
+    res.json({ success: true, message: 'Venta reactivada exitosamente', data: encomienda });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.getPageOf = async (req, res, next) => {
   try {
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);

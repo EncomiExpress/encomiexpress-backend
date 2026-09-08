@@ -189,7 +189,7 @@ const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, metod
   const { count, rows: data } = await EncomiendaVenta.findAndCountAll({
     where,
     include: [
-      { model: Cliente, as: 'cliente' },
+      { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'destino' }] },
       RUTA_INCLUDE,
       { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
       paqueteIncludeConAsignacion({ separate: true }),
@@ -207,7 +207,7 @@ const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, metod
 const getById = async (id) => {
   const encomienda = await EncomiendaVenta.findByPk(id, {
     include: [
-      { model: Cliente, as: 'cliente' },
+      { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'destino' }] },
       RUTA_INCLUDE,
       { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
       paqueteIncludeConAsignacion(),
@@ -429,7 +429,7 @@ const create = async (data) => {
 
     const encomiendaCompleta = await EncomiendaVenta.findByPk(encomienda.idEncomiendaVenta, {
       include: [
-        { model: Cliente, as: 'cliente' },
+        { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'destino' }] },
         RUTA_INCLUDE,
         { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
         paqueteIncludeConAsignacion(),
@@ -650,7 +650,7 @@ const update = async (id, data) => {
 
     const encomiendaActualizada = await EncomiendaVenta.findByPk(id, {
       include: [
-        { model: Cliente, as: 'cliente' },
+        { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'destino' }] },
         RUTA_INCLUDE,
         { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
         paqueteIncludeConAsignacion(),
@@ -726,6 +726,18 @@ const actualizarEstadoPaquete = async (idPaquete, estado, { observacion = '', fo
       await encomienda.update({ estado: determinarEstadoEncomienda(paquetes, encomienda.estado) }, { transaction: t });
     }
   });
+
+  // Este paquete acaba de salir de "Por entregar" (a "Entregado"/"Devuelto" directo,
+  // Camino A, o a "En sede de destino") — puede que con este último la ruta ya tenga
+  // todas sus sedes completas. Mismo disparador best-effort que dejarPaquetesEnSede
+  // (Camino B); sin esto, una ruta que se completa entera por Camino A (sin pasar
+  // nunca por dejarPaquetesEnSede) nunca dispara el auto-completado y se queda "En
+  // Ruta" para siempre aunque no le falte nada. require lazy para no atar el orden
+  // de carga de módulos.
+  if (estadoAnterior === 'Por entregar' && paquete.asignacion?.idRuta) {
+    const autoCompletar = require('./rutaService').intentarAutoCompletar;
+    await autoCompletar(paquete.asignacion.idRuta);
+  }
 
   // Notificación al cliente por correo cuando un paquete pasa a "Devuelto" — solo en
   // la transición (no en cada re-guardado mientras ya estaba devuelto), y sin bloquear
@@ -1175,7 +1187,7 @@ const toggleHabilitado = async (id) => {
 
   const encomiendaActualizada = await EncomiendaVenta.findByPk(id, {
     include: [
-      { model: Cliente, as: 'cliente' },
+      { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'destino' }] },
       { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
       paqueteIncludeConAsignacion(),
       RUTA_INCLUDE,
@@ -1183,6 +1195,53 @@ const toggleHabilitado = async (id) => {
   });
 
   return { encomienda: encomiendaActualizada, pasoACancelada };
+};
+
+// Reactiva una venta "Cancelada" a "Programada" sin pasar por el wizard de Editar —
+// para el caso en que no hace falta cambiar ningún dato: la ruta ya volvió a servir
+// sola (ej. se canceló y se reprogramó) y no hay nada que reasignar. Único llamador:
+// el clic en "Programada" del menú de Estado en el listado (frontend:
+// EstadoVentaCancelada.jsx), que solo lo habilita cuando ya confirmó
+// rutaSigueSirviendo() del lado del cliente — se revalida igual acá, fuente de
+// verdad, por si la ruta cambió de estado justo en el medio. Ver LOGICA.md, "Ventas
+// — Cancelada e inhabilitar/habilitar".
+const reactivar = async (id) => {
+  const encomienda = await EncomiendaVenta.findByPk(id);
+  if (!encomienda) {
+    throw new AppError('Encomienda no encontrada', 404);
+  }
+  if (encomienda.habilitado === false) {
+    throw new AppError('Esta venta está inhabilitada: habilítala primero', 400);
+  }
+  if (encomienda.estado !== 'Cancelada') {
+    throw new AppError(`Esta venta ya está en estado "${encomienda.estado}": no hace falta reactivarla`, 400);
+  }
+
+  const ruta = await Ruta.findByPk(encomienda.idRuta);
+  if (!rutaSigueSirviendo(ruta)) {
+    throw new AppError('La ruta de esta venta ya no está disponible: edítala para asignarle una ruta nueva', 400);
+  }
+
+  // Mismo criterio que toggleHabilitado() al rehabilitar una venta "Programada" (ver
+  // arriba): se corrige la fecha SOLO si ya no alcanza el mínimo actual de la ruta —
+  // no se pisa un margen manual que sigue siendo válido. Distinto del "sincronizar
+  // siempre" de rutaService.update() (ahí el disparador es que la ruta cambió; acá
+  // el disparador es que la venta se reactiva, la ruta pudo no haber cambiado nada).
+  const minimaEntrega = ruta.fechaLlegadaEstimada || sumarDias(ruta.fechaSalida, 1);
+  if (!encomienda.fechaEstimadaEntrega || encomienda.fechaEstimadaEntrega < minimaEntrega) {
+    encomienda.fechaEstimadaEntrega = minimaEntrega;
+  }
+  encomienda.estado = 'Programada';
+  await encomienda.save();
+
+  return EncomiendaVenta.findByPk(id, {
+    include: [
+      { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'destino' }] },
+      { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
+      paqueteIncludeConAsignacion(),
+      RUTA_INCLUDE,
+    ],
+  });
 };
 
 // El orden por defecto de getAll es [fechaRegistro DESC, idEncomiendaVenta DESC] —
@@ -1229,6 +1288,7 @@ module.exports = {
   update,
   cambiarEstadoPago,
   toggleHabilitado,
+  reactivar,
   getPageOf,
   getRangoFechas,
   actualizarEstadoPaquete,
