@@ -58,6 +58,17 @@ const login = async (email, password) => {
 
   const permisos = usuario.rol?.permisos?.map(p => p.nombre) ?? [];
 
+  // Un rol sin NINGÚN permiso (ni de panel web ni 'acceder_app_movil') no puede
+  // hacer nada en ningún lado -- se rechaza el login desde acá, no solo dejarlo
+  // entrar y toparse con 403 en todo. Es la única forma real de que, por ejemplo,
+  // desmarcar "acceder_app_movil" del rol conductor desde el módulo Roles tenga
+  // efecto de verdad (los endpoints móviles se gatean por nombre de rol, no por
+  // este permiso -- ver LOGICA.md, "Permiso acceder_app_movil").
+  if (permisos.length === 0) {
+    logIntentoFallido('rol sin ningún permiso asignado');
+    throw new AppError(CREDENCIALES_INVALIDAS, 401);
+  }
+
   const token = generateToken({
     idUsuario: usuario.idUsuario,
     email: usuario.email,
@@ -134,12 +145,18 @@ const refresh = async (refreshToken) => {
   }
 
   const usuario = await Usuario.findByPk(decoded.idUsuario, {
-    include: [{ model: Rol, as: 'rol' }]
+    include: [{ model: Rol, as: 'rol', include: [{ model: Permiso, as: 'permisos' }] }]
   });
 
   if (!usuario) throw new AppError('Usuario no encontrado', 401);
   if (!usuario.habilitado) throw new AppError('Tu cuenta está inhabilitada. Contacta al administrador.', 401);
   if (usuario.rol && !usuario.rol.habilitado) throw new AppError('El acceso para tu rol está inhabilitado. Contacta al administrador.', 401);
+  // Mismo chequeo que login() -- si a un rol le quitaron todos los permisos
+  // (incluido 'acceder_app_movil') mientras la sesión seguía viva, no se le deja
+  // seguir renovando el token silenciosamente.
+  if ((usuario.rol?.permisos?.length ?? 0) === 0) {
+    throw new AppError('Tu rol ya no tiene ningún permiso asignado. Contacta al administrador.', 401);
+  }
 
   const token = generateToken({
     idUsuario: usuario.idUsuario,
