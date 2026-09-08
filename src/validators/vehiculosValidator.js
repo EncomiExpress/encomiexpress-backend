@@ -38,7 +38,7 @@ const createValidation = [
     .custom(noSoloRelleno('El tipo no puede contener solo espacios o guiones'))
     .matches(SOLO_LETRAS_REGEX).withMessage('El tipo solo puede contener letras')
     .isLength({ max: 30 }).withMessage('El tipo no puede exceder 30 caracteres'),
-  body('capacidad').notEmpty().withMessage('La capacidad es obligatoria').isFloat({ min: 1, max: 99999 }).withMessage('La capacidad debe estar entre 1 y 99.999 kg'),
+  body('capacidad').notEmpty().withMessage('La capacidad es obligatoria').isFloat({ min: 500, max: 99999 }).withMessage('La capacidad debe estar entre 500 y 99.999 kg'),
   body('vencimientoSOAT').notEmpty().withMessage('La fecha de vencimiento del SOAT es requerida').isDate().withMessage('Fecha de SOAT inválida'),
   body('vencimientoRevisionTecnica').notEmpty().withMessage('La fecha de vencimiento de la Revisión Técnica es requerida').isDate().withMessage('Fecha de Revisión Técnica inválida'),
   body('vencimientoSeguroTerceros').notEmpty().withMessage('La fecha de vencimiento del Seguro de Terceros es requerida').isDate().withMessage('Fecha de Seguro de Terceros inválida'),
@@ -68,7 +68,7 @@ const updateValidation = [
     .custom(noSoloRelleno('El tipo no puede contener solo espacios o guiones'))
     .matches(SOLO_LETRAS_REGEX).withMessage('El tipo solo puede contener letras')
     .isLength({ max: 30 }).withMessage('El tipo no puede exceder 30 caracteres'),
-  body('capacidad').optional().notEmpty().withMessage('La capacidad es obligatoria').isFloat({ min: 1, max: 99999 }).withMessage('La capacidad debe estar entre 1 y 99.999 kg')
+  body('capacidad').optional().notEmpty().withMessage('La capacidad es obligatoria').isFloat({ min: 500, max: 99999 }).withMessage('La capacidad debe estar entre 500 y 99.999 kg')
 ];
 
 const cambiarEstadoValidation = [

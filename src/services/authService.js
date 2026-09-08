@@ -95,7 +95,7 @@ const login = async (email, password) => {
   if (usuario.rol?.nombre === 'distribuidor') {
     const sedes = await UsuarioSede.findAll({
       where: { idUsuario: usuario.idUsuario, habilitado: true },
-      include: [{ model: Destino, as: 'destino', attributes: ['idDestino', 'municipio', 'departamento'] }],
+      include: [{ model: Destino, as: 'destino', attributes: ['idDestino', 'municipio', 'departamento', 'direccion'] }],
     });
     sedesData = sedes
       .filter((s) => s.destino)
@@ -103,6 +103,7 @@ const login = async (email, password) => {
         idDestino: s.idDestino,
         municipio: s.destino.municipio,
         departamento: s.destino.departamento,
+        direccion: s.destino.direccion,
       }));
   }
 
