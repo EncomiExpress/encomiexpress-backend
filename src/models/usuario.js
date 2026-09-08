@@ -17,8 +17,7 @@ const Usuario = sequelize.define('Usuario', {
   },
   numeroIdentificacion: {
     type: DataTypes.STRING(20),
-    allowNull: false,
-    unique: true
+    allowNull: false
   },
   nombre: {
     type: DataTypes.STRING(100),
@@ -34,8 +33,7 @@ const Usuario = sequelize.define('Usuario', {
   },
   email: {
     type: DataTypes.STRING(150),
-    allowNull: false,
-    unique: true
+    allowNull: false
   },
   password: {
     type: DataTypes.STRING(255),
@@ -48,7 +46,15 @@ const Usuario = sequelize.define('Usuario', {
 }, {
   tableName: 'usuario',
   timestamps: false,
-  underscored: true
+  underscored: true,
+  // Únicos SOLO entre cuentas activas (no `unique: true` de columna, a
+  // propósito) — un registro inhabilitado no debe dejar su correo/documento
+  // bloqueados para siempre. Ver database/init.sql y LOGICA.md, "Usuario —
+  // correo/documento únicos solo entre activos".
+  indexes: [
+    { unique: true, fields: ['numero_identificacion'], where: { habilitado: true }, name: 'uq_usuario_numero_identificacion_activo' },
+    { unique: true, fields: ['email'], where: { habilitado: true }, name: 'uq_usuario_email_activo' },
+  ],
 });
 
 module.exports = Usuario;

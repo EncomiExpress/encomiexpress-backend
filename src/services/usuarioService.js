@@ -120,12 +120,16 @@ const resolverSedes = async (rolNombre, sedes) => {
 const create = async (data) => {
   const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, password, idRol, sedes } = data;
 
-  const existingEmail = await Usuario.findOne({ where: { email } });
+  // Solo se compara contra cuentas ACTIVAS (habilitado: true) — un registro
+  // inhabilitado (ex-empleado, error de registro corregido) no deja su correo/
+  // documento bloqueados para siempre. Ver LOGICA.md, "Usuario — correo/
+  // documento únicos solo entre activos".
+  const existingEmail = await Usuario.findOne({ where: { email, habilitado: true } });
   if (existingEmail) {
     throw new AppError('El email ya está registrado', 400);
   }
 
-  const existingDoc = await Usuario.findOne({ where: { numeroIdentificacion } });
+  const existingDoc = await Usuario.findOne({ where: { numeroIdentificacion, habilitado: true } });
   if (existingDoc) {
     throw new AppError('El número de identificación ya está registrado', 400);
   }
@@ -182,15 +186,19 @@ const update = async (id, data, currentUserId) => {
     throw new AppError('Usuario no encontrado', 404);
   }
 
+  // Mismo criterio que create(): solo contra cuentas ACTIVAS. Esto también aplica
+  // al editar directamente un registro inhabilitado (el módulo Usuarios ya lo
+  // permite) — así se le puede corregir/reasignar un correo o documento que
+  // quedó "atrapado" en él sin tener que habilitarlo primero.
   if (email && email !== usuario.email) {
-    const existingEmail = await Usuario.findOne({ where: { email } });
+    const existingEmail = await Usuario.findOne({ where: { email, habilitado: true } });
     if (existingEmail) {
       throw new AppError('El email ya está registrado', 400);
     }
   }
 
   if (numeroIdentificacion && numeroIdentificacion !== usuario.numeroIdentificacion) {
-    const existingDoc = await Usuario.findOne({ where: { numeroIdentificacion } });
+    const existingDoc = await Usuario.findOne({ where: { numeroIdentificacion, habilitado: true } });
     if (existingDoc) {
       throw new AppError('El número de identificación ya está registrado', 400);
     }
@@ -299,6 +307,28 @@ const toggleHabilitado = async (id, currentUserId) => {
       }
     } catch (e) {
       // No bloquear el flujo si ocurre un error al verificar cliente; dejar que la inhabilitación continúe según otras reglas.
+    }
+  }
+
+  // Al REHABILITAR (pasa de false a true): el correo/documento de este usuario
+  // solo se comparan contra activos al crear/editar (ver create()/update()), así
+  // que mientras estuvo inhabilitado alguien más pudo haber tomado ese mismo
+  // correo o documento para una cuenta nueva. Se revalida acá, justo antes de
+  // volverlo a marcar activo, en vez de vaciar el campo o dejarlo chocar contra
+  // el índice único de la base de datos con un error crudo. Ver LOGICA.md,
+  // "Usuario — correo/documento únicos solo entre activos".
+  if (usuario.habilitado === false) {
+    const emailEnUso = await Usuario.findOne({
+      where: { email: usuario.email, habilitado: true, idUsuario: { [Op.ne]: usuario.idUsuario } },
+    });
+    if (emailEnUso) {
+      throw new AppError(`No se puede habilitar: el correo ${usuario.email} ya está en uso por otro usuario activo. Cámbialo primero desde Editar.`, 400);
+    }
+    const documentoEnUso = await Usuario.findOne({
+      where: { numeroIdentificacion: usuario.numeroIdentificacion, habilitado: true, idUsuario: { [Op.ne]: usuario.idUsuario } },
+    });
+    if (documentoEnUso) {
+      throw new AppError(`No se puede habilitar: el documento ${usuario.tipoIdentificacion} ${usuario.numeroIdentificacion} ya está en uso por otro usuario activo. Cámbialo primero desde Editar.`, 400);
     }
   }
 

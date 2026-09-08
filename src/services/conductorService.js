@@ -96,12 +96,15 @@ const create = async (data) => {
     numeroLicencia,
   } = data;
 
-  const existingEmail = await Usuario.findOne({ where: { email } });
+  // Solo se compara contra cuentas ACTIVAS (habilitado: true) — mismo criterio
+  // que usuarioService.create(). Ver LOGICA.md, "Usuario — correo/documento
+  // únicos solo entre activos".
+  const existingEmail = await Usuario.findOne({ where: { email, habilitado: true } });
   if (existingEmail) {
     throw new AppError('El email ya está registrado', 400);
   }
 
-  const existingDoc = await Usuario.findOne({ where: { numeroIdentificacion } });
+  const existingDoc = await Usuario.findOne({ where: { numeroIdentificacion, habilitado: true } });
   if (existingDoc) {
     throw new AppError('El número de identificación ya está registrado', 400);
   }
@@ -162,9 +165,10 @@ const update = async (id, data) => {
   // titular (Ley 769 de 2002 — ver CLAUDE.md), cuya unicidad ya se valida abajo sobre Usuario.
 
   if (conductor.usuario) {
+    // Mismo criterio que usuarioService.update(): solo contra cuentas ACTIVAS.
     if (numeroIdentificacion && numeroIdentificacion !== conductor.usuario.numeroIdentificacion) {
       const existingDoc = await Usuario.findOne({
-        where: { numeroIdentificacion, idUsuario: { [Op.ne]: conductor.usuario.idUsuario } },
+        where: { numeroIdentificacion, habilitado: true, idUsuario: { [Op.ne]: conductor.usuario.idUsuario } },
       });
       if (existingDoc) {
         throw new AppError('El número de identificación ya está registrado', 400);
@@ -172,7 +176,7 @@ const update = async (id, data) => {
     }
     if (email && email !== conductor.usuario.email) {
       const existingEmail = await Usuario.findOne({
-        where: { email, idUsuario: { [Op.ne]: conductor.usuario.idUsuario } },
+        where: { email, habilitado: true, idUsuario: { [Op.ne]: conductor.usuario.idUsuario } },
       });
       if (existingEmail) {
         throw new AppError('El email ya está registrado', 400);
