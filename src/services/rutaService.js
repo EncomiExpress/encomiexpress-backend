@@ -1005,13 +1005,18 @@ const updateEstado = async (id, estado) => {
       });
       if (conflictoVehiculo) {
         const rutaLabel = conflictoVehiculo.ruta.origen ? `${conflictoVehiculo.ruta.origen} → ${conflictoVehiculo.ruta.destino?.municipio || 'Sin destino'}` : `Ruta #${conflictoVehiculo.idRuta}`;
+        // Mismo criterio de redacción en los 3 lugares que reportan este conflicto
+        // (acá, el pre-chequeo del frontend en useEstadoRuta.js, y el descripcion
+        // de abajo) — "está en curso con la ruta X", no "ya está asignado a la
+        // ruta X que se encuentra En Ruta" (daba a entender que el problema era la
+        // asignación en sí, no que ya está ocupado). Ver LOGICA.md.
         throw new AppError(
-          `El vehículo ${par.vehiculo?.placa || ''} ya está en curso en otra ruta (${rutaLabel})`,
+          `El vehículo ${par.vehiculo?.placa || ''} está en curso con la ruta ${rutaLabel}`,
           409,
           [{
             tipo: 'Conflicto de vehículo',
             id: conflictoVehiculo.idRuta,
-            descripcion: `${par.vehiculo?.placa || 'Vehículo'} ya está asignado a la ruta ${rutaLabel} que se encuentra En Ruta`
+            descripcion: `${par.vehiculo?.placa || 'Vehículo'} está en curso con la ruta ${rutaLabel}`
           }],
           'VEHICLE_IN_USE'
         );
@@ -1025,12 +1030,12 @@ const updateEstado = async (id, estado) => {
         const u = par.conductor?.usuario;
         const rutaLabel = conflictoConductor.ruta.origen ? `${conflictoConductor.ruta.origen} → ${conflictoConductor.ruta.destino?.municipio || 'Sin destino'}` : `Ruta #${conflictoConductor.idRuta}`;
         throw new AppError(
-          `El conductor ${u ? `${u.nombre} ${u.apellido}` : ''} ya está en curso en otra ruta (${rutaLabel})`,
+          `El conductor ${u ? `${u.nombre} ${u.apellido}` : ''} está en curso con la ruta ${rutaLabel}`,
           409,
           [{
             tipo: 'Conflicto de conductor',
             id: conflictoConductor.idRuta,
-            descripcion: `${u ? `${u.nombre} ${u.apellido}` : 'El conductor'} ya está asignado a la ruta ${rutaLabel} que se encuentra En Ruta`
+            descripcion: `${u ? `${u.nombre} ${u.apellido}` : 'El conductor'} está en curso con la ruta ${rutaLabel}`
           }],
           'CONDUCTOR_IN_USE'
         );
