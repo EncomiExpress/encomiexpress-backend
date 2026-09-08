@@ -1,11 +1,17 @@
 const { EncomiendaVenta, Destinatario, Paquete, PaqueteEntregaFinal, Cliente, Ruta, RutaParada, RutaVehiculoConductor, Vehiculo, Conductor, Destino, Usuario, UsuarioSede, sequelize } = require('../models');
 const AppError = require('../errors/appError');
 const crypto = require('crypto');
-const { normalizarEstadoPaquete, determinarEstadoEncomienda } = require('./paqueteStateUtils');
+const { normalizarEstadoPaquete, determinarEstadoEncomienda, ventaTodaNoEntregada } = require('./paqueteStateUtils');
 const { sendPaqueteDevueltoEmail } = require('../config/email');
 const { MAX_DIAS_ANTICIPACION } = require('../utils/horarioLaboral');
 
 const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia'];
+// Municipio de origen de toda venta (oficina principal). Mismo string que fuerza
+// rutaService.resolverOrigenRuta para una ruta normal. No es una fila de `destino`
+// por diseño (el origen es texto libre en `ruta.origen`), pero sí puede existir una
+// fila `destino` "Medellín" en la BD real — y una venta nunca debe ir dirigida a
+// ella (uno no se despacha encomiendas a sí mismo). Ver LOGICA.md.
+const MUNICIPIO_ORIGEN = 'Medellín';
 // Tope de la "novedad"/observación de un paquete en Entrega en dos fases — mismo
 // valor que ya usa "Observaciones" en Ruta/Venta (ver rutasValidator.js), aunque
 // acá no hay un validators/paquetesValidator.js: este módulo valida a mano en el
@@ -340,6 +346,13 @@ const create = async (data) => {
     if (!rutaSigueSirviendo(ruta)) {
       throw new AppError('Solo se puede asignar la venta a una ruta que esté Programada', 400);
     }
+    // Un viaje de regreso (ruta.idRutaIda) no transporta ventas nuevas — solo lleva
+    // al convoy de vuelta a la base (y, a futuro, los paquetes no entregados que
+    // regresan). El frontend ya lo excluye del selector de ruta; esto es la fuente
+    // de verdad del backend.
+    if (ruta.idRutaIda) {
+      throw new AppError('No se puede asignar una venta a un viaje de regreso: elige una ruta de ida', 400);
+    }
     // Si no mandan fecha estimada de entrega, se autocompleta con la llegada de la
     // ruta (o salida+1 si no tiene llegada) — el mínimo permitido de todos modos, así
     // que siempre es válida. El frontend ya la autocompleta igual al elegir la ruta
@@ -356,6 +369,9 @@ const create = async (data) => {
     const destinoDestinatario = await Destino.findByPk(destinatario.idDestino);
     if (!destinoDestinatario) {
       throw new AppError('El destino del destinatario no existe', 400);
+    }
+    if (destinoDestinatario.municipio === MUNICIPIO_ORIGEN) {
+      throw new AppError(`El destino del destinatario no puede ser ${MUNICIPIO_ORIGEN}: es el municipio de origen de las ventas`, 400);
     }
     await validarRutaLlegaAlDestino(ruta, destinatario.idDestino, transaction);
 
@@ -536,6 +552,10 @@ const update = async (id, data) => {
     if (!rutaSigueSirviendo(rutaNueva)) {
       throw new AppError('Solo se puede asignar la venta a una ruta que esté Programada', 400);
     }
+    // Un viaje de regreso no transporta ventas — ver el mismo chequeo en create().
+    if (rutaNueva.idRutaIda) {
+      throw new AppError('No se puede asignar una venta a un viaje de regreso: elige una ruta de ida', 400);
+    }
     const nuevaFechaEstimadaEntrega = fechaEstimadaEntrega !== undefined ? fechaEstimadaEntrega : encomienda.fechaEstimadaEntrega;
     validarFechaEntrega(nuevaFechaEstimadaEntrega, rutaNueva);
     const destinatarioExistente = await Destinatario.findOne({ where: { idEncomiendaVenta: id }, transaction });
@@ -585,6 +605,9 @@ const update = async (id, data) => {
         const destinoDestinatario = await Destino.findByPk(destinatario.idDestino);
         if (!destinoDestinatario) {
           throw new AppError('El destino del destinatario no existe', 400);
+        }
+        if (destinoDestinatario.municipio === MUNICIPIO_ORIGEN) {
+          throw new AppError(`El destino del destinatario no puede ser ${MUNICIPIO_ORIGEN}: es el municipio de origen de las ventas`, 400);
         }
         idDestinoResuelto = destinatario.idDestino;
       }
@@ -1207,6 +1230,17 @@ const cambiarEstadoPago = async (id, estadoPago) => {
     !['Entregada', 'Completada con novedades'].includes(encomienda.estado)
   ) {
     throw new AppError('Esta venta es Contraentrega: el pago solo se puede confirmar cuando el distribuidor haya legalizado todos los paquetes de la venta', 400);
+  }
+
+  // Contraentrega + venta 100% "No entregado": la venta llega igual a "Completada con
+  // novedades" (determinarEstadoEncomienda), pero si NINGÚN paquete se entregó no hubo
+  // plata que recibir — no tiene sentido marcarla "Pagado". El caso mixto (algún
+  // paquete entregado) sí habilita el pago y no se toca. Ver LOGICA.md.
+  if (estadoPago === 'Pagado' && encomienda.metodoPago === 'Contraentrega') {
+    const paquetes = await Paquete.findAll({ where: { idEncomiendaVenta: id }, attributes: ['estado'] });
+    if (ventaTodaNoEntregada(paquetes)) {
+      throw new AppError('Esta venta es Contraentrega y ningún paquete fue entregado (todos quedaron como No entregado): no hay pago que confirmar', 400);
+    }
   }
 
   await encomienda.update({ estadoPago });

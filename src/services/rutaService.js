@@ -136,10 +136,18 @@ const buildOrder = (sortBy) => {
   return [[field, direction], ['idRuta', direction]];
 };
 
+// Pseudo-estado SOLO para el filtro del listado (NO es un valor real de
+// `ruta.estado`): ruta de IDA ya "Completada", todavía SIN viaje de regreso
+// enlazado, cuyo convoy sigue "fuera de base" (algún vehículo o conductor con
+// `id_destino_actual`). Sirve para que el admin ubique rápido los conductores/
+// vehículos varados que hay que traer de vuelta a la base. Ver LOGICA.md,
+// "Rutas — filtro 'Regreso pendiente'".
+const ESTADO_REGRESO_PENDIENTE = 'Regreso pendiente';
+
 const buildRutaWhere = ({ habilitado, estado, anio, mes, q, idConductor, idVehiculo, idDestino }) => {
   const where = {};
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
-  if (estado) where.estado = estado;
+  if (estado && estado !== ESTADO_REGRESO_PENDIENTE) where.estado = estado;
   if (idDestino) where.idDestino = parseInt(idDestino);
 
   // idVehiculo/idConductor ya no son columnas directas de "ruta" — se resuelven vía
@@ -155,6 +163,23 @@ const buildRutaWhere = ({ habilitado, estado, anio, mes, q, idConductor, idVehic
       `(SELECT id_ruta FROM ruta_vehiculo_conductor WHERE id_vehiculo = ${parseInt(idVehiculo)} AND habilitado = true)`
     ) };
     where.idRuta = where.idRuta ? { [Op.and]: [where.idRuta, condicion] } : condicion;
+  }
+
+  if (estado === ESTADO_REGRESO_PENDIENTE) {
+    where.estado = 'Completada';
+    where.idRutaIda = null; // una ruta de regreso no necesita su propio regreso
+    const regresoPendienteCond = { [Op.and]: [
+      // todavía no tiene un viaje de regreso enlazado
+      { [Op.notIn]: sequelize.literal('(SELECT id_ruta_ida FROM ruta WHERE id_ruta_ida IS NOT NULL)') },
+      // algún par del convoy sigue fuera de base
+      { [Op.in]: sequelize.literal(
+        '(SELECT rvc.id_ruta FROM ruta_vehiculo_conductor rvc ' +
+        'LEFT JOIN conductor c ON c.id_conductor = rvc.id_conductor ' +
+        'LEFT JOIN vehiculo v ON v.id_vehiculo = rvc.id_vehiculo ' +
+        'WHERE rvc.habilitado = true AND (c.id_destino_actual IS NOT NULL OR v.id_destino_actual IS NOT NULL))'
+      ) },
+    ] };
+    where.idRuta = where.idRuta ? { [Op.and]: [where.idRuta, regresoPendienteCond] } : regresoPendienteCond;
   }
 
   if (anio) {

@@ -59,6 +59,18 @@ const resumenSedes = (sedesRuta = [], sedesConPendiente = []) => {
   return { total: todas.length, completadas };
 };
 
+// Una venta que quedó 100% "No entregada": tiene paquetes y TODOS terminaron en
+// "Devuelto" (la etiqueta visible es "No entregado", el valor interno sigue siendo
+// 'Devuelto'). En Contraentrega esto significa que no hubo ninguna entrega y por
+// tanto no hay plata que cobrar — encomiendaService.cambiarEstadoPago lo usa para
+// bloquear el paso a "Pagado". El caso mixto (al menos un paquete "Entregado") NO
+// cuenta acá: ahí sí hubo cobro y el pago se habilita normal. Sin paquetes -> false
+// (no hay nada que afirmar).
+const ventaTodaNoEntregada = (paquetes = []) => {
+  if (!Array.isArray(paquetes) || paquetes.length === 0) return false;
+  return paquetes.every((pkg) => normalizarEstadoPaquete(pkg?.estado || 'Por entregar') === 'Devuelto');
+};
+
 // Terminal = ya no requiere más acción de nadie (se entregó al destinatario o
 // quedó como no-entregado). "En sede de destino" NO es terminal a propósito: la
 // venta no se cierra hasta que el distribuidor resuelve la entrega final — así el
@@ -88,5 +100,6 @@ module.exports = {
   normalizarEstadoPaquete,
   paqueteLiberaRuta,
   resumenSedes,
+  ventaTodaNoEntregada,
   determinarEstadoEncomienda,
 };
