@@ -2,6 +2,31 @@ const { AnticipoExcedente, Conductor, Ruta, RutaVehiculoConductor, Vehiculo, Des
 const AppError = require('../errors/appError');
 const { Op } = require('sequelize');
 const { tieneLicenciaVigente } = require('../utils/licenciaHelper');
+const { MAX_DIAS_ANTICIPACION } = require('../utils/horarioLaboral');
+
+const sumarDias = (fechaStr, dias) => {
+  const d = new Date(`${fechaStr}T00:00:00`);
+  d.setDate(d.getDate() + dias);
+  return d.toISOString().slice(0, 10);
+};
+
+// La fecha de entrega del anticipo (cuándo se le dio la plata al conductor) no puede
+// ser posterior a la salida de la ruta -- no tiene sentido entregar el anticipo
+// después de que el vehículo ya salió. Tampoco puede ser una fecha absurdamente
+// vieja: mismo horizonte (MAX_DIAS_ANTICIPACION, 90 días) que ya limita las fechas de
+// Ruta/Venta, aplicado hacia atrás en vez de hacia adelante. Fuente de verdad; el
+// frontend replica esto en anticipoValidation.js.
+const validarFechaEntregaAnticipo = (fechaEntrega, ruta) => {
+  if (!fechaEntrega) return;
+  if (ruta?.fechaSalida && fechaEntrega > ruta.fechaSalida) {
+    throw new AppError(`La fecha de entrega no puede ser posterior a la salida de la ruta (máximo el ${ruta.fechaSalida})`, 400);
+  }
+  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+  const minima = sumarDias(hoy, -MAX_DIAS_ANTICIPACION);
+  if (fechaEntrega < minima) {
+    throw new AppError(`La fecha de entrega no puede ser más de ${MAX_DIAS_ANTICIPACION} días en el pasado (mínimo el ${minima})`, 400);
+  }
+};
 
 const buildOrder = (sortBy) => {
   if (!sortBy) return [];
@@ -31,7 +56,16 @@ const getAll = async ({ idConductor, idRuta, estado, habilitado, anio, mes, q, p
     const where = {};
     if (idConductor) where.idConductor = idConductor;
     if (idRuta) where.idRuta = parseInt(idRuta);
-    if (estado) where.estado = estado;
+    // Acepta un solo estado ("Completado") o varios separados por coma
+    // ("Completado,Cancelado") -- lo segundo es lo que usa el toggle
+    // "Pendientes"/"Historial" del móvil admin (ver LOGICA.md, "Toggle
+    // Pendientes/Historial"), para no tener que traer TODOS los anticipos al
+    // cliente y filtrar ahí (con límite 100, se podían perder registros fuera
+    // de esa ventana -- ver el comentario en admin_home.dart).
+    if (estado) {
+      const estados = estado.split(',').map((e) => e.trim()).filter(Boolean);
+      where.estado = estados.length > 1 ? { [Op.in]: estados } : estados[0];
+    }
     if (habilitado !== undefined) where.habilitado = habilitado === 'true';
     if (anio) {
       // fecha_entrega es tipo DATE en Postgres — se filtra por rango, no por LIKE.
@@ -181,6 +215,9 @@ const create = async (data) => {
     return value;
   };
 
+  const fechaEntregaLimpia = cleanDate(fechaEntrega);
+  validarFechaEntregaAnticipo(fechaEntregaLimpia, ruta);
+
   const anticipo = await AnticipoExcedente.create({
     idConductor,
     idRuta: ruta.idRuta,
@@ -189,7 +226,7 @@ const create = async (data) => {
     excedente: 0,
     estado: 'Entregado',
     soporte,
-    fechaEntrega: cleanDate(fechaEntrega)
+    fechaEntrega: fechaEntregaLimpia
   });
 
   return getAnticipoCompleto(anticipo.idAnticipoExcedente);
@@ -231,6 +268,16 @@ const update = async (id, data) => {
     if (valorGastado === undefined) {
       throw new AppError('Debes registrar el valor gastado para legalizar este anticipo.', 400);
     }
+    // Comprobante obligatorio para legalizar -- mismo criterio que la evidencia
+    // de entrega final de Paquetes (ver LOGICA.md, "Evidencia de entrega final
+    // obligatoria"): un valorGastado sin ningún respaldo es solo un número
+    // declarado. `anticipo.soporte` ya refleja lo subido hasta ahora, incluido
+    // lo que se haya subido justo antes en esta misma sesión de guardado (el
+    // móvil sube el/los archivo(s) vía POST /anticipos/:id/soporte ANTES de
+    // mandar este PUT con valorGastado -- ver anticipo_edit.dart).
+    if (!anticipo.soporte || anticipo.soporte.length === 0) {
+      throw new AppError('Debes subir al menos un comprobante (soporte) antes de legalizar este anticipo.', 400);
+    }
   } else if (valorGastado !== undefined) {
     // anticipo.estado === 'Entregado': la ruta todavía no arrancó, así que
     // todavía no hay nada que legalizar.
@@ -239,6 +286,7 @@ const update = async (id, data) => {
 
   let idRutaFinal;
   let idConductorFinal;
+  let rutaResuelta;
   if (idRuta !== undefined || idRutaVehiculoConductor !== undefined) {
     if (!idRuta || !idRutaVehiculoConductor) {
       throw new AppError('Debes indicar la ruta y el vehículo/conductor', 400);
@@ -247,6 +295,7 @@ const update = async (id, data) => {
     if (!ruta) {
       throw new AppError('Ruta no encontrada', 404);
     }
+    rutaResuelta = ruta;
     // El conductor del anticipo siempre sigue al del par vehículo+conductor elegido
     // (una ruta puede tener varios) — no se selecciona aparte, para que nunca
     // queden desincronizados.
@@ -279,6 +328,15 @@ const update = async (id, data) => {
     if (value === null || value === '' || value === 'Invalid date') return null;
     return value;
   };
+
+  const cleanedFechaEntrega = cleanDate(fechaEntrega);
+  if (cleanedFechaEntrega !== undefined) {
+    // Si esta misma petición no trae idRuta (raro -- el frontend siempre manda
+    // ambos mientras el anticipo sigue editable, ver ActualizarAnticipoExcedente.jsx),
+    // se valida contra la ruta que el anticipo ya tenía.
+    const rutaParaValidar = rutaResuelta || await Ruta.findByPk(anticipo.idRuta);
+    validarFechaEntregaAnticipo(cleanedFechaEntrega, rutaParaValidar);
+  }
 
   // Si se provee valorGastado, el estado y excedente se calculan automáticamente
   let autoEstado;
@@ -323,7 +381,6 @@ const update = async (id, data) => {
     autoFechaLegalizacion = new Date();
   }
 
-  const cleanedFechaEntrega = cleanDate(fechaEntrega);
   const cleanedFechaLegalizacion = cleanDate(fechaLegalizacion);
   const cleanedFechaEntregaExcedente = cleanDate(fechaEntregaExcedente);
 
