@@ -233,6 +233,15 @@ const cambiarEstado = async (id, estado) => {
     throw new AppError('No se puede cambiar el estado de un vehículo que está en ruta', 400);
   }
 
+  // Mantenimiento solo tiene sentido en la base (ahí está el taller) -- un
+  // vehículo Disponible pero fuera de base (quedó en otro municipio tras una
+  // ruta que no volvió a Medellín, idDestinoActual) no se puede poner en
+  // mantenimiento hasta que vuelva. El frontend ya oculta el selector en ese
+  // caso; esto lo respalda por si llega la petición directa a la API.
+  if (estado === 'Mantenimiento' && vehiculo.idDestinoActual) {
+    throw new AppError('No se puede poner en mantenimiento un vehículo que está fuera de base', 400);
+  }
+
   const estadoAnterior = vehiculo.estado;
   await vehiculo.update({ estado });
 
