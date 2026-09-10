@@ -722,6 +722,13 @@ const create = async (data) => {
 
   const paradasNormalizadas = await validarParadas(paradas);
 
+  // Una parada es un municipio ANTES de llegar, no el mismo lugar de llegada —
+  // igual criterio que validarOrigenDistinto de abajo, pero contra el destino
+  // final en vez del origen.
+  if ((paradasNormalizadas || []).some((p) => p.idDestino === parseInt(idDestino))) {
+    throw new AppError('Una parada no puede ser el mismo destino final de la ruta', 400, null, 'PARADA_IGUAL_DESTINO');
+  }
+
   await validarOrigenDistinto({
     idDestino,
     paradasIdDestino: (paradasNormalizadas || []).map((p) => p.idDestino),
@@ -915,10 +922,18 @@ const update = async (id, data) => {
 
   if (pares !== undefined) validarPares(pares);
   const paradasNormalizadas = await validarParadas(paradas);
+  // idDestino efectivo: el que llega, o el que ya tenía la ruta.
+  const idDestinoEfectivo = idDestino !== undefined ? parseInt(idDestino) : ruta.idDestino;
+
+  // Una parada es un municipio ANTES de llegar, no el mismo lugar de llegada —
+  // solo se revisa si llega un juego nuevo de paradas (paradasNormalizadas !==
+  // null); si la edición no las toca, se dejan como estaban.
+  if (paradasNormalizadas && paradasNormalizadas.some((p) => p.idDestino === idDestinoEfectivo)) {
+    throw new AppError('Una parada no puede ser el mismo destino final de la ruta', 400, null, 'PARADA_IGUAL_DESTINO');
+  }
 
   await validarOrigenDistinto({
-    // idDestino efectivo: el que llega, o el que ya tenía la ruta.
-    idDestino: idDestino !== undefined ? idDestino : ruta.idDestino,
+    idDestino: idDestinoEfectivo,
     // Solo se revisan las paradas si llega un juego nuevo (paradasNormalizadas
     // !== null); si la edición no las toca, se dejan como estaban.
     paradasIdDestino: paradasNormalizadas ? paradasNormalizadas.map((p) => p.idDestino) : [],
