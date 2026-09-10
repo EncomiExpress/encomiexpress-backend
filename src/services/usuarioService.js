@@ -94,17 +94,18 @@ const getById = async (id) => {
   return usuario;
 };
 
-// Roles que exigen exactamente una sede propia vía usuario_sede — 'distribuidor'
-// (entrega final, solo móvil) y 'operador_sede' (panel web restringido, ver
-// LOGICA.md "Sedes remotas"). Cada uno cubre UNA sola sede.
+// Códigos (Rol.codigo, no el nombre editable) de los roles que exigen
+// exactamente una sede propia vía usuario_sede — 'distribuidor' (entrega
+// final, solo móvil) y 'operador_sede' (panel web restringido, ver LOGICA.md
+// "Sedes remotas"). Cada uno cubre UNA sola sede.
 const ROLES_CON_SEDE = ['distribuidor', 'operador_sede'];
 
 // Normaliza el array de ids de sede que llega del cliente y valida que sea un
 // destino real y habilitado. Solo aplica a ROLES_CON_SEDE — para cualquier otro
 // rol el campo se ignora. El campo sigue viajando como array (contrato con el
 // front y con usuario_sede) pero se rechaza si trae más de un id.
-const resolverSedes = async (rolNombre, sedes) => {
-  if (!ROLES_CON_SEDE.includes(rolNombre)) return [];
+const resolverSedes = async (rolCodigo, sedes) => {
+  if (!ROLES_CON_SEDE.includes(rolCodigo)) return [];
   const limpias = Array.isArray(sedes)
     ? [...new Set(sedes.map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))]
     : [];
@@ -142,7 +143,7 @@ const create = async (data) => {
   if (!rol) {
     throw new AppError('El rol indicado no existe', 400);
   }
-  const sedesLimpias = await resolverSedes(rol.nombre, sedes);
+  const sedesLimpias = await resolverSedes(rol.codigo, sedes);
 
   const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -228,12 +229,12 @@ const update = async (id, data, currentUserId) => {
   // (b) el usuario pasa a un rol de ROLES_CON_SEDE y hay que exigirle al menos una.
   const rolCambia = idRol && parseInt(idRol, 10) !== usuario.idRol;
   const rolFinal = rolCambia ? await Rol.findByPk(idRol) : usuario.rol;
-  const requiereSedeFinal = ROLES_CON_SEDE.includes(rolFinal?.nombre);
+  const requiereSedeFinal = ROLES_CON_SEDE.includes(rolFinal?.codigo);
 
   let sedesLimpias = null; // null = no tocar; [] = borrar todas
   if (requiereSedeFinal) {
     if (sedes !== undefined) {
-      sedesLimpias = await resolverSedes(rolFinal.nombre, sedes);
+      sedesLimpias = await resolverSedes(rolFinal.codigo, sedes);
     } else if (rolCambia) {
       throw new AppError('Este rol debe tener al menos una sede asignada', 400);
     }
@@ -284,9 +285,9 @@ const toggleHabilitado = async (id, currentUserId) => {
     throw new AppError('Usuario no encontrado', 404);
   }
 
-  if (usuario.habilitado === true && usuario.rol?.nombre === 'admin') {
+  if (usuario.habilitado === true && usuario.rol?.codigo === 'admin') {
     const adminsHabilitados = await Usuario.count({
-      include: [{ model: Rol, as: 'rol', where: { nombre: 'admin' } }],
+      include: [{ model: Rol, as: 'rol', where: { codigo: 'admin' } }],
       where: { habilitado: true },
     });
     if (adminsHabilitados <= 1) {

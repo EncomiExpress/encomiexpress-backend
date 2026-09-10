@@ -33,7 +33,7 @@ const getProfile = async (req, res, next) => {
 
 const getConductorProfile = async (req, res, next) => {
   try {
-    const conductor = await authService.getConductorProfile(req.usuario.idUsuario, req.usuario.rol?.nombre);
+    const conductor = await authService.getConductorProfile(req.usuario.idUsuario, req.usuario.rol?.codigo);
     res.json({ success: true, data: conductor });
   } catch (error) {
     next(error);

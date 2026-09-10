@@ -51,13 +51,16 @@ const authenticate = async (req, res, next) => {
 }
 };
 
+// `roles` son códigos estables ('admin', 'conductor', ...), no el nombre visible
+// del rol — ese se puede renombrar libremente sin afectar esta comparación (ver
+// Rol.codigo en models/rol.js).
 const authorize = (...roles) => {
   return (req, res, next) => {
     if (!req.usuario) {
       return sendAuthRequired(res);
     }
 
-    if (!roles.includes(req.usuario.rol?.nombre)) {
+    if (!roles.includes(req.usuario.rol?.codigo)) {
       return res.status(403).json({
         success: false,
         message: 'No tiene permisos para esta acción'

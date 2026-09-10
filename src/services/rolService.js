@@ -106,17 +106,34 @@ const create = async (data) => {
 const update = async (id, data) => {
   const { nombre, descripcion, habilitado, permisos } = data;
 
-  // El rol admin (id=1) no se toca ni siquiera por otro admin — así se creó
-  // el bug real de "Admin" con mayúscula: alguien lo editó a mano desde este
-  // mismo formulario y el login por rol (comparación exacta a 'admin' en
-  // middlewares/auth.js) empezó a fallar en silencio.
-  if (parseInt(id) === 1) {
-    throw new AppError('El rol de administrador no se puede modificar', 403);
-  }
-
-  const rol = await Rol.findByPk(id);
+  // El nombre y la descripción del rol admin (id=1) sí se pueden editar
+  // libremente ahora — el bug real de "Admin" con mayúscula (login por rol
+  // comparando contra el string exacto 'admin' en middlewares/auth.js)
+  // quedó resuelto de raíz: esa comparación usa Rol.codigo, un identificador
+  // estable que nunca se toca desde aquí (no se lee `data.codigo`), así que
+  // `nombre` es puro texto de display para cualquier rol, admin incluido.
+  // Los permisos y el estado del rol admin siguen intocables: vaciarle los
+  // permisos o inhabilitarlo dejaría el sistema sin ningún admin funcional.
+  // El formulario del panel siempre reenvía el set completo de permisos
+  // actuales (no solo los que cambiaron), así que el candado compara contra
+  // lo que ya tiene el rol en vez de rechazar cualquier `permisos` presente.
+  const rol = await Rol.findByPk(id, { include: [{ model: Permiso, as: 'permisos', through: { attributes: [] } }] });
   if (!rol) {
     throw new AppError('Rol no encontrado', 404);
+  }
+
+  if (parseInt(id) === 1) {
+    if (permisos !== undefined) {
+      const actuales = new Set(rol.permisos.map(p => p.idPermiso));
+      const nuevos = new Set(permisos.map(Number));
+      const sinCambios = actuales.size === nuevos.size && [...actuales].every(p => nuevos.has(p));
+      if (!sinCambios) {
+        throw new AppError('Los permisos del rol de administrador no se pueden modificar', 403);
+      }
+    }
+    if (habilitado !== undefined && habilitado !== true) {
+      throw new AppError('El rol de administrador no se puede inhabilitar', 403);
+    }
   }
 
   if (nombre && nombre !== rol.nombre) {

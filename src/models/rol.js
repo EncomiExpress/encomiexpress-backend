@@ -11,6 +11,16 @@ const Rol = sequelize.define('Rol', {
     type: DataTypes.STRING(50),
     allowNull: false
   },
+  // Identificador estable e inmutable de los 4 roles del sistema (admin,
+  // conductor, distribuidor, operador_sede) — NULL para un rol nuevo creado a
+  // mano desde el panel. Nunca se expone para editar (ver rolService.update):
+  // es lo que compara todo el código de autorización/negocio en vez de
+  // `nombre`, para que `nombre` se pueda renombrar libremente (incluido
+  // 'admin') sin romper nada. Ver LOGICA.md, "Rol: nombre editable vs codigo".
+  codigo: {
+    type: DataTypes.STRING(30),
+    allowNull: true
+  },
   descripcion: {
     type: DataTypes.STRING(200),
     allowNull: true

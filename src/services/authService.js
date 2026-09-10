@@ -106,7 +106,7 @@ const login = async (email, password) => {
   });
 
   let conductorData = null;
-  if (usuario.rol?.nombre === 'conductor') {
+  if (usuario.rol?.codigo === 'conductor') {
     const conductor = await Conductor.findOne({
       where: { idUsuario: usuario.idUsuario }
     });
@@ -126,7 +126,7 @@ const login = async (email, password) => {
   // sedes (municipios) que cubre — la app las usa para pedir "sus" paquetes en
   // sede. Análogo a `conductor` de arriba. null para cualquier otro rol.
   let sedesData = null;
-  if (usuario.rol?.nombre === 'distribuidor') {
+  if (usuario.rol?.codigo === 'distribuidor') {
     const sedes = await UsuarioSede.findAll({
       where: { idUsuario: usuario.idUsuario, habilitado: true },
       include: [{ model: Destino, as: 'destino', attributes: ['idDestino', 'municipio', 'departamento', 'direccion'] }],
@@ -154,6 +154,12 @@ const login = async (email, password) => {
       tipoIdentificacion: usuario.tipoIdentificacion,
       numeroIdentificacion: usuario.numeroIdentificacion,
       rol: usuario.rol?.nombre ?? null,
+      // Identificador estable del rol, distinto del nombre (editable) — lo usa
+      // el frontend para decisiones de UI que antes comparaban contra `rol`
+      // directamente (ver Rol.codigo en models/rol.js). No reemplaza `rol`
+      // para no romper a nadie que ya consuma ese campo como string (ej. la
+      // app móvil).
+      rolCodigo: usuario.rol?.codigo ?? null,
       permisos,
       sede
     },
@@ -219,6 +225,7 @@ const getProfile = async (idUsuario) => {
     tipoIdentificacion: usuario.tipoIdentificacion,
     numeroIdentificacion: usuario.numeroIdentificacion,
     rol: usuario.rol?.nombre ?? null,
+    rolCodigo: usuario.rol?.codigo ?? null,
     permisos,
     sede
   };

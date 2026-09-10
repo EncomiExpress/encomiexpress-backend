@@ -4,7 +4,7 @@ const rutaService = require('../services/rutaService');
 // (ver LOGICA.md, "Sedes remotas"); para el resto de roles, idSede va undefined
 // y los filtros/guardias de rutaService no se activan.
 const contextoSede = (req) => ({
-  rol: req.usuario?.rol?.nombre,
+  rol: req.usuario?.rol?.codigo,
   idSede: req.sede?.idDestino,
 });
 

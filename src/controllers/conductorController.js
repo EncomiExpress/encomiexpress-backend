@@ -69,7 +69,7 @@ exports.cambiarEstado = async (req, res, next) => {
 
 exports.getPerfil = async (req, res, next) => {
   try {
-    const perfil = await conductorService.getMiPerfil(req.usuario.idUsuario, req.usuario.rol?.nombre);
+    const perfil = await conductorService.getMiPerfil(req.usuario.idUsuario, req.usuario.rol?.codigo);
     res.json({ success: true, data: perfil });
   } catch (error) {
     next(error);
@@ -78,7 +78,7 @@ exports.getPerfil = async (req, res, next) => {
 
 exports.actualizarPerfil = async (req, res, next) => {
   try {
-    await conductorService.actualizarMiPerfil(req.usuario.idUsuario, req.usuario.rol?.nombre, req.body);
+    await conductorService.actualizarMiPerfil(req.usuario.idUsuario, req.usuario.rol?.codigo, req.body);
     res.json({ success: true, message: 'Perfil actualizado exitosamente' });
   } catch (error) {
     next(error);
@@ -87,7 +87,7 @@ exports.actualizarPerfil = async (req, res, next) => {
 
 exports.getMisAnticipos = async (req, res, next) => {
   try {
-    const anticipos = await conductorService.getMisAnticipos(req.usuario.idUsuario, req.usuario.rol?.nombre);
+    const anticipos = await conductorService.getMisAnticipos(req.usuario.idUsuario, req.usuario.rol?.codigo);
     res.json({ success: true, data: anticipos });
   } catch (error) {
     next(error);

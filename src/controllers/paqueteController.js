@@ -109,7 +109,7 @@ exports.dejarEnSede = async (req, res, next) => {
 // el distribuidor autenticado (usuario_sede). El idUsuario sale del token.
 exports.getPorSede = async (req, res, next) => {
   try {
-    if (req.usuario.rol?.nombre !== 'distribuidor') {
+    if (req.usuario.rol?.codigo !== 'distribuidor') {
       return res.status(403).json({ success: false, message: 'Solo los distribuidores pueden acceder a los paquetes en sede' });
     }
     const paquetes = await encomiendaService.getPaquetesEnSede(req.usuario.idUsuario);
@@ -123,7 +123,7 @@ exports.getPorSede = async (req, res, next) => {
 // cerró (Entregado/Devuelto). Ver getHistorialSedeDistribuidor().
 exports.getHistorialSede = async (req, res, next) => {
   try {
-    if (req.usuario.rol?.nombre !== 'distribuidor') {
+    if (req.usuario.rol?.codigo !== 'distribuidor') {
       return res.status(403).json({ success: false, message: 'Solo los distribuidores pueden acceder a su historial de entregas' });
     }
     const paquetes = await encomiendaService.getHistorialSedeDistribuidor(req.usuario.idUsuario);
@@ -142,7 +142,7 @@ exports.getHistorialSede = async (req, res, next) => {
 // acá solo se valida la presencia (forma de la petición).
 exports.registrarEntregaFinal = async (req, res, next) => {
   try {
-    if (req.usuario.rol?.nombre !== 'distribuidor') {
+    if (req.usuario.rol?.codigo !== 'distribuidor') {
       return res.status(403).json({ success: false, message: 'Solo los distribuidores pueden gestionar la entrega final' });
     }
     const { id } = req.params;
@@ -188,7 +188,7 @@ exports.getHistorialEntrega = async (req, res, next) => {
     const { id } = req.params;
     const permisos = req.usuario.rol?.permisos?.map((p) => p.nombre) || [];
     const esAdmin = permisos.includes('consultar_venta');
-    const esDistribuidor = req.usuario.rol?.nombre === 'distribuidor';
+    const esDistribuidor = req.usuario.rol?.codigo === 'distribuidor';
 
     if (!esAdmin && !esDistribuidor) {
       return res.status(403).json({ success: false, message: 'Acceso denegado' });
