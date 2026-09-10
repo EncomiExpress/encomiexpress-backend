@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { Usuario, Rol, Permiso } = require('../models');
+const { Usuario, Rol, Permiso, UsuarioSede, Destino } = require('../models');
 const AppError = require('../errors/appError');
 
 const sendAuthRequired = (res) => res.status(401).json({
@@ -22,7 +22,10 @@ const authenticate = async (req, res, next) => {
 
     const usuario = await Usuario.findByPk(decoded.idUsuario, {
       include: [
-        { model: Rol, as: 'rol', include: [{ model: Permiso, as: 'permisos' }] }
+        { model: Rol, as: 'rol', include: [{ model: Permiso, as: 'permisos' }] },
+        { model: UsuarioSede, as: 'sedes', required: false, where: { habilitado: true },
+          include: [{ model: Destino, as: 'destino',
+            attributes: ['idDestino', 'municipio', 'departamento', 'direccion'] }] }
       ]
     });
 
@@ -35,6 +38,10 @@ const authenticate = async (req, res, next) => {
     }
 
     req.usuario = usuario;
+    // La sede activa del usuario (si tiene una) — la usan los módulos de Ventas/
+    // Rutas/Clientes para acotar "solo lo mío" al rol operador_sede (ver
+    // LOGICA.md, "Sedes remotas").
+    req.sede = req.usuario.sedes?.find(s => s.destino)?.destino ?? null;
     next();
   } catch (error) {
   if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {

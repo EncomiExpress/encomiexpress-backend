@@ -164,7 +164,7 @@ const buildOrder = (sortBy) => {
   return [[field, direction], ['idEncomiendaVenta', direction]];
 };
 
-const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, metodoPago, q, page = 1, limit = 10, sortBy } = {}) => {
+const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, metodoPago, q, page = 1, limit = 10, sortBy, rol, idSede } = {}) => {
   const where = {};
   if (estado) where.estado = estado;
   if (idCliente) where.idCliente = idCliente;
@@ -172,6 +172,9 @@ const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, metod
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
   if (estadoPago) where.estadoPago = estadoPago;
   if (metodoPago) where.metodoPago = metodoPago;
+  // "Solo lo mío" para operador_sede — filtra por quién registró la venta. Un
+  // listado nuevo empieza vacío. Ver LOGICA.md, "Sedes remotas".
+  if (rol === 'operador_sede') where.idSede = idSede;
 
   if (q) {
     const { Op } = sequelize.Sequelize;
@@ -226,7 +229,7 @@ const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, metod
   return { data, total: count };
 };
 
-const getById = async (id) => {
+const getById = async (id, { rol, idSede } = {}) => {
   const encomienda = await EncomiendaVenta.findByPk(id, {
     include: [
       { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'destino' }] },
@@ -238,6 +241,10 @@ const getById = async (id) => {
 
   if (!encomienda) {
     throw new AppError('Encomienda no encontrada', 404);
+  }
+
+  if (rol === 'operador_sede' && encomienda.idSede !== idSede) {
+    throw new AppError('No tienes acceso a esta venta', 403);
   }
 
   return encomienda;
@@ -313,7 +320,18 @@ const validarRutaLlegaAlDestino = async (ruta, idDestinoVenta, transaction) => {
   }
 };
 
-const create = async (data) => {
+// Un regreso solo transporta ventas nuevas cuando lo registra el operador_sede
+// de la sede desde la que ESE regreso sale (WS5, "Sedes remotas") — el destino
+// de la ida que enlaza es justo esa sede. Para cualquier otro caller (admin
+// incluido) un regreso sigue sin transportar ventas nuevas (ver LOGICA.md,
+// "Ventas — no se puede asignar una venta a un viaje de regreso").
+const esRegresoDeLaSede = async (ruta, idSede, transaction) => {
+  if (!ruta.idRutaIda || idSede === undefined) return false;
+  const rutaIda = await Ruta.findByPk(ruta.idRutaIda, { attributes: ['idDestino'], transaction });
+  return rutaIda?.idDestino === idSede;
+};
+
+const create = async (data, { rol, idSede } = {}) => {
   const transaction = await sequelize.transaction();
 
   try {
@@ -348,9 +366,14 @@ const create = async (data) => {
     }
     // Un viaje de regreso (ruta.idRutaIda) no transporta ventas nuevas — solo lleva
     // al convoy de vuelta a la base (y, a futuro, los paquetes no entregados que
-    // regresan). El frontend ya lo excluye del selector de ruta; esto es la fuente
-    // de verdad del backend.
-    if (ruta.idRutaIda) {
+    // regresan) — EXCEPTO cuando quien registra es el operador_sede de la sede
+    // desde la que ese regreso sale (WS5, "Sedes remotas"): ahí es justo la venta
+    // de regreso que la sede necesita registrar (remitente en su sede, destinatario
+    // en Medellín — al revés del flujo normal). El frontend ya lo excluye del
+    // selector de ruta para cualquier otro caso; esto es la fuente de verdad del
+    // backend.
+    const esVentaDeRegresoDeSede = ruta.idRutaIda && rol === 'operador_sede' && await esRegresoDeLaSede(ruta, idSede, transaction);
+    if (ruta.idRutaIda && !esVentaDeRegresoDeSede) {
       throw new AppError('No se puede asignar una venta a un viaje de regreso: elige una ruta de ida', 400);
     }
     // Si no mandan fecha estimada de entrega, se autocompleta con la llegada de la
@@ -370,7 +393,10 @@ const create = async (data) => {
     if (!destinoDestinatario) {
       throw new AppError('El destino del destinatario no existe', 400);
     }
-    if (destinoDestinatario.municipio === MUNICIPIO_ORIGEN) {
+    // Excepción simétrica a la de arriba: en una venta de regreso de sede el
+    // destinatario SÍ va a Medellín a propósito (es el origen real de esa venta
+    // el que cambió, no Medellín — ver comentario de esRegresoDeLaSede arriba).
+    if (destinoDestinatario.municipio === MUNICIPIO_ORIGEN && !esVentaDeRegresoDeSede) {
       throw new AppError(`El destino del destinatario no puede ser ${MUNICIPIO_ORIGEN}: es el municipio de origen de las ventas`, 400);
     }
     await validarRutaLlegaAlDestino(ruta, destinatario.idDestino, transaction);
@@ -418,6 +444,9 @@ const create = async (data) => {
         metodoPago: metodoPagoResuelto,
         estadoPago: estadoPagoResuelto,
         estado: 'Programada',
+        // Nunca lo que mande el body — sale del contexto de sesión de quien
+        // registra. Alimenta el filtro "solo lo mío" de Ventas (WS3).
+        idSede: rol === 'operador_sede' ? idSede : null,
       },
       { transaction }
     );
@@ -1363,18 +1392,21 @@ const reactivar = async (id) => {
 // el desempate también tiene que ser DESC (Op.gt), no ASC. Con fechaRegistro
 // siendo un DATEONLY, es normal que varias ventas del mismo día empaten ahí y
 // dependan del desempate para quedar en el orden correcto.
-const getPageOf = async (id, { limit = 10 } = {}) => {
+const getPageOf = async (id, { limit = 10, rol, idSede } = {}) => {
   const Op = sequelize.Sequelize.Op;
-  const record = await EncomiendaVenta.findByPk(id, { attributes: ['idEncomiendaVenta', 'fechaRegistro'] });
+  const record = await EncomiendaVenta.findByPk(id, { attributes: ['idEncomiendaVenta', 'fechaRegistro', 'idSede'] });
   if (!record) throw new AppError('Encomienda no encontrada', 404);
-  const before = await EncomiendaVenta.count({
-    where: {
-      [Op.or]: [
-        { fechaRegistro: { [Op.gt]: record.fechaRegistro } },
-        { fechaRegistro: record.fechaRegistro, idEncomiendaVenta: { [Op.gt]: parseInt(id) } },
-      ],
-    },
-  });
+  if (rol === 'operador_sede' && record.idSede !== idSede) {
+    throw new AppError('No tienes acceso a esta venta', 403);
+  }
+  const where = {
+    [Op.or]: [
+      { fechaRegistro: { [Op.gt]: record.fechaRegistro } },
+      { fechaRegistro: record.fechaRegistro, idEncomiendaVenta: { [Op.gt]: parseInt(id) } },
+    ],
+  };
+  if (rol === 'operador_sede') where.idSede = idSede;
+  const before = await EncomiendaVenta.count({ where });
   return { page: Math.floor(before / limit) + 1 };
 };
 

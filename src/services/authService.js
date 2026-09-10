@@ -3,6 +3,29 @@ const { Usuario, Rol, Permiso, Conductor, UsuarioSede, Destino } = require('../m
 const { generateToken, generateRefreshToken, verifyRefreshToken, generateResetPasswordToken, verifyResetPasswordToken } = require('../middlewares/auth');
 const AppError = require('../errors/appError');
 
+// Sede activa de un usuario (si tiene una), para cualquier rol de panel web —
+// hoy la usa 'operador_sede' (ver LOGICA.md, "Sedes remotas"); 'distribuidor'
+// también tiene una fila en usuario_sede pero ese rol no entra al panel, así
+// que en la práctica esto queda null para admin/conductor. Objeto singular
+// (a diferencia de `sedes`, el array top-level que sigue consumiendo el móvil
+// del distribuidor) porque un usuario de panel cubre como máximo una sede.
+const resolverSedeUsuario = async (idUsuario) => {
+  const usuarioSede = await UsuarioSede.findOne({
+    where: { idUsuario, habilitado: true },
+    include: [{ model: Destino, as: 'destino',
+      attributes: ['idDestino', 'municipio', 'departamento', 'direccion'] }],
+  });
+
+  if (!usuarioSede?.destino) return null;
+
+  return {
+    idDestino: usuarioSede.destino.idDestino,
+    municipio: usuarioSede.destino.municipio,
+    departamento: usuarioSede.destino.departamento,
+    direccion: usuarioSede.destino.direccion,
+  };
+};
+
 const login = async (email, password) => {
   if (!email || !password) {
     throw new AppError('Email y password son requeridos', 400);
@@ -118,6 +141,8 @@ const login = async (email, password) => {
       }));
   }
 
+  const sede = await resolverSedeUsuario(usuario.idUsuario);
+
   return {
     token,
     refreshToken,
@@ -129,7 +154,8 @@ const login = async (email, password) => {
       tipoIdentificacion: usuario.tipoIdentificacion,
       numeroIdentificacion: usuario.numeroIdentificacion,
       rol: usuario.rol?.nombre ?? null,
-      permisos
+      permisos,
+      sede
     },
     conductor: conductorData,
     sedes: sedesData
@@ -183,6 +209,7 @@ const getProfile = async (idUsuario) => {
   }
 
   const permisos = usuario.rol?.permisos?.map(p => p.nombre) ?? [];
+  const sede = await resolverSedeUsuario(usuario.idUsuario);
 
   return {
     idUsuario: usuario.idUsuario,
@@ -192,7 +219,8 @@ const getProfile = async (idUsuario) => {
     tipoIdentificacion: usuario.tipoIdentificacion,
     numeroIdentificacion: usuario.numeroIdentificacion,
     rol: usuario.rol?.nombre ?? null,
-    permisos
+    permisos,
+    sede
   };
 };
 

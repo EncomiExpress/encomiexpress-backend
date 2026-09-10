@@ -144,19 +144,42 @@ const buildOrder = (sortBy) => {
 // "Rutas — filtro 'Regreso pendiente'".
 const ESTADO_REGRESO_PENDIENTE = 'Regreso pendiente';
 
-const buildRutaWhere = ({ habilitado, estado, anio, mes, q, idConductor, idVehiculo, idDestino }) => {
+// Criterio "solo lo mío" de Rutas para operador_sede — DISTINTO del de
+// Ventas/Clientes (que filtran por quién los registró): acá se filtra por qué
+// rutas TOCAN geográficamente su municipio (como destino final o como parada),
+// más los regresos enlazados a esas idas — así la sede siempre ve la ida que
+// Medellín le trajo, aunque ella no la haya registrado. Nunca vacío para una
+// sede con operación. Ver LOGICA.md, "Sedes remotas".
+const buildSedeCondition = (idSede) => sequelize.literal(
+  `("Ruta"."id_ruta" IN (
+    SELECT r.id_ruta FROM ruta r
+    WHERE r.id_destino = ${parseInt(idSede)}
+       OR EXISTS (SELECT 1 FROM ruta_parada rp WHERE rp.id_ruta = r.id_ruta AND rp.id_destino = ${parseInt(idSede)})
+       OR r.id_ruta_ida IN (
+          SELECT r2.id_ruta FROM ruta r2
+          WHERE r2.id_destino = ${parseInt(idSede)}
+             OR EXISTS (SELECT 1 FROM ruta_parada rp2 WHERE rp2.id_ruta = r2.id_ruta AND rp2.id_destino = ${parseInt(idSede)})
+       )
+  ))`
+);
+
+const buildRutaWhere = ({ habilitado, estado, anio, mes, q, idConductor, idVehiculo, idDestino, rol, idSede }) => {
   const where = {};
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
   if (estado && estado !== ESTADO_REGRESO_PENDIENTE) where.estado = estado;
   if (idDestino) where.idDestino = parseInt(idDestino);
+  if (rol === 'operador_sede') where.idRuta = where.idRuta
+    ? { [Op.and]: [where.idRuta, buildSedeCondition(idSede)] }
+    : buildSedeCondition(idSede);
 
   // idVehiculo/idConductor ya no son columnas directas de "ruta" — se resuelven vía
   // subquery contra la tabla intermedia (usado por los links "highlight" desde las
   // páginas de Vehículo/Conductor).
   if (idConductor) {
-    where.idRuta = { [Op.in]: sequelize.literal(
+    const condicion = { [Op.in]: sequelize.literal(
       `(SELECT id_ruta FROM ruta_vehiculo_conductor WHERE id_conductor = ${parseInt(idConductor)} AND habilitado = true)`
     ) };
+    where.idRuta = where.idRuta ? { [Op.and]: [where.idRuta, condicion] } : condicion;
   }
   if (idVehiculo) {
     const condicion = { [Op.in]: sequelize.literal(
@@ -215,8 +238,8 @@ const buildRutaWhere = ({ habilitado, estado, anio, mes, q, idConductor, idVehic
   return where;
 };
 
-const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sortBy, q, idConductor, idVehiculo, idDestino } = {}) => {
-  const where = buildRutaWhere({ habilitado, estado, anio, mes, q, idConductor, idVehiculo, idDestino });
+const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sortBy, q, idConductor, idVehiculo, idDestino, rol, idSede } = {}) => {
+  const where = buildRutaWhere({ habilitado, estado, anio, mes, q, idConductor, idVehiculo, idDestino, rol, idSede });
 
   const offset = (page - 1) * limit;
   const order = buildOrder(sortBy);
@@ -305,13 +328,23 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
   return { data, total: count };
 };
 
-const getById = async (id) => {
+const getById = async (id, { rol, idSede } = {}) => {
   const ruta = await Ruta.findByPk(id, {
     include: [INCLUDE_PARES, INCLUDE_PARADAS, { model: Destino, as: 'destino' }, INCLUDE_REGRESO_IDA, INCLUDE_REGRESO_VUELTA]
   });
 
   if (!ruta) {
     throw new AppError('Ruta no encontrada', 404);
+  }
+
+  // Mismo criterio geográfico de getAll ("toca mi municipio", más regresos
+  // enlazados) — un operador_sede no debe poder consultar el detalle de una
+  // ruta ajena a su sede adivinando el id. Ver LOGICA.md, "Sedes remotas".
+  if (rol === 'operador_sede') {
+    const visible = await Ruta.findOne({ where: { idRuta: id, [Op.and]: [buildSedeCondition(idSede)] }, attributes: ['idRuta'] });
+    if (!visible) {
+      throw new AppError('No tienes acceso a esta ruta', 403);
+    }
   }
 
   return ruta;
@@ -730,6 +763,56 @@ const create = async (data) => {
   }
 
   return getById(idRutaCreada);
+};
+
+// WS4 "Sedes remotas" — el operador_sede dispara el regreso de su sede con una
+// sola acción (solo pide fecha/hora de salida): arma acá el resto de los datos
+// (mismo convoy, paradas invertidas — igual patrón que
+// ListarRutaProgramacion.handleProgramarRegreso en el wizard del admin) y
+// delega en create() para el resto (resolverOrigenRuta, validarUbicacionParaRuta,
+// transacción...). Ver LOGICA.md, "Sedes remotas".
+const crearRegresoDesdeSede = async (idRutaIda, { fechaSalida, horaSalida } = {}, { idSede } = {}) => {
+  if (!fechaSalida || !horaSalida) {
+    throw new AppError('La fecha y la hora de salida del regreso son obligatorias', 400);
+  }
+
+  const ida = await Ruta.findByPk(idRutaIda, { include: [INCLUDE_PARES, INCLUDE_PARADAS] });
+  if (!ida || !ida.habilitado) {
+    throw new AppError('La ruta no existe o está inhabilitada', 404);
+  }
+  if (ida.estado !== 'Completada') {
+    throw new AppError('Solo se puede programar el regreso de una ruta que ya esté "Completada"', 400);
+  }
+  const yaTieneRegreso = await Ruta.findOne({ where: { idRutaIda } });
+  if (yaTieneRegreso) {
+    throw new AppError('Esa ruta ya tiene un viaje de regreso programado', 409);
+  }
+  // La ida debe tocar geográficamente la sede de quien dispara el regreso —
+  // mismo criterio "solo lo mío" de Rutas (destino final o parada, ver
+  // buildSedeCondition). En la práctica solo la sede que es el destino final
+  // puede tener el convoy "fuera de base" ahí (validarUbicacionParaRuta, más
+  // abajo, es la validación autoritativa) — esto solo da un mensaje más claro.
+  const tocaLaSede = ida.idDestino === idSede || (ida.paradas || []).some((p) => p.idDestino === idSede);
+  if (!tocaLaSede) {
+    throw new AppError('Esa ruta no llega a tu sede', 403);
+  }
+
+  const medellin = await Destino.findOne({ where: { municipio: 'Medellín', habilitado: true } });
+  if (!medellin) {
+    throw new AppError('No se encontró el destino "Medellín" en el catálogo', 500);
+  }
+
+  const pares = (ida.paresVehiculoConductor || []).map((p) => ({ idVehiculo: p.idVehiculo, idConductor: p.idConductor }));
+  const paradas = [...(ida.paradas || [])].sort((a, b) => b.orden - a.orden).map((p) => ({ idDestino: p.idDestino }));
+
+  return create({
+    idDestino: medellin.idDestino,
+    idRutaIda,
+    fechaSalida,
+    horaSalida,
+    pares,
+    paradas,
+  });
 };
 
 const update = async (id, data) => {
@@ -1351,12 +1434,18 @@ const getAniosDisponibles = async () => {
   return rows.map((r) => r.anio);
 };
 
-const getPageOf = async (id, { limit = 10 } = {}) => {
+const getPageOf = async (id, { limit = 10, rol, idSede } = {}) => {
   const record = await Ruta.findByPk(id, { attributes: ['idRuta'] });
   if (!record) throw new AppError('Ruta no encontrada', 404);
+  const where = { idRuta: { [Op.gt]: parseInt(id) } };
+  if (rol === 'operador_sede') {
+    where[Op.and] = [buildSedeCondition(idSede)];
+    const visible = await Ruta.findOne({ where: { idRuta: id, [Op.and]: [buildSedeCondition(idSede)] }, attributes: ['idRuta'] });
+    if (!visible) throw new AppError('No tienes acceso a esta ruta', 403);
+  }
   // Debe replicar exactamente el orden por defecto de getAll (idRuta DESC) — si no,
   // "ir a la página donde está" vuelve a apuntar a la página equivocada.
-  const before = await Ruta.count({ where: { idRuta: { [Op.gt]: parseInt(id) } } });
+  const before = await Ruta.count({ where });
   const page = Math.floor(before / limit) + 1;
   const row = (before % limit) + 1;
   return { page, row };
@@ -1428,4 +1517,5 @@ module.exports = {
   getDisponibilidad,
   calcularSedesRuta,
   intentarAutoCompletar,
+  crearRegresoDesdeSede,
 };

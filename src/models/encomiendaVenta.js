@@ -47,6 +47,13 @@ const EncomiendaVenta = sequelize.define('EncomiendaVenta', {
     type: DataTypes.STRING(20),
     defaultValue: 'Pendiente'
   },
+  // Sede (operador_sede) que registró esta venta — NULL = registrada desde
+  // Medellín. Alimenta el filtro "solo lo mío" de Ventas. Ver LOGICA.md,
+  // "Sedes remotas".
+  idSede: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
   habilitado: {
     type: DataTypes.BOOLEAN,
     defaultValue: true

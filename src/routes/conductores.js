@@ -91,7 +91,7 @@ router.get('/mis-anticipos', conductorController.getMisAnticipos);
  *       200:
  *         description: Lista de conductores con datos de usuario y licencia
  */
-router.get('/', conductorController.getAll);
+router.get('/', authorizePermission('listar_conductor'), conductorController.getAll);
 router.get('/:id/page-of', authorize('admin'), conductorController.getPageOf);
 
 /**
@@ -115,7 +115,7 @@ router.get('/:id/page-of', authorize('admin'), conductorController.getPageOf);
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.get('/:id', conductorController.getById);
+router.get('/:id', authorizePermission('consultar_conductor'), conductorController.getById);
 
 /**
  * @swagger
@@ -132,7 +132,7 @@ router.get('/:id', conductorController.getById);
  *       200:
  *         description: Lista de anticipos y excedentes del conductor
  */
-router.get('/:id/anticipos', conductorController.getAnticipos);
+router.get('/:id/anticipos', authorize('admin'), conductorController.getAnticipos);
 
 /**
  * @swagger

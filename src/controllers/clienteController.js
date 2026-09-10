@@ -1,12 +1,20 @@
 const clienteService = require('../services/clienteService');
 
+// Contexto de sede del solicitante — solo tiene efecto para 'operador_sede'
+// (ver LOGICA.md, "Sedes remotas"); para el resto de roles, idSede va undefined
+// y los filtros/guardias de clienteService no se activan.
+const contextoSede = (req) => ({
+  rol: req.usuario?.rol?.nombre,
+  idSede: req.sede?.idDestino,
+});
+
 const listarClientes = async (req, res, next) => {
   try {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const sortBy = req.query.sortBy;
     const { habilitado, q } = req.query;
-    const result = await clienteService.getAll({ page, limit, sortBy, habilitado, q });
+    const result = await clienteService.getAll({ page, limit, sortBy, habilitado, q, ...contextoSede(req) });
     res.json({ success: true, data: result.data, total: result.total });
   } catch (error) {
     next(error);
@@ -16,7 +24,7 @@ const listarClientes = async (req, res, next) => {
 const obtenerCliente = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const cliente = await clienteService.getById(id);
+    const cliente = await clienteService.getById(id, contextoSede(req));
     res.json({ success: true, data: cliente });
   } catch (error) {
     next(error);
@@ -25,7 +33,7 @@ const obtenerCliente = async (req, res, next) => {
 
 const registrarCliente = async (req, res, next) => {
   try {
-    const nuevoCliente = await clienteService.create(req.body);
+    const nuevoCliente = await clienteService.create(req.body, contextoSede(req));
     res.status(201).json({ success: true, message: 'Cliente registrado exitosamente', data: nuevoCliente });
   } catch (error) {
     next(error);
@@ -35,7 +43,7 @@ const registrarCliente = async (req, res, next) => {
 const actualizarCliente = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const cliente = await clienteService.update(id, req.body);
+    const cliente = await clienteService.update(id, req.body, contextoSede(req));
     res.json({ success: true, message: 'Cliente actualizado exitosamente', data: cliente });
   } catch (error) {
     next(error);
@@ -45,7 +53,7 @@ const actualizarCliente = async (req, res, next) => {
 const toggleHabilitadoCliente = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const cliente = await clienteService.toggleHabilitado(id);
+    const cliente = await clienteService.toggleHabilitado(id, contextoSede(req));
     res.json({
       success: true,
       message: `Cliente ${cliente.habilitado ? 'habilitado' : 'inhabilitado'} exitosamente`,
@@ -60,7 +68,7 @@ const getPageOfCliente = async (req, res, next) => {
   try {
     const { id } = req.params;
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
-    const result = await clienteService.getPageOf(id, { limit });
+    const result = await clienteService.getPageOf(id, { limit, ...contextoSede(req) });
     res.json({ success: true, data: result });
   } catch (error) {
     next(error);

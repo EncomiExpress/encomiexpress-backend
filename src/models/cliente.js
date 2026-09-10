@@ -45,6 +45,13 @@ const Cliente = sequelize.define('Cliente', {
     type: DataTypes.INTEGER,
     allowNull: true
   },
+  // Sede (operador_sede) que registró este cliente — NULL = registrado desde
+  // Medellín. Distinto de idDestino (municipio de devolución del remitente).
+  // Ver LOGICA.md, "Sedes remotas".
+  idSede: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
   habilitado: {
     type: DataTypes.BOOLEAN,
     defaultValue: true

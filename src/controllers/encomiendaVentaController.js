@@ -1,5 +1,13 @@
 const encomiendaService = require('../services/encomiendaService');
 
+// Contexto de sede del solicitante — solo tiene efecto para 'operador_sede'
+// (ver LOGICA.md, "Sedes remotas"); para el resto de roles, idSede va undefined
+// y los filtros/guardias de encomiendaService no se activan.
+const contextoSede = (req) => ({
+  rol: req.usuario?.rol?.nombre,
+  idSede: req.sede?.idDestino,
+});
+
 exports.getAll = async (req, res, next) => {
   try {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
@@ -17,6 +25,7 @@ exports.getAll = async (req, res, next) => {
       limit,
       sortBy,
       q,
+      ...contextoSede(req),
     };
     const result = await encomiendaService.getAll(filters);
     res.json({ success: true, data: result.data, total: result.total });
@@ -28,7 +37,7 @@ exports.getAll = async (req, res, next) => {
 exports.getById = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const encomienda = await encomiendaService.getById(id);
+    const encomienda = await encomiendaService.getById(id, contextoSede(req));
     res.json({ success: true, data: encomienda });
   } catch (error) {
     next(error);
@@ -37,7 +46,7 @@ exports.getById = async (req, res, next) => {
 
 exports.create = async (req, res, next) => {
   try {
-    const encomienda = await encomiendaService.create(req.body, req.file?.path);
+    const encomienda = await encomiendaService.create(req.body, contextoSede(req));
     res.status(201).json({ success: true, message: 'Encomienda creada exitosamente', data: encomienda });
   } catch (error) {
     next(error);
@@ -94,7 +103,7 @@ exports.reactivar = async (req, res, next) => {
 exports.getPageOf = async (req, res, next) => {
   try {
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
-    const data = await encomiendaService.getPageOf(req.params.id, { limit });
+    const data = await encomiendaService.getPageOf(req.params.id, { limit, ...contextoSede(req) });
     res.json({ success: true, data });
   } catch (error) {
     next(error);

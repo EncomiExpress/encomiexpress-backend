@@ -79,6 +79,10 @@ CREATE TABLE cliente (
   -- Municipio del remitente — para saber a dónde devolver un paquete si el
   -- destinatario nunca lo recoge (ver LOGICA.md).
   id_destino            INTEGER,
+  -- Sede (operador_sede) que registró este cliente — NULL = registrado desde
+  -- Medellín. Semántica de "quién lo registró", distinta de id_destino (municipio
+  -- de devolución del remitente). Ver LOGICA.md, "Sedes remotas".
+  id_sede               INTEGER,
   habilitado            BOOLEAN NOT NULL DEFAULT true
 );
 
@@ -205,6 +209,10 @@ CREATE TABLE encomienda_venta (
   total                  DECIMAL(12,2) NOT NULL DEFAULT 0,
   metodo_pago            VARCHAR(30),
   estado_pago            VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+  -- Sede (operador_sede) que registró esta venta — NULL = registrada desde
+  -- Medellín. Alimenta el filtro "solo lo mío" de Ventas. Ver LOGICA.md, "Sedes
+  -- remotas".
+  id_sede                INTEGER,
   habilitado             BOOLEAN NOT NULL DEFAULT true
 );
 
@@ -343,6 +351,9 @@ ALTER TABLE usuario_sede ADD FOREIGN KEY (id_usuario) REFERENCES usuario (id_usu
 ALTER TABLE usuario_sede ADD FOREIGN KEY (id_destino) REFERENCES destino (id_destino);
 -- Un mismo distribuidor no queda dos veces como cubridor activo de la misma sede.
 CREATE UNIQUE INDEX uq_usuario_sede_activo ON usuario_sede (id_usuario, id_destino) WHERE habilitado = true;
+-- Sede que registró cada cliente/venta (operador_sede) — ver LOGICA.md, "Sedes remotas".
+ALTER TABLE cliente ADD FOREIGN KEY (id_sede) REFERENCES destino (id_destino);
+ALTER TABLE encomienda_venta ADD FOREIGN KEY (id_sede) REFERENCES destino (id_destino);
 
 -- ============================================
 -- DATOS INICIALES
@@ -358,7 +369,8 @@ CREATE UNIQUE INDEX uq_usuario_sede_activo ON usuario_sede (id_usuario, id_desti
 INSERT INTO rol (nombre, descripcion) VALUES
 ('admin',       'Administrador del sistema con acceso total'),
 ('conductor',   'Conductor de vehículo'),
-('distribuidor','Encargado de sede — entrega final de paquetes al destinatario; solo app móvil');
+('distribuidor','Encargado de sede — entrega final de paquetes al destinatario; solo app móvil'),
+('operador_sede','Operador de sede remota — dispara el regreso, registra sus ventas y gestiona sus propios clientes; solo lectura del resto. Panel web.');
 
 -- Permisos granulares
 INSERT INTO permiso (nombre, descripcion, habilitado) VALUES
@@ -416,7 +428,10 @@ INSERT INTO permiso (nombre, descripcion, habilitado) VALUES
 -- Especial, no sigue el patrón verbo_entidad (igual que ver_dashboard): no es
 -- "puede administrar la entidad móvil", es "puede iniciar sesión desde la app
 -- móvil" — ver authService.login() y LOGICA.md, "Permiso acceder_app_movil".
-('acceder_app_movil',      'Acceder a la aplicación móvil', true);
+('acceder_app_movil',      'Acceder a la aplicación móvil', true),
+-- Especial, no sigue el patrón verbo_entidad: dispara la ruta de regreso de la
+-- sede del operador (WS4 de "Sedes remotas") — ver LOGICA.md.
+('programar_regreso_sede', 'Disparar la ruta de regreso de su sede', true);
 
 -- Asignar todos los permisos al admin
 INSERT INTO rol_permiso (id_rol, id_permiso)
@@ -428,6 +443,20 @@ INSERT INTO rol_permiso (id_rol, id_permiso)
 SELECT r.id_rol, p.id_permiso
 FROM rol r, permiso p
 WHERE r.nombre IN ('conductor', 'distribuidor') AND p.nombre = 'acceder_app_movil';
+
+-- 'operador_sede' (4): Ventas/Rutas de solo lectura + la acción de regreso +
+-- Clientes completo (acotado a los suyos, ver clienteService/rutaService). Sin
+-- acceder_app_movil (es panel web) y sin actualizar/inhabilitar de Venta/Ruta
+-- ni registrar_ruta — ver LOGICA.md, "Sedes remotas".
+INSERT INTO rol_permiso (id_rol, id_permiso)
+SELECT r.id_rol, p.id_permiso
+FROM rol r, permiso p
+WHERE r.nombre = 'operador_sede' AND p.nombre IN (
+  'listar_venta', 'registrar_venta', 'consultar_venta',
+  'listar_ruta', 'consultar_ruta', 'programar_regreso_sede',
+  'listar_cliente', 'registrar_cliente', 'consultar_cliente',
+  'actualizar_cliente', 'inhabilitar_cliente'
+);
 
 -- El usuario admin NO se crea aquí a propósito: correr `npm run db:seed`
 -- (src/config/seed.js) después de este script — toma la contraseña de la

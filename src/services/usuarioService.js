@@ -94,21 +94,25 @@ const getById = async (id) => {
   return usuario;
 };
 
+// Roles que exigen exactamente una sede propia vía usuario_sede — 'distribuidor'
+// (entrega final, solo móvil) y 'operador_sede' (panel web restringido, ver
+// LOGICA.md "Sedes remotas"). Cada uno cubre UNA sola sede.
+const ROLES_CON_SEDE = ['distribuidor', 'operador_sede'];
+
 // Normaliza el array de ids de sede que llega del cliente y valida que sea un
-// destino real y habilitado. Solo aplica cuando el rol del usuario es
-// 'distribuidor' — para cualquier otro rol el campo se ignora. Un distribuidor
-// cubre UNA sola sede; el campo sigue viajando como array (contrato con el
+// destino real y habilitado. Solo aplica a ROLES_CON_SEDE — para cualquier otro
+// rol el campo se ignora. El campo sigue viajando como array (contrato con el
 // front y con usuario_sede) pero se rechaza si trae más de un id.
 const resolverSedes = async (rolNombre, sedes) => {
-  if (rolNombre !== 'distribuidor') return [];
+  if (!ROLES_CON_SEDE.includes(rolNombre)) return [];
   const limpias = Array.isArray(sedes)
     ? [...new Set(sedes.map((s) => parseInt(s, 10)).filter((n) => Number.isInteger(n) && n > 0))]
     : [];
   if (limpias.length === 0) {
-    throw new AppError('Un distribuidor debe tener una sede asignada', 400);
+    throw new AppError('Este rol debe tener una sede asignada', 400);
   }
   if (limpias.length > 1) {
-    throw new AppError('Un distribuidor cubre una sola sede', 400);
+    throw new AppError('Este rol cubre una sola sede', 400);
   }
   const existentes = await Destino.count({ where: { idDestino: { [Op.in]: limpias }, habilitado: true } });
   if (existentes !== limpias.length) {
@@ -221,20 +225,20 @@ const update = async (id, data, currentUserId) => {
 
   // Resolver el rol final (el que llega, o el que ya tenía) para decidir qué hacer
   // con las sedes. Se tocan solo si: (a) llega el array `sedes` en el body, o
-  // (b) el usuario pasa a ser distribuidor y hay que exigirle al menos una.
+  // (b) el usuario pasa a un rol de ROLES_CON_SEDE y hay que exigirle al menos una.
   const rolCambia = idRol && parseInt(idRol, 10) !== usuario.idRol;
   const rolFinal = rolCambia ? await Rol.findByPk(idRol) : usuario.rol;
-  const esDistribuidorFinal = rolFinal?.nombre === 'distribuidor';
+  const requiereSedeFinal = ROLES_CON_SEDE.includes(rolFinal?.nombre);
 
   let sedesLimpias = null; // null = no tocar; [] = borrar todas
-  if (esDistribuidorFinal) {
+  if (requiereSedeFinal) {
     if (sedes !== undefined) {
-      sedesLimpias = await resolverSedes('distribuidor', sedes);
+      sedesLimpias = await resolverSedes(rolFinal.nombre, sedes);
     } else if (rolCambia) {
-      throw new AppError('Un distribuidor debe tener al menos una sede asignada', 400);
+      throw new AppError('Este rol debe tener al menos una sede asignada', 400);
     }
   } else if (rolCambia || sedes !== undefined) {
-    // Dejó de ser distribuidor (o nunca lo fue y mandaron sedes por error): se
+    // Dejó de requerir sede (o nunca la requirió y mandaron sedes por error): se
     // limpian las coberturas, ya no aplican.
     sedesLimpias = [];
   }

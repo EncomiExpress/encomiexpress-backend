@@ -18,7 +18,7 @@ const {
 
 router.use(authenticate);
 
-router.get('/:id/page-of', encomiendaVentaController.getPageOf);
+router.get('/:id/page-of', authorizePermission('listar_venta'), encomiendaVentaController.getPageOf);
 
 /**
  * @swagger
@@ -30,7 +30,7 @@ router.get('/:id/page-of', encomiendaVentaController.getPageOf);
  *       200:
  *         description: "{ primerRegistro, ultimoRegistro } en formato YYYY-MM-DD, o null si no hay ventas"
  */
-router.get('/rango-fechas', encomiendaVentaController.getRangoFechas);
+router.get('/rango-fechas', authorizePermission('ver_dashboard'), encomiendaVentaController.getRangoFechas);
 
 /**
  * @swagger
@@ -59,7 +59,7 @@ router.get('/rango-fechas', encomiendaVentaController.getRangoFechas);
  *       200:
  *         description: Lista paginada de encomiendas
  */
-router.get('/', encomiendaVentaController.getAll);
+router.get('/', authorizePermission('listar_venta'), encomiendaVentaController.getAll);
 
 /**
  * @swagger
@@ -89,7 +89,7 @@ router.get('/', encomiendaVentaController.getAll);
  */
 router.get('/paquetes/devueltos', authorizePermission('listar_venta'), encomiendaVentaController.getPaquetesDevueltos);
 router.get('/paquetes/devueltos/anios-disponibles', authorizePermission('listar_venta'), encomiendaVentaController.getAniosDisponiblesPaquetesDevueltos);
-router.get('/:id', encomiendaVentaController.getById);
+router.get('/:id', authorizePermission('consultar_venta'), encomiendaVentaController.getById);
 
 /**
  * @swagger
@@ -107,7 +107,7 @@ router.get('/:id', encomiendaVentaController.getById);
  *       201:
  *         description: Encomienda registrada con número de guía generado
  */
-router.post('/', createValidation, validate, encomiendaVentaController.create);
+router.post('/', authorizePermission('registrar_venta'), createValidation, validate, encomiendaVentaController.create);
 
 /**
  * @swagger
@@ -130,7 +130,7 @@ router.post('/', createValidation, validate, encomiendaVentaController.create);
  *       200:
  *         description: Encomienda actualizada
  */
-router.put('/:id', updateValidation, validate, encomiendaVentaController.update);
+router.put('/:id', authorizePermission('actualizar_venta'), updateValidation, validate, encomiendaVentaController.update);
 
 /**
  * @swagger
@@ -158,7 +158,7 @@ router.put('/:id', updateValidation, validate, encomiendaVentaController.update)
  *       200:
  *         description: Estado de pago actualizado
  */
-router.patch('/:id/estado-pago', cambiarEstadoPagoValidation, validate, encomiendaVentaController.cambiarEstadoPago);
+router.patch('/:id/estado-pago', authorizePermission('actualizar_venta'), cambiarEstadoPagoValidation, validate, encomiendaVentaController.cambiarEstadoPago);
 
 /**
  * @swagger

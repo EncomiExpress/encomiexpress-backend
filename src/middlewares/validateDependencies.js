@@ -80,12 +80,21 @@ const verificarDependenciasDestino = async (destinoId) => {
   return { bloqueado: dependencias.length > 0, dependencias };
 };
 
-const verificarDependenciasCliente = async (clienteId) => {
+// `idSede`, si llega, acota la consulta a las ventas registradas por esa sede
+// (encomienda_venta.id_sede) — lo usa clienteService.toggleHabilitado cuando
+// quien pide el toggle es 'operador_sede', para no bloquear inhabilitar un
+// cliente por ventas activas de OTRA sede que ni siquiera puede ver ni
+// gestionar (ver LOGICA.md, "Sedes remotas"). Sin `idSede` (admin), el
+// comportamiento es el de siempre: cualquier venta activa del cliente bloquea.
+const verificarDependenciasCliente = async (clienteId, { idSede } = {}) => {
+  const where = {
+    idCliente: clienteId,
+    estado: { [Op.notIn]: ['Entregada', 'Completada con novedades', 'Cancelada'] }
+  };
+  if (idSede !== undefined) where.idSede = idSede;
+
   const encomiendas = await EncomiendaVenta.findAll({
-    where: {
-      idCliente: clienteId,
-      estado: { [Op.notIn]: ['Entregada', 'Completada con novedades', 'Cancelada'] }
-    },
+    where,
     attributes: ['idEncomiendaVenta', 'estado'],
     include: [{ model: Paquete, as: 'paquetes', attributes: ['numeroGuia'], required: false, limit: 1 }]
   });

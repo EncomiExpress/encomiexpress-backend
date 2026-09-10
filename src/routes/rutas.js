@@ -179,6 +179,33 @@ router.patch('/:id/estado', authorizePermission('actualizar_ruta'), rutaControll
 
 /**
  * @swagger
+ * /rutas/{idRutaIda}/regreso-sede:
+ *   post:
+ *     summary: Programa el regreso de una sede remota (operador_sede) — solo fecha/hora de salida
+ *     tags: [Rutas]
+ *     parameters:
+ *       - in: path
+ *         name: idRutaIda
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [fechaSalida, horaSalida]
+ *             properties:
+ *               fechaSalida: { type: string, format: date }
+ *               horaSalida: { type: string }
+ *     responses:
+ *       201:
+ *         description: Ruta de regreso creada
+ */
+router.post('/:idRutaIda/regreso-sede', authorizePermission('programar_regreso_sede'), rutaController.crearRegresoDesdeSede);
+
+/**
+ * @swagger
  * /rutas/{id}/toggle-habilitado:
  *   patch:
  *     summary: Habilitar o inhabilitar ruta

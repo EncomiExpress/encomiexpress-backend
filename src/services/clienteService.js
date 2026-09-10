@@ -22,9 +22,13 @@ const buildOrder = (sortBy) => {
   return [[field, direction], ['idCliente', direction]];
 };
 
-const getAll = async ({ habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
+const getAll = async ({ habilitado, q, page = 1, limit = 10, sortBy, rol, idSede } = {}) => {
   const where = {};
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
+  // "Solo lo mío" para operador_sede — filtra por quién registró el cliente,
+  // no por municipio. Un listado nuevo empieza vacío (no hereda nada de
+  // Medellín ni de otra sede). Ver LOGICA.md, "Sedes remotas".
+  if (rol === 'operador_sede') where.idSede = idSede;
   if (q) {
     const trimmed = q.trim();
     const query = `%${trimmed}%`;
@@ -63,17 +67,21 @@ const getAll = async ({ habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
   return { data, total: count };
 };
 
-const getById = async (id) => {
+const getById = async (id, { rol, idSede } = {}) => {
   const cliente = await Cliente.findByPk(id, { include: [{ model: Destino, as: 'destino' }] });
 
   if (!cliente) {
     throw new AppError('Cliente no encontrado', 404);
   }
 
+  if (rol === 'operador_sede' && cliente.idSede !== idSede) {
+    throw new AppError('No tienes acceso a este cliente', 403);
+  }
+
   return cliente;
 };
 
-const create = async (data) => {
+const create = async (data, { rol, idSede } = {}) => {
   const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, direccion, idDestino } = data;
 
   const existingCliente = await Cliente.findOne({ where: { numeroIdentificacion } });
@@ -109,18 +117,24 @@ const create = async (data) => {
     email,
     direccion,
     idDestino,
+    // Nunca lo que mande el body — sale del contexto de sesión de quien registra.
+    idSede: rol === 'operador_sede' ? idSede : null,
     habilitado: true
   });
 
   return Cliente.findByPk(nuevoCliente.idCliente, { include: [{ model: Destino, as: 'destino' }] });
 };
 
-const update = async (id, data) => {
+const update = async (id, data, { rol, idSede } = {}) => {
   const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, direccion, idDestino } = data;
 
   const cliente = await Cliente.findByPk(id);
   if (!cliente) {
     throw new AppError('Cliente no encontrado', 404);
+  }
+
+  if (rol === 'operador_sede' && cliente.idSede !== idSede) {
+    throw new AppError('No tienes acceso a este cliente', 403);
   }
 
   if (numeroIdentificacion && numeroIdentificacion !== cliente.numeroIdentificacion) {
@@ -170,12 +184,19 @@ const update = async (id, data) => {
   return Cliente.findByPk(id, { include: [{ model: Destino, as: 'destino' }] });
 };
 
-const toggleHabilitado = async (id) => {
+const toggleHabilitado = async (id, { rol, idSede } = {}) => {
   const cliente = await Cliente.findByPk(id);
   if (!cliente) throw new AppError('Cliente no encontrado', 404);
 
+  if (rol === 'operador_sede' && cliente.idSede !== idSede) {
+    throw new AppError('No tienes acceso a este cliente', 403);
+  }
+
   if (cliente.habilitado === true) {
-    const { bloqueado, dependencias } = await verificarDependenciasCliente(id);
+    const { bloqueado, dependencias } = await verificarDependenciasCliente(
+      id,
+      rol === 'operador_sede' ? { idSede } : {}
+    );
     if (bloqueado) {
       throw new AppError(
         'No se puede inhabilitar este cliente porque tiene encomiendas activas',
@@ -194,12 +215,15 @@ const toggleHabilitado = async (id) => {
 // El orden por defecto de getAll (sin sortBy) es idCliente DESC — este cálculo
 // tiene que replicar exactamente ese orden, porque el frontend llama getPageOf
 // justo cuando llega recién cargado (sin ningún sortBy activo todavía).
-const getPageOf = async (id, { limit = 10 } = {}) => {
-  const record = await Cliente.findByPk(id, { attributes: ['idCliente'] });
+const getPageOf = async (id, { limit = 10, rol, idSede } = {}) => {
+  const record = await Cliente.findByPk(id, { attributes: ['idCliente', 'idSede'] });
   if (!record) throw new AppError('Cliente no encontrado', 404);
-  const before = await Cliente.count({
-    where: { idCliente: { [Op.gt]: parseInt(id) } },
-  });
+  if (rol === 'operador_sede' && record.idSede !== idSede) {
+    throw new AppError('No tienes acceso a este cliente', 403);
+  }
+  const where = { idCliente: { [Op.gt]: parseInt(id) } };
+  if (rol === 'operador_sede') where.idSede = idSede;
+  const before = await Cliente.count({ where });
   const page = Math.floor(before / limit) + 1;
   const row = (before % limit) + 1;
   return { page, row };

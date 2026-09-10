@@ -139,6 +139,15 @@ EncomiendaVenta.belongsTo(Cliente, { foreignKey: 'idCliente', as: 'cliente' });
 Destino.hasMany(Cliente, { foreignKey: 'idDestino', as: 'clientes' });
 Cliente.belongsTo(Destino, { foreignKey: 'idDestino', as: 'destino' });
 
+// Destino - Cliente/EncomiendaVenta por idSede (1:N) — sede (operador_sede) que
+// registró cada cliente/venta, alias distinto del idDestino de arriba (que es
+// el municipio de devolución del remitente, no quién lo registró). Ver
+// LOGICA.md, "Sedes remotas".
+Destino.hasMany(Cliente, { foreignKey: 'idSede', as: 'clientesRegistrados' });
+Cliente.belongsTo(Destino, { foreignKey: 'idSede', as: 'sedeRegistro' });
+Destino.hasMany(EncomiendaVenta, { foreignKey: 'idSede', as: 'ventasRegistradas' });
+EncomiendaVenta.belongsTo(Destino, { foreignKey: 'idSede', as: 'sedeRegistro' });
+
 // Ruta - EncomiendaVenta (1:N)
 Ruta.hasMany(EncomiendaVenta, { foreignKey: 'idRuta', as: 'encomiendas' });
 EncomiendaVenta.belongsTo(Ruta, { foreignKey: 'idRuta', as: 'ruta' });

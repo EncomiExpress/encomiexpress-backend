@@ -1,5 +1,13 @@
 const rutaService = require('../services/rutaService');
 
+// Contexto de sede del solicitante — solo tiene efecto para 'operador_sede'
+// (ver LOGICA.md, "Sedes remotas"); para el resto de roles, idSede va undefined
+// y los filtros/guardias de rutaService no se activan.
+const contextoSede = (req) => ({
+  rol: req.usuario?.rol?.nombre,
+  idSede: req.sede?.idDestino,
+});
+
 exports.getAll = async (req, res, next) => {
   try {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
@@ -17,6 +25,7 @@ exports.getAll = async (req, res, next) => {
       page,
       limit,
       sortBy,
+      ...contextoSede(req),
     };
     const result = await rutaService.getAll(filters);
     res.json({ success: true, data: result.data, total: result.total });
@@ -28,7 +37,7 @@ exports.getAll = async (req, res, next) => {
 exports.getById = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const ruta = await rutaService.getById(id);
+    const ruta = await rutaService.getById(id, contextoSede(req));
     res.json({ success: true, data: ruta });
   } catch (error) {
     next(error);
@@ -98,11 +107,24 @@ exports.getAniosDisponibles = async (req, res, next) => {
   }
 };
 
+// WS4 "Sedes remotas" — el operador_sede dispara el regreso de su sede con una
+// sola acción (solo fecha/hora de salida). Ver LOGICA.md, "Sedes remotas".
+exports.crearRegresoDesdeSede = async (req, res, next) => {
+  try {
+    const { idRutaIda } = req.params;
+    const { fechaSalida, horaSalida } = req.body;
+    const regreso = await rutaService.crearRegresoDesdeSede(idRutaIda, { fechaSalida, horaSalida }, contextoSede(req));
+    res.status(201).json({ success: true, message: 'Regreso programado exitosamente', data: regreso });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.getPageOf = async (req, res, next) => {
   try {
     const { id } = req.params;
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
-    const result = await rutaService.getPageOf(id, { limit });
+    const result = await rutaService.getPageOf(id, { limit, ...contextoSede(req) });
     res.json({ success: true, data: result });
   } catch (error) {
     next(error);
