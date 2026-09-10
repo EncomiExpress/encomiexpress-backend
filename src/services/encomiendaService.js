@@ -72,6 +72,14 @@ const INCLUDE_PARES = {
   as: 'paresVehiculoConductor',
   where: { habilitado: true },
   required: false,
+  // separate: true -- una ruta con convoy (2+ pares) multiplicaba filas a nivel
+  // SQL dentro de RUTA_INCLUDE. En getAll(), paginado con LIMIT/OFFSET y
+  // subQuery:false, esas filas de más se comían cupo de la página: una venta
+  // cuya ruta tiene 2 pares ocupaba 2 posiciones en la ventana de la página,
+  // dejando esa página con un registro menos y corriendo todo lo siguiente un
+  // lugar (ver LOGICA.md, "getAll de Ventas devolvía páginas cortas por el
+  // convoy, getPageOf quedaba desincronizado").
+  separate: true,
   include: [
     { model: Vehiculo, as: 'vehiculo' },
     { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
