@@ -35,6 +35,18 @@ router.get('/', authorizePermission('listar_destino'), destinoController.getAll)
 
 /**
  * @swagger
+ * /destinos/departamentos:
+ *   get:
+ *     summary: Departamentos que ya tienen al menos un destino registrado (opciones del filtro)
+ *     tags: [Destinos]
+ *     responses:
+ *       200:
+ *         description: Lista de departamentos
+ */
+router.get('/departamentos', authorizePermission('listar_destino'), destinoController.getDepartamentosRegistrados);
+
+/**
+ * @swagger
  * /destinos/{id}:
  *   get:
  *     summary: Obtener destino por ID

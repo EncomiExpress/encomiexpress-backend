@@ -1,4 +1,4 @@
-const { Destino } = require('../models');
+const { Destino, sequelize } = require('../models');
 const AppError = require('../errors/appError');
 const { verificarDependenciasDestino } = require('../middlewares/validateDependencies');
 const { Op } = require('sequelize');
@@ -39,6 +39,21 @@ const getAll = async ({ habilitado, departamento, q, page = 1, limit = 10, sortB
   });
 
   return { data, total: count };
+};
+
+// Opciones reales del filtro "Departamento" de Listar Destinos -- no una lista fija:
+// solo los departamentos que YA tienen al menos un destino (de cualquier estado
+// habilitado, para que el filtro siga sirviendo también al mirar la pestaña
+// "Inhabilitado"). Se actualiza sola a medida que se registran destinos en
+// departamentos nuevos, y nunca ofrece una opción que de todos modos daría la
+// tabla vacía.
+const getDepartamentosRegistrados = async () => {
+  const rows = await Destino.findAll({
+    attributes: [[sequelize.fn('DISTINCT', sequelize.col('departamento')), 'departamento']],
+    order: [['departamento', 'ASC']],
+    raw: true,
+  });
+  return rows.map((r) => r.departamento);
 };
 
 const getById = async (id) => {
@@ -117,7 +132,7 @@ const toggleHabilitado = async (id) => {
     const { bloqueado, dependencias } = await verificarDependenciasDestino(id);
     if (bloqueado) {
       throw new AppError(
-        'No se puede inhabilitar este destino porque tiene rutas activas o programadas',
+        'No se puede inhabilitar este destino: tiene rutas activas o programadas, o un convoy fuera de base con el regreso sin programar',
         409,
         dependencias,
         'DEPENDENCY_CONFLICT'
@@ -149,4 +164,5 @@ module.exports = {
   update,
   toggleHabilitado,
   getPageOf,
+  getDepartamentosRegistrados,
 };

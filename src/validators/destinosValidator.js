@@ -1,11 +1,12 @@
 const { body } = require('express-validator');
 const r = require('./commonRules');
 
-// Mismo alfabeto que filtran en vivo RegistrarDestino.jsx/ActualizarDestino.jsx y que
-// valida destinoValidation.js en el frontend (incluye ü/Ü, ej. "Güicán"). Departamento
-// pasó a ser texto libre (Autocomplete freeSolo), así que el servidor tiene que imponer
-// la misma regla que municipio y no solo "no vacío".
-const SOLO_LETRAS_REGEX = /^[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ\s]+$/;
+// Mismo regex que valida destinoValidation.js en el frontend (defensa en el servidor
+// por si el dato llega de otra forma que no sea el Autocomplete Departamento/Municipio
+// del wizard). Incluye el punto porque "Bogotá D.C." es el único municipio real de
+// Colombia (de los ~1100 que trae la API que alimenta ese Autocomplete) que no es
+// solo letras/espacios/tildes.
+const SOLO_LETRAS_REGEX = /^[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ\s.]+$/;
 const MAX_LEN = 60;
 
 const noSoloRelleno = (mensaje) => (value) => {

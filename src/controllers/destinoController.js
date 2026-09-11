@@ -20,6 +20,15 @@ exports.getAll = async (req, res, next) => {
   }
 };
 
+exports.getDepartamentosRegistrados = async (req, res, next) => {
+  try {
+    const departamentos = await destinoService.getDepartamentosRegistrados();
+    res.json({ success: true, data: departamentos });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.getById = async (req, res, next) => {
   try {
     const { id } = req.params;
