@@ -144,6 +144,13 @@ const buildOrder = (sortBy) => {
 // "Rutas — filtro 'Regreso pendiente'".
 const ESTADO_REGRESO_PENDIENTE = 'Regreso pendiente';
 
+// Otro pseudo-filtro, no un estado real: toda ruta que ES un viaje de regreso
+// (idRutaIda != null) -- mismo criterio que ya pinta el chip "Viaje de regreso" en
+// el listado (useRutaColumns.jsx). Se agrega junto a "Regreso pendiente" en el
+// selector de Estado para poder ubicarlas directamente sin tener que reconocerlas
+// fila por fila.
+const ESTADO_VIAJE_REGRESO = 'Viaje de regreso';
+
 // Criterio "solo lo mío" de Rutas para operador_sede — DISTINTO del de
 // Ventas/Clientes (que filtran por quién los registró): acá se filtra por qué
 // rutas TOCAN geográficamente su municipio (como destino final o como parada),
@@ -166,7 +173,7 @@ const buildSedeCondition = (idSede) => sequelize.literal(
 const buildRutaWhere = ({ habilitado, estado, anio, mes, q, idConductor, idVehiculo, idDestino, rol, idSede }) => {
   const where = {};
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
-  if (estado && estado !== ESTADO_REGRESO_PENDIENTE) where.estado = estado;
+  if (estado && estado !== ESTADO_REGRESO_PENDIENTE && estado !== ESTADO_VIAJE_REGRESO) where.estado = estado;
   if (idDestino) where.idDestino = parseInt(idDestino);
   if (rol === 'operador_sede') where.idRuta = where.idRuta
     ? { [Op.and]: [where.idRuta, buildSedeCondition(idSede)] }
@@ -204,6 +211,8 @@ const buildRutaWhere = ({ habilitado, estado, anio, mes, q, idConductor, idVehic
     ] };
     where.idRuta = where.idRuta ? { [Op.and]: [where.idRuta, regresoPendienteCond] } : regresoPendienteCond;
   }
+
+  if (estado === ESTADO_VIAJE_REGRESO) where.idRutaIda = { [Op.ne]: null };
 
   if (anio) {
     // fecha_salida es tipo DATE en Postgres — LIKE no aplica sobre fechas, hay que
