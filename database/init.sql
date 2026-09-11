@@ -377,11 +377,15 @@ ALTER TABLE encomienda_venta ADD FOREIGN KEY (id_sede) REFERENCES destino (id_de
 -- ve tal cual en el panel) y libremente editable; `codigo` es el identificador
 -- estable en minúscula que compara el código, nunca se muestra ni se edita.
 -- Ver LOGICA.md, "Rol: nombre editable vs codigo".
+-- La descripción solo admite letras y espacios (validators/rolesValidator.js,
+-- SOLO_LETRAS_REGEX) -- sin comas, guiones ni punto y coma, para que se pueda
+-- editar cualquier otro campo del rol (ej. sus permisos) sin que el PUT
+-- rechace la descripción ya sembrada por reenviarla intacta.
 INSERT INTO rol (nombre, codigo, descripcion) VALUES
-('Admin',        'admin',        'Administrador general — gestión completa de usuarios, roles, rutas, ventas, clientes, conductores y configuración. Panel web.'),
-('Conductor',    'conductor',    'Conductor de vehículo — transporta la ruta asignada, gestiona anticipos y entregas en sede; solo app móvil.'),
-('Distribuidor', 'distribuidor', 'Encargado de sede — entrega final de paquetes al destinatario; solo app móvil'),
-('Operador_sede','operador_sede','Operador de sede remota — dispara el regreso, registra sus ventas y gestiona sus propios clientes; solo lectura del resto. Panel web.');
+('Admin',        'admin',        'Administrador general gestión completa de usuarios roles rutas ventas clientes conductores y configuración Panel web'),
+('Conductor',    'conductor',    'Conductor de vehículo transporta la ruta asignada gestiona anticipos y entregas en sede solo app móvil'),
+('Distribuidor', 'distribuidor', 'Encargado de sede entrega final de paquetes al destinatario solo app móvil'),
+('Operador Sede','operador_sede','Operador de sede remota dispara el regreso registra sus ventas y gestiona sus propios clientes solo lectura del resto Panel web');
 
 -- Permisos granulares
 INSERT INTO permiso (nombre, descripcion, habilitado) VALUES
@@ -450,10 +454,12 @@ SELECT 1, id_permiso FROM permiso WHERE habilitado = true;
 
 -- 'conductor' (2) y 'distribuidor' (3): solo el permiso especial de móvil —
 -- ningún permiso de panel web (ver comentario junto a INSERT INTO rol arriba).
+-- Se filtra por `codigo` (estable, minúscula) y NO por `nombre` — `nombre` es
+-- texto de display capitalizado y libremente editable ('Conductor', ...).
 INSERT INTO rol_permiso (id_rol, id_permiso)
 SELECT r.id_rol, p.id_permiso
 FROM rol r, permiso p
-WHERE r.nombre IN ('conductor', 'distribuidor') AND p.nombre = 'acceder_app_movil';
+WHERE r.codigo IN ('conductor', 'distribuidor') AND p.nombre = 'acceder_app_movil';
 
 -- 'operador_sede' (4): Ventas/Rutas de solo lectura + la acción de regreso +
 -- Clientes completo (acotado a los suyos, ver clienteService/rutaService). Sin
@@ -462,7 +468,7 @@ WHERE r.nombre IN ('conductor', 'distribuidor') AND p.nombre = 'acceder_app_movi
 INSERT INTO rol_permiso (id_rol, id_permiso)
 SELECT r.id_rol, p.id_permiso
 FROM rol r, permiso p
-WHERE r.nombre = 'operador_sede' AND p.nombre IN (
+WHERE r.codigo = 'operador_sede' AND p.nombre IN (
   'listar_venta', 'registrar_venta', 'consultar_venta',
   'listar_ruta', 'consultar_ruta', 'programar_regreso_sede',
   'listar_cliente', 'registrar_cliente', 'consultar_cliente',
