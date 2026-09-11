@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { Ruta, RutaVehiculoConductor, EncomiendaVenta, Vehiculo, Destino, AnticipoExcedente, Paquete } = require('../models');
+const { Ruta, RutaVehiculoConductor, EncomiendaVenta, Vehiculo, Conductor, Destino, AnticipoExcedente, Paquete, sequelize } = require('../models');
 
 // ─── Funciones detalladas (devuelven { bloqueado, dependencias[] }) ────────────
 
@@ -17,6 +17,23 @@ const verificarDependenciasPropietario = async (propietarioId) => {
 };
 
 const verificarDependenciasVehiculo = async (vehiculoId) => {
+  const dependencias = [];
+
+  // Fuera de base (idDestinoActual != null): quedó varado en otro municipio tras una
+  // ruta que no volvió — no tiene sentido inhabilitarlo desde ahí, el mismo criterio
+  // que ya bloquea pasarlo a "Mantenimiento" (ver vehiculoService.cambiarEstado).
+  const vehiculo = await Vehiculo.findByPk(vehiculoId, {
+    attributes: ['idVehiculo', 'idDestinoActual'],
+    include: [{ model: Destino, as: 'destinoActual', attributes: ['municipio', 'departamento'], required: false }],
+  });
+  if (vehiculo?.idDestinoActual) {
+    dependencias.push({
+      tipo: 'Fuera de base',
+      id: vehiculo.idVehiculo,
+      descripcion: `El vehículo está fuera de base, en ${vehiculo.destinoActual?.municipio || 'otro municipio'}`
+    });
+  }
+
   const rutas = await Ruta.findAll({
     where: { habilitado: true, estado: 'En Ruta' },
     include: [
@@ -25,16 +42,31 @@ const verificarDependenciasVehiculo = async (vehiculoId) => {
     ],
     attributes: ['idRuta', 'origen', 'estado', 'fechaSalida']
   });
-  const dependencias = rutas.map(r => ({
+  rutas.forEach(r => dependencias.push({
     tipo: 'Ruta',
     id: r.idRuta,
     descripcion: `${r.origen || `Ruta #${r.idRuta}`} → ${r.destino?.municipio || ''} (${r.estado})`
   }));
+
   return { bloqueado: dependencias.length > 0, dependencias };
 };
 
 const verificarDependenciasConductor = async (conductorId) => {
   const dependencias = [];
+
+  // Fuera de base (idDestinoActual != null) -- mismo criterio que en Vehículo, ver
+  // verificarDependenciasVehiculo.
+  const conductor = await Conductor.findByPk(conductorId, {
+    attributes: ['idConductor', 'idDestinoActual'],
+    include: [{ model: Destino, as: 'destinoActual', attributes: ['municipio', 'departamento'], required: false }],
+  });
+  if (conductor?.idDestinoActual) {
+    dependencias.push({
+      tipo: 'Fuera de base',
+      id: conductor.idConductor,
+      descripcion: `El conductor está fuera de base, en ${conductor.destinoActual?.municipio || 'otro municipio'}`
+    });
+  }
 
   const rutasEnCurso = await Ruta.findAll({
     where: { habilitado: true, estado: 'En Ruta' },
@@ -64,6 +96,8 @@ const verificarDependenciasConductor = async (conductorId) => {
 };
 
 const verificarDependenciasDestino = async (destinoId) => {
+  const dependencias = [];
+
   const rutas = await Ruta.findAll({
     where: {
       idDestino: destinoId,
@@ -72,11 +106,43 @@ const verificarDependenciasDestino = async (destinoId) => {
     },
     attributes: ['idRuta', 'origen', 'estado', 'fechaSalida']
   });
-  const dependencias = rutas.map(r => ({
+  rutas.forEach(r => dependencias.push({
     tipo: 'Ruta',
     id: r.idRuta,
     descripcion: `${r.origen || `Ruta #${r.idRuta}`} — ${r.fechaSalida || ''} (${r.estado})`
   }));
+
+  // "Regreso pendiente": la ida ya llegó (Completada) pero el convoy sigue fuera de
+  // base y todavía no se le programó el regreso -- mismo criterio EXACTO que el
+  // pseudo-estado "Regreso pendiente" del filtro de Rutas (ver rutaService.js,
+  // ESTADO_REGRESO_PENDIENTE/buildRutaWhere, y LOGICA.md "Rutas — filtro 'Regreso
+  // pendiente'"). Duplicado a propósito en vez de importado: rutaService.js ya
+  // importa este archivo (verificarDependenciasRuta) — importar en sentido
+  // contrario crearía un require circular.
+  const regresosPendientes = await Ruta.findAll({
+    where: {
+      idDestino: destinoId,
+      habilitado: true,
+      estado: 'Completada',
+      idRutaIda: null,
+      idRuta: {
+        [Op.notIn]: sequelize.literal('(SELECT id_ruta_ida FROM ruta WHERE id_ruta_ida IS NOT NULL)'),
+        [Op.in]: sequelize.literal(
+          '(SELECT rvc.id_ruta FROM ruta_vehiculo_conductor rvc ' +
+          'LEFT JOIN conductor c ON c.id_conductor = rvc.id_conductor ' +
+          'LEFT JOIN vehiculo v ON v.id_vehiculo = rvc.id_vehiculo ' +
+          'WHERE rvc.habilitado = true AND (c.id_destino_actual IS NOT NULL OR v.id_destino_actual IS NOT NULL))'
+        ),
+      },
+    },
+    attributes: ['idRuta', 'origen', 'fechaSalida']
+  });
+  regresosPendientes.forEach(r => dependencias.push({
+    tipo: 'Regreso pendiente',
+    id: r.idRuta,
+    descripcion: `${r.origen || `Ruta #${r.idRuta}`} — ${r.fechaSalida || ''} (convoy fuera de base, sin regreso programado)`
+  }));
+
   return { bloqueado: dependencias.length > 0, dependencias };
 };
 

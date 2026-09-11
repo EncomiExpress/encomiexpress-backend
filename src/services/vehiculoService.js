@@ -260,7 +260,7 @@ const toggleHabilitado = async (id) => {
     const { bloqueado, dependencias } = await verificarDependenciasVehiculo(id);
     if (bloqueado) {
       throw new AppError(
-        'No se puede inhabilitar este vehículo porque tiene rutas activas asignadas',
+        'No se puede inhabilitar este vehículo: tiene una ruta activa asignada o está fuera de base',
         409,
         dependencias,
         'DEPENDENCY_CONFLICT'

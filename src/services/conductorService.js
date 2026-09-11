@@ -399,7 +399,7 @@ const toggleHabilitado = async (id) => {
     const { bloqueado, dependencias } = await verificarDependenciasConductor(id);
     if (bloqueado) {
       throw new AppError(
-        'No se puede inhabilitar este conductor porque tiene rutas en curso o anticipos pendientes',
+        'No se puede inhabilitar este conductor: tiene una ruta en curso, un anticipo pendiente, o está fuera de base',
         409,
         dependencias,
         'DEPENDENCY_CONFLICT'
