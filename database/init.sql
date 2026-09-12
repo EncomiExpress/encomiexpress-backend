@@ -214,8 +214,8 @@ CREATE TABLE encomienda_venta (
   estado                 VARCHAR(30) NOT NULL DEFAULT 'pendiente de recogida',
   observaciones          TEXT,
   total                  DECIMAL(12,2) NOT NULL DEFAULT 0,
-  metodo_pago            VARCHAR(30),
-  estado_pago            VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+  modalidad_recaudo      VARCHAR(30),   -- 'Pago Inmediato' | 'Contraentrega'
+  estado_pago            VARCHAR(20) NOT NULL DEFAULT 'Pendiente',
   -- Sede (operador_sede) que registró esta venta — NULL = registrada desde
   -- Medellín. Alimenta el filtro "solo lo mío" de Ventas. Ver LOGICA.md, "Sedes
   -- remotas".
@@ -261,6 +261,7 @@ CREATE TABLE paquete (
   -- entrega exitosa ni la marca final de no-entregado.
   ,intentos_entrega           INTEGER NOT NULL DEFAULT 0
   ,fecha_ultimo_intento       TIMESTAMPTZ
+  ,estado_pago                VARCHAR(20) NOT NULL DEFAULT 'Pendiente'
 );
 
 -- Historial completo de la entrega final de un paquete (ver LOGICA.md, "Historial
@@ -302,6 +303,8 @@ COMMENT ON COLUMN anticipo_excedente.soporte IS 'Array JSONB de URLs de Cloudina
 COMMENT ON COLUMN ruta.estado IS 'Programada | En Ruta | Completada | Cancelada';
 COMMENT ON COLUMN ruta.origen IS 'Ciudad de origen de la ruta (texto libre, dato base: Medellín)';
 COMMENT ON COLUMN encomienda_venta.estado IS 'Programada | En Ruta | Entregada | Completada con novedades | Cancelada';
+COMMENT ON COLUMN encomienda_venta.modalidad_recaudo IS 'Pago Inmediato | Contraentrega';
+COMMENT ON COLUMN encomienda_venta.estado_pago IS 'Rollup derivado de paquete.estado_pago (paqueteStateUtils.determinarEstadoPago), nadie lo escribe a mano: Pendiente (genérico, en curso) | Pagada (todos pagados) | Pago parcial (mixto) | Sin pago (ninguno, todos cerrados sin cobro)';
 COMMENT ON COLUMN paquete.estado IS 'Por entregar | En sede de destino | Entregado | Devuelto';
 COMMENT ON COLUMN destinatario.id_destino IS 'Municipio al que se envía el paquete (mismo catálogo que ruta.id_destino) — decisión comercial capturada al vender, distinta de qué Ruta administrativa termine asignándose. Nullable a nivel de columna por flexibilidad (igual que ruta.fecha_llegada_estimada); obligatorio en el flujo real vía encomiendasValidator.';
 COMMENT ON COLUMN paquete.tipo_carga IS 'hierro | normal — determina qué tarifa por kg (tarifa_por_kg_hierro / tarifa_por_kg_normal) aplica en el cálculo de total';
@@ -309,6 +312,7 @@ COMMENT ON COLUMN conductor.id_destino_actual IS 'Municipio donde quedó el cond
 COMMENT ON COLUMN vehiculo.id_destino_actual IS 'Igual que conductor.id_destino_actual, para el vehículo';
 COMMENT ON COLUMN paquete.id_usuario_entrega IS 'Usuario rol distribuidor que hizo la entrega final (Entregado/Devuelto) desde "En sede de destino"';
 COMMENT ON COLUMN paquete.intentos_entrega IS 'Contador de insistidera del distribuidor: intentos fallidos de entrega al destinatario (el paquete sigue "En sede de destino")';
+COMMENT ON COLUMN paquete.estado_pago IS 'Pendiente | Pagado — recaudo de ESTE paquete. Pago Inmediato: nace Pagado. Contraentrega: nace Pendiente, pasa a Pagado si el distribuidor lo marca Entregado; se queda Pendiente si lo marca Devuelto (cerrado sin cobro).';
 
 -- ============================================
 -- LLAVES FORÁNEAS

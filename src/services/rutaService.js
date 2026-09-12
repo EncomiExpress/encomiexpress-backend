@@ -4,7 +4,7 @@ const AppError = require('../errors/appError');
 const { verificarDependenciasRuta } = require('../middlewares/validateDependencies');
 const { tieneLicenciaVigente } = require('../utils/licenciaHelper');
 const { esDomingo, getRangoHorario, horaDentroDeRango, MIN_DIAS_SALIDA_LLEGADA, DIAS_MARGEN_ENTRE_RUTAS, MAX_DIAS_ANTICIPACION } = require('../utils/horarioLaboral');
-const { determinarEstadoEncomienda, paqueteLiberaRuta, resumenSedes } = require('./paqueteStateUtils');
+const { determinarEstadoEncomienda, determinarEstadoPago, paqueteLiberaRuta, resumenSedes } = require('./paqueteStateUtils');
 
 // "Sedes de una ruta" = TODOS los municipios estructurales del recorrido (paradas
 // + destino final). Devuelve { total, completadas } — una sede está completada
@@ -1322,7 +1322,10 @@ const updateEstado = async (id, estado) => {
     }
 
     for (const venta of ventasActivas) {
-      await venta.update({ estado: determinarEstadoEncomienda(venta.paquetes, venta.estado) });
+      await venta.update({
+        estado: determinarEstadoEncomienda(venta.paquetes, venta.estado),
+        estadoPago: determinarEstadoPago(venta.paquetes, venta.estadoPago),
+      });
     }
 
     // Al completar, el conductor y el vehículo quedaron físicamente en el destino

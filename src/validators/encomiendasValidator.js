@@ -6,8 +6,7 @@ const noSoloRelleno = (mensaje) => (value) => {
   return true;
 };
 
-const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia'];
-const ESTADOS_PAGO_VALIDOS = ['Pendiente', 'Pagado'];
+const MODALIDADES_RECAUDO_VALIDAS = ['Pago Inmediato', 'Contraentrega'];
 
 const createValidation = [
   body('idCliente').notEmpty().withMessage('Cliente es requerido'),
@@ -18,14 +17,10 @@ const createValidation = [
   body('observaciones').optional({ nullable: true }).isString().withMessage('Observaciones debe ser un texto')
     .custom(noSoloRelleno('Las observaciones no pueden contener solo espacios o guiones')),
   body('total').optional().isFloat({ min: 0, max: 9999999 }).withMessage('El total a pagar debe estar entre 0 y 9.999.999'),
-  body('metodoPago')
+  body('modalidadRecaudo')
     .optional()
-    .isIn(METODOS_PAGO_VALIDOS)
-    .withMessage(`Método de pago inválido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`),
-  body('estadoPago')
-    .optional()
-    .isIn(ESTADOS_PAGO_VALIDOS)
-    .withMessage(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`),
+    .isIn(MODALIDADES_RECAUDO_VALIDAS)
+    .withMessage(`Modalidad de recaudo inválida. Opciones: ${MODALIDADES_RECAUDO_VALIDAS.join(', ')}`),
   body('destinatario').notEmpty().withMessage('El destinatario es obligatorio').isObject().withMessage('Destinatario debe ser un objeto'),
   body('destinatario.nombreDestinatario')
     .notEmpty().withMessage('El nombre del destinatario es obligatorio')
@@ -93,14 +88,10 @@ const updateValidation = [
   body('observaciones').optional({ nullable: true }).isString().withMessage('Observaciones debe ser un texto')
     .custom(noSoloRelleno('Las observaciones no pueden contener solo espacios o guiones')),
   body('total').optional().isFloat({ min: 0, max: 9999999 }).withMessage('El total a pagar debe estar entre 0 y 9.999.999'),
-  body('metodoPago')
+  body('modalidadRecaudo')
     .optional()
-    .isIn(METODOS_PAGO_VALIDOS)
-    .withMessage(`Método de pago inválido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`),
-  body('estadoPago')
-    .optional()
-    .isIn(ESTADOS_PAGO_VALIDOS)
-    .withMessage(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`),
+    .isIn(MODALIDADES_RECAUDO_VALIDAS)
+    .withMessage(`Modalidad de recaudo inválida. Opciones: ${MODALIDADES_RECAUDO_VALIDAS.join(', ')}`),
   body('destinatario').optional().isObject().withMessage('Destinatario debe ser un objeto'),
   body('destinatario.nombreDestinatario')
     .if(body('destinatario').exists())
@@ -168,16 +159,7 @@ const updateValidation = [
     .isInt().withMessage('ID de vehículo/conductor de ruta debe ser un número entero'),
 ];
 
-const cambiarEstadoPagoValidation = [
-  body('estadoPago')
-    .notEmpty()
-    .withMessage('Estado de pago es requerido')
-    .isIn(ESTADOS_PAGO_VALIDOS)
-    .withMessage(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`),
-];
-
 module.exports = {
   createValidation,
   updateValidation,
-  cambiarEstadoPagoValidation,
 };

@@ -1,11 +1,11 @@
 const { EncomiendaVenta, Destinatario, Paquete, PaqueteEntregaFinal, Cliente, Ruta, RutaParada, RutaVehiculoConductor, Vehiculo, Conductor, Destino, Usuario, UsuarioSede, sequelize } = require('../models');
 const AppError = require('../errors/appError');
 const crypto = require('crypto');
-const { normalizarEstadoPaquete, determinarEstadoEncomienda, ventaTodaNoEntregada } = require('./paqueteStateUtils');
+const { normalizarEstadoPaquete, determinarEstadoEncomienda, determinarEstadoPago } = require('./paqueteStateUtils');
 const { sendPaqueteDevueltoEmail } = require('../config/email');
 const { MAX_DIAS_ANTICIPACION } = require('../utils/horarioLaboral');
 
-const METODOS_PAGO_VALIDOS = ['Contraentrega', 'Efectivo', 'Transferencia'];
+const MODALIDADES_RECAUDO_VALIDAS = ['Pago Inmediato', 'Contraentrega'];
 // Municipio de origen de toda venta (oficina principal). Mismo string que fuerza
 // rutaService.resolverOrigenRuta para una ruta normal. No es una fila de `destino`
 // por diseño (el origen es texto libre en `ruta.origen`), pero sí puede existir una
@@ -18,7 +18,6 @@ const MUNICIPIO_ORIGEN = 'Medellín';
 // controller/servicio, no vía express-validator (gap preexistente, no se creó
 // uno nuevo solo para esto).
 const NOVEDAD_MAX_LENGTH = 500;
-const ESTADOS_PAGO_VALIDOS = ['Pendiente', 'Pagado'];
 
 const sumarDias = (fechaStr, dias) => {
   const d = new Date(`${fechaStr}T00:00:00`);
@@ -172,14 +171,14 @@ const buildOrder = (sortBy) => {
   return [[field, direction], ['idEncomiendaVenta', direction]];
 };
 
-const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, metodoPago, q, page = 1, limit = 10, sortBy, rol, idSede } = {}) => {
+const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, modalidadRecaudo, q, page = 1, limit = 10, sortBy, rol, idSede } = {}) => {
   const where = {};
   if (estado) where.estado = estado;
   if (idCliente) where.idCliente = idCliente;
   if (idRuta) where.idRuta = parseInt(idRuta);
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
   if (estadoPago) where.estadoPago = estadoPago;
-  if (metodoPago) where.metodoPago = metodoPago;
+  if (modalidadRecaudo) where.modalidadRecaudo = modalidadRecaudo;
   // "Solo lo mío" para operador_sede — filtra por quién registró la venta. Un
   // listado nuevo empieza vacío. Ver LOGICA.md, "Sedes remotas".
   if (rol === 'operador_sede') where.idSede = idSede;
@@ -349,8 +348,7 @@ const create = async (data, { rol, idSede } = {}) => {
       fechaEstimadaEntrega,
       observaciones,
       total,
-      metodoPago,
-      estadoPago,
+      modalidadRecaudo,
       destinatario,
       paquetes,
     } = data;
@@ -419,28 +417,22 @@ const create = async (data, { rol, idSede } = {}) => {
     await validarCapacidadPares(idRuta, paquetes, transaction);
 
     if (
-      metodoPago &&
-      !METODOS_PAGO_VALIDOS.some((v) => v.toLowerCase() === metodoPago.toLowerCase())
+      modalidadRecaudo &&
+      !MODALIDADES_RECAUDO_VALIDAS.some((v) => v.toLowerCase() === modalidadRecaudo.toLowerCase())
     ) {
-      throw new AppError(`Método de pago inválido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`, 400);
+      throw new AppError(`Modalidad de recaudo inválida. Opciones: ${MODALIDADES_RECAUDO_VALIDAS.join(', ')}`, 400);
     }
 
-    if (
-      estadoPago &&
-      !ESTADOS_PAGO_VALIDOS.includes(estadoPago)
-    ) {
-      throw new AppError(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
-    }
-
-    const metodoPagoResuelto = metodoPago
-      ? (METODOS_PAGO_VALIDOS.find((v) => v.toLowerCase() === metodoPago.toLowerCase()) || null)
+    const modalidadRecaudoResuelta = modalidadRecaudo
+      ? (MODALIDADES_RECAUDO_VALIDAS.find((v) => v.toLowerCase() === modalidadRecaudo.toLowerCase()) || null)
       : null;
-    // Efectivo se cobra en el momento mismo del registro (no hay nada pendiente por
-    // cobrar después, a diferencia de Contraentrega/Transferencia) — nace "Pagado"
-    // directamente, sin importar qué estadoPago haya mandado el cliente.
-    const estadoPagoResuelto = metodoPagoResuelto === 'Efectivo'
-      ? 'Pagado'
-      : (ESTADOS_PAGO_VALIDOS.find((v) => v.toLowerCase() === (estadoPago || 'Pendiente').toLowerCase()) || 'Pendiente');
+    // Pago Inmediato se cobra en el momento mismo del registro (no hay nada
+    // pendiente por cobrar después, a diferencia de Contraentrega) — la venta y
+    // cada uno de sus paquetes nacen "Pagado" directamente. Contraentrega nace
+    // "Pendiente" en ambos niveles; el cobro real se resuelve por paquete en
+    // registrarEntregaFinal. Ver paqueteStateUtils.determinarEstadoPago.
+    const esPagoInmediato = modalidadRecaudoResuelta === 'Pago Inmediato';
+    const estadoPagoResuelto = esPagoInmediato ? 'Pagada' : 'Pendiente';
 
     const encomienda = await EncomiendaVenta.create(
       {
@@ -449,7 +441,7 @@ const create = async (data, { rol, idSede } = {}) => {
         fechaEstimadaEntrega: fechaEstimadaEntregaFinal || null,
         observaciones: observaciones || null,
         total: total || 0,
-        metodoPago: metodoPagoResuelto,
+        modalidadRecaudo: modalidadRecaudoResuelta,
         estadoPago: estadoPagoResuelto,
         estado: 'Programada',
         // Nunca lo que mande el body — sale del contexto de sesión de quien
@@ -488,6 +480,7 @@ const create = async (data, { rol, idSede } = {}) => {
             ancho: pkg.ancho || null,
             profundidad: pkg.profundidad || null,
             tipoCarga: pkg.tipoCarga || 'normal',
+            estadoPago: esPagoInmediato ? 'Pagado' : 'Pendiente',
           },
           { transaction }
         );
@@ -521,8 +514,7 @@ const update = async (id, data) => {
       fechaEstimadaEntrega,
       observaciones,
       total,
-      metodoPago,
-      estadoPago,
+      modalidadRecaudo,
       habilitado,
       destinatario,
       paquetes,
@@ -542,17 +534,10 @@ const update = async (id, data) => {
     }
 
     if (
-      metodoPago &&
-      !METODOS_PAGO_VALIDOS.some((v) => v.toLowerCase() === metodoPago.toLowerCase())
+      modalidadRecaudo &&
+      !MODALIDADES_RECAUDO_VALIDAS.some((v) => v.toLowerCase() === modalidadRecaudo.toLowerCase())
     ) {
-      throw new AppError(`Método de pago inválido. Opciones: ${METODOS_PAGO_VALIDOS.join(', ')}`, 400);
-    }
-
-    if (
-      estadoPago &&
-      !ESTADOS_PAGO_VALIDOS.includes(estadoPago)
-    ) {
-      throw new AppError(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
+      throw new AppError(`Modalidad de recaudo inválida. Opciones: ${MODALIDADES_RECAUDO_VALIDAS.join(', ')}`, 400);
     }
 
     const parseDecimal = (value) => {
@@ -618,6 +603,20 @@ const update = async (id, data) => {
       : await Paquete.findAll({ where: { idEncomiendaVenta: id }, attributes: ['peso', 'idRutaVehiculoConductor'], transaction });
     await validarCapacidadPares(nuevoIdRuta, paquetesParaValidar, transaction, parseInt(id));
 
+    // Modalidad de recaudo: solo se puede llegar hasta acá (update no bloqueado)
+    // mientras la venta sigue Programada/Cancelada, o sea antes de que cualquier
+    // paquete haya salido de "Por entregar" — así que si la modalidad cambia, el
+    // re-sync de Paquete.estadoPago de abajo siempre es "todos a Pagado" o "todos
+    // a Pendiente", nunca hay estados intermedios que respetar. Ver PLAN_recaudo_
+    // por_paquete.md, sección 9, punto 1.
+    const modalidadRecaudoAnterior = encomienda.modalidadRecaudo;
+    const modalidadRecaudoResuelta = modalidadRecaudo !== undefined
+      ? (modalidadRecaudo ? MODALIDADES_RECAUDO_VALIDAS.find(v => v.toLowerCase() === modalidadRecaudo.toLowerCase()) || modalidadRecaudoAnterior : null)
+      : modalidadRecaudoAnterior;
+    const modalidadRecaudoCambio = modalidadRecaudoResuelta !== modalidadRecaudoAnterior;
+    const esPagoInmediatoVigente = modalidadRecaudoResuelta === 'Pago Inmediato';
+    const estadoPagoPaqueteVigente = esPagoInmediatoVigente ? 'Pagado' : 'Pendiente';
+
     // Si llegó hasta acá sin lanzar error, la ruta/fecha nuevas ya son válidas (ruta
     // Programada, fechaEstimadaEntrega dentro de rango) — una venta Cancelada se
     // reactiva sola a Programada en la misma operación, sin pedir un segundo paso
@@ -628,8 +627,8 @@ const update = async (id, data) => {
         fechaEstimadaEntrega: nuevaFechaEstimadaEntrega,
         observaciones: observaciones !== undefined ? observaciones : encomienda.observaciones,
         total: nuevoTotal,
-        metodoPago: metodoPago !== undefined ? (metodoPago ? METODOS_PAGO_VALIDOS.find(v => v.toLowerCase() === metodoPago.toLowerCase()) || encomienda.metodoPago : null) : encomienda.metodoPago,
-        estadoPago: estadoPago !== undefined ? (ESTADOS_PAGO_VALIDOS.find(v => v.toLowerCase() === estadoPago.toLowerCase()) || encomienda.estadoPago) : encomienda.estadoPago,
+        modalidadRecaudo: modalidadRecaudoResuelta,
+        estadoPago: modalidadRecaudoCambio ? (esPagoInmediatoVigente ? 'Pagada' : 'Pendiente') : encomienda.estadoPago,
         habilitado: habilitado !== undefined ? habilitado : encomienda.habilitado,
         estado: encomienda.estado === 'Cancelada' ? 'Programada' : encomienda.estado,
       },
@@ -707,8 +706,12 @@ const update = async (id, data) => {
           idsConservados.add(pkg.idPaquete);
           await existentesPorId.get(pkg.idPaquete).update(datos, { transaction });
         } else {
+          // Paquete nuevo del diff: nace con el estadoPago de la modalidad
+          // vigente de la venta (misma regla que create()), sin esperar a que la
+          // modalidad "haya cambiado" — un paquete nuevo nunca tuvo un
+          // estadoPago previo que preservar.
           await Paquete.create(
-            { idEncomiendaVenta: id, numeroGuia: await generarNumeroGuia(transaction), ...datos },
+            { idEncomiendaVenta: id, numeroGuia: await generarNumeroGuia(transaction), estadoPago: estadoPagoPaqueteVigente, ...datos },
             { transaction }
           );
         }
@@ -720,6 +723,17 @@ const update = async (id, data) => {
       if (idsAEliminar.length > 0) {
         await Paquete.destroy({ where: { idPaquete: idsAEliminar }, transaction });
       }
+    }
+
+    // Si la modalidad de recaudo cambió, re-sincronizar el estadoPago de TODOS los
+    // paquetes de la venta (no solo los nuevos del diff de arriba) — ver el
+    // comentario sobre modalidadRecaudoCambio más arriba. Ningún paquete pudo
+    // haber avanzado más allá de "Por entregar" mientras la venta seguía editable.
+    if (modalidadRecaudoCambio) {
+      await Paquete.update(
+        { estadoPago: estadoPagoPaqueteVigente },
+        { where: { idEncomiendaVenta: id }, transaction }
+      );
     }
 
     await transaction.commit();
@@ -786,16 +800,25 @@ const actualizarEstadoPaquete = async (idPaquete, estado, { observacion = '', fo
   }
 
   await sequelize.transaction(async (t) => {
-    await paquete.update({
+    // Espejo de registrarEntregaFinal, por consistencia: si este camino legacy
+    // marca "Entregado" una venta Contraentrega, ese paquete también se cobra.
+    const datosPaquete = {
       estado: estadoNormalizado,
       observacionEstado: observacion || paquete.observacionEstado || '',
       fechaUltimoEstado: new Date(),
       fotoEntrega: fotoEntrega || paquete.fotoEntrega || null,
-    }, { transaction: t });
+    };
+    if (estadoNormalizado === 'Entregado' && encomienda?.modalidadRecaudo === 'Contraentrega') {
+      datosPaquete.estadoPago = 'Pagado';
+    }
+    await paquete.update(datosPaquete, { transaction: t });
 
     if (encomienda) {
       const paquetes = await Paquete.findAll({ where: { idEncomiendaVenta: paquete.idEncomiendaVenta }, transaction: t });
-      await encomienda.update({ estado: determinarEstadoEncomienda(paquetes, encomienda.estado) }, { transaction: t });
+      await encomienda.update({
+        estado: determinarEstadoEncomienda(paquetes, encomienda.estado),
+        estadoPago: determinarEstadoPago(paquetes, encomienda.estadoPago),
+      }, { transaction: t });
     }
   });
 
@@ -911,7 +934,10 @@ const dejarPaquetesEnSede = async (idConductor, { idRuta, idDestino, novedades =
       const venta = await EncomiendaVenta.findByPk(idEncomiendaVenta, { transaction: t });
       if (!venta) continue;
       const paquetesVenta = await Paquete.findAll({ where: { idEncomiendaVenta }, transaction: t });
-      await venta.update({ estado: determinarEstadoEncomienda(paquetesVenta, venta.estado) }, { transaction: t });
+      await venta.update({
+        estado: determinarEstadoEncomienda(paquetesVenta, venta.estado),
+        estadoPago: determinarEstadoPago(paquetesVenta, venta.estadoPago),
+      }, { transaction: t });
     }
 
     // Trazabilidad en vivo: el conductor (y su vehículo) acaba de dejar carga en
@@ -1104,18 +1130,29 @@ const registrarEntregaFinal = async (idPaquete, { accion, novedad = '', fotoEntr
         idUsuarioEntrega: idUsuarioDistribuidor,
       }, { transaction: t });
     } else {
-      await paquete.update({
+      // Regla de recaudo por paquete (ver PLAN_recaudo_por_paquete.md): en
+      // Contraentrega, este paquete se cobra si y solo si se entregó. Un
+      // 'Devuelto' se queda 'Pendiente' — cerrado sin cobro, en firme.
+      const datosPaquete = {
         estado: accion, // 'Entregado' | 'Devuelto'
         observacionEstado: novedad,
         fotoEntrega,
         fechaUltimoEstado: new Date(),
         idUsuarioEntrega: idUsuarioDistribuidor,
-      }, { transaction: t });
+      };
+      if (accion === 'Entregado' && encomienda?.modalidadRecaudo === 'Contraentrega') {
+        datosPaquete.estadoPago = 'Pagado';
+      }
+      await paquete.update(datosPaquete, { transaction: t });
 
-      // Cierre de la venta si ya ningún paquete queda pendiente.
+      // Cierre de la venta si ya ningún paquete queda pendiente, y recálculo del
+      // rollup de pago (determinarEstadoPago) en el mismo punto.
       if (encomienda) {
         const paquetes = await Paquete.findAll({ where: { idEncomiendaVenta: paquete.idEncomiendaVenta }, transaction: t });
-        await encomienda.update({ estado: determinarEstadoEncomienda(paquetes, encomienda.estado) }, { transaction: t });
+        await encomienda.update({
+          estado: determinarEstadoEncomienda(paquetes, encomienda.estado),
+          estadoPago: determinarEstadoPago(paquetes, encomienda.estadoPago),
+        }, { transaction: t });
       }
     }
   });
@@ -1244,45 +1281,6 @@ const getAniosDisponiblesPaquetesDevueltos = async () => {
     { type: sequelize.QueryTypes.SELECT }
   );
   return rows.map((r) => r.anio);
-};
-
-const cambiarEstadoPago = async (id, estadoPago) => {
-  const encomienda = await EncomiendaVenta.findByPk(id);
-
-  if (!encomienda) {
-    throw new AppError('Encomienda no encontrada', 404);
-  }
-
-  if (!ESTADOS_PAGO_VALIDOS.includes(estadoPago)) {
-    throw new AppError(`Estado de pago inválido. Opciones: ${ESTADOS_PAGO_VALIDOS.join(', ')}`, 400);
-  }
-
-  if (encomienda.estado === 'Cancelada') {
-    throw new AppError('Esta venta fue cancelada: no se puede cambiar el estado de pago', 400);
-  }
-
-  if (
-    estadoPago === 'Pagado' &&
-    encomienda.metodoPago === 'Contraentrega' &&
-    !['Entregada', 'Completada con novedades'].includes(encomienda.estado)
-  ) {
-    throw new AppError('Esta venta es Contraentrega: el pago solo se puede confirmar cuando el distribuidor haya legalizado todos los paquetes de la venta', 400);
-  }
-
-  // Contraentrega + venta 100% "No entregado": la venta llega igual a "Completada con
-  // novedades" (determinarEstadoEncomienda), pero si NINGÚN paquete se entregó no hubo
-  // plata que recibir — no tiene sentido marcarla "Pagado". El caso mixto (algún
-  // paquete entregado) sí habilita el pago y no se toca. Ver LOGICA.md.
-  if (estadoPago === 'Pagado' && encomienda.metodoPago === 'Contraentrega') {
-    const paquetes = await Paquete.findAll({ where: { idEncomiendaVenta: id }, attributes: ['estado'] });
-    if (ventaTodaNoEntregada(paquetes)) {
-      throw new AppError('Esta venta es Contraentrega y ningún paquete fue entregado (todos quedaron como No entregado): no hay pago que confirmar', 400);
-    }
-  }
-
-  await encomienda.update({ estadoPago });
-
-  return encomienda;
 };
 
 const toggleHabilitado = async (id) => {
@@ -1441,7 +1439,6 @@ module.exports = {
   getById,
   create,
   update,
-  cambiarEstadoPago,
   toggleHabilitado,
   reactivar,
   getPageOf,

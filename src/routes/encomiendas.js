@@ -6,7 +6,6 @@ const { authenticate, authorizePermission } = require('../middlewares/auth');
 const {
   createValidation,
   updateValidation,
-  cambiarEstadoPagoValidation,
 } = require('../validators/encomiendasValidator');
 
 /**
@@ -131,34 +130,6 @@ router.post('/', authorizePermission('registrar_venta'), createValidation, valid
  *         description: Encomienda actualizada
  */
 router.put('/:id', authorizePermission('actualizar_venta'), updateValidation, validate, encomiendaVentaController.update);
-
-/**
- * @swagger
- * /encomiendas/{id}/estado-pago:
- *   patch:
- *     summary: Confirmar/cambiar el estado de pago de la encomienda (independiente del estado de envío)
- *     tags: [Encomiendas]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema: { type: integer }
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [estadoPago]
- *             properties:
- *               estadoPago:
- *                 type: string
- *                 enum: [Pendiente, Pagado]
- *     responses:
- *       200:
- *         description: Estado de pago actualizado
- */
-router.patch('/:id/estado-pago', authorizePermission('actualizar_venta'), cambiarEstadoPagoValidation, validate, encomiendaVentaController.cambiarEstadoPago);
 
 /**
  * @swagger

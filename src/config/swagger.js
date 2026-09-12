@@ -170,7 +170,7 @@ const options = {
             idCliente:          { type: 'integer' },
             idRuta:             { type: 'integer' },
             total:              { type: 'number', example: 25000 },
-            metodoPago:         { type: 'string', enum: ['efectivo','transferencia','contraentrega'] },
+            modalidadRecaudo:   { type: 'string', enum: ['Pago Inmediato','Contraentrega'] },
             observaciones:      { type: 'string' },
           },
         },

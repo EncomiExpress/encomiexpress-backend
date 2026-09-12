@@ -20,7 +20,7 @@ exports.getAll = async (req, res, next) => {
       idRuta: req.query.idRuta,
       habilitado: req.query.habilitado,
       estadoPago: req.query.estadoPago,
-      metodoPago: req.query.metodoPago,
+      modalidadRecaudo: req.query.modalidadRecaudo,
       page,
       limit,
       sortBy,
@@ -58,16 +58,6 @@ exports.update = async (req, res, next) => {
     const { id } = req.params;
     const encomienda = await encomiendaService.update(id, req.body);
     res.json({ success: true, message: 'Encomienda actualizada exitosamente', data: encomienda });
-  } catch (error) {
-    next(error);
-  }
-};
-
-exports.cambiarEstadoPago = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const encomienda = await encomiendaService.cambiarEstadoPago(id, req.body.estadoPago);
-    res.json({ success: true, message: 'Estado de pago actualizado exitosamente', data: encomienda });
   } catch (error) {
     next(error);
   }

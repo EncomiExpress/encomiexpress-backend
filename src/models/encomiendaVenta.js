@@ -39,10 +39,13 @@ const EncomiendaVenta = sequelize.define('EncomiendaVenta', {
     type: DataTypes.DECIMAL(12, 2),
     defaultValue: 0
   },
-  metodoPago: {
+  modalidadRecaudo: {
     type: DataTypes.STRING(30),
     allowNull: true
   },
+  // Rollup derivado, calculado por paqueteStateUtils.determinarEstadoPago a
+  // partir de paquete.estadoPago — nadie lo escribe a mano desde afuera. Ver
+  // LOGICA.md, "Recaudo por paquete".
   estadoPago: {
     type: DataTypes.STRING(20),
     defaultValue: 'Pendiente'

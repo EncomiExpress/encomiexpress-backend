@@ -53,6 +53,15 @@ const Paquete = sequelize.define('Paquete', {
     allowNull: false,
     defaultValue: 'Por entregar'
   },
+  // Pendiente | Pagado — recaudo de ESTE paquete. Pago Inmediato: nace Pagado.
+  // Contraentrega: nace Pendiente, pasa a Pagado si el distribuidor lo marca
+  // Entregado; se queda Pendiente si lo marca Devuelto (cerrado sin cobro). Ver
+  // paqueteStateUtils.determinarEstadoPago y LOGICA.md, "Recaudo por paquete".
+  estadoPago: {
+    type: DataTypes.STRING(20),
+    allowNull: false,
+    defaultValue: 'Pendiente'
+  },
   observacionEstado: {
     type: DataTypes.TEXT,
     allowNull: true
