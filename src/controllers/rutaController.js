@@ -100,7 +100,7 @@ exports.toggleHabilitado = async (req, res) => {
 };
 exports.getAniosDisponibles = async (req, res, next) => {
   try {
-    const anios = await rutaService.getAniosDisponibles();
+    const anios = await rutaService.getAniosDisponibles(contextoSede(req));
     res.json({ success: true, data: anios });
   } catch (error) {
     next(error);

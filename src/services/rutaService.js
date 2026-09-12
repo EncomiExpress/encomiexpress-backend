@@ -1450,9 +1450,23 @@ const toggleHabilitado = async (id) => {
   return { ruta, seCancelaPorFechaVencida };
 };
 
-const getAniosDisponibles = async () => {
+const getAniosDisponibles = async ({ rol, idSede } = {}) => {
+  // Mismo criterio geográfico que buildSedeCondition ("toca mi municipio" +
+  // regresos enlazados) — sin esto, el filtro "Año" de operador_sede mostraba
+  // años de rutas que ni siquiera puede abrir. Ver LOGICA.md, "Sedes remotas".
+  const condicionSede = rol === 'operador_sede'
+    ? `WHERE (
+        id_destino = ${parseInt(idSede)}
+        OR EXISTS (SELECT 1 FROM ruta_parada rp WHERE rp.id_ruta = ruta.id_ruta AND rp.id_destino = ${parseInt(idSede)})
+        OR id_ruta_ida IN (
+          SELECT r2.id_ruta FROM ruta r2
+          WHERE r2.id_destino = ${parseInt(idSede)}
+             OR EXISTS (SELECT 1 FROM ruta_parada rp2 WHERE rp2.id_ruta = r2.id_ruta AND rp2.id_destino = ${parseInt(idSede)})
+        )
+      )`
+    : '';
   const rows = await sequelize.query(
-    'SELECT DISTINCT EXTRACT(YEAR FROM fecha_salida)::int AS anio FROM ruta ORDER BY anio DESC',
+    `SELECT DISTINCT EXTRACT(YEAR FROM fecha_salida)::int AS anio FROM ruta ${condicionSede} ORDER BY anio DESC`,
     { type: sequelize.QueryTypes.SELECT }
   );
   return rows.map((r) => r.anio);
