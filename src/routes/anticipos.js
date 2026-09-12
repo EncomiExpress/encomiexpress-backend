@@ -187,6 +187,6 @@ router.patch('/:id/entregar-excedente', authenticate, authorize('admin'), author
  *       200:
  *         description: Estado cambiado correctamente
  */
-router.patch('/:id/toggle-habilitado', authorizePermission('inhabilitar_anticipo'), anticipoController.toggleHabilitado);
+router.patch('/:id/toggle-habilitado', authenticate, authorizePermission('inhabilitar_anticipo'), anticipoController.toggleHabilitado);
 
 module.exports = router;

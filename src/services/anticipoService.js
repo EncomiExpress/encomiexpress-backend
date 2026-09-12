@@ -139,14 +139,22 @@ const ANTICIPO_INCLUDE = [
 // puede repartirse entre varios vehículos+conductor) — ya no hay una asociación
 // directa Ruta→Vehiculo, así que se resuelve aparte contra la tabla intermedia y se
 // anexa en ruta.vehiculo para no romper la forma que ya esperaba el frontend.
+//
+// De paso, esta misma búsqueda dice si el anticipo quedó "huérfano": si no aparece
+// ningún par activo con ese idRuta+idConductor es porque el par se reasignó a otro
+// conductor después de entregarle este anticipo (ver LOGICA.md, "Anticipos huérfanos
+// al reasignar conductor") — se expone en `esHuerfano` para el chip de aviso del
+// listado (useAnticipoColumns.jsx).
 const attachVehiculo = async (anticipo) => {
+  let par = null;
   if (anticipo?.ruta) {
-    const par = await RutaVehiculoConductor.findOne({
+    par = await RutaVehiculoConductor.findOne({
       where: { idRuta: anticipo.idRuta, idConductor: anticipo.idConductor, habilitado: true },
       include: [{ model: Vehiculo, as: 'vehiculo' }],
     });
     anticipo.ruta.dataValues.vehiculo = par?.vehiculo || null;
   }
+  anticipo.dataValues.esHuerfano = !!anticipo?.ruta && !par;
   return anticipo;
 };
 
@@ -452,7 +460,16 @@ const toggleHabilitado = async (id) => {
   const anticipo = await AnticipoExcedente.findByPk(id);
   if (!anticipo) throw new AppError('Anticipo no encontrado', 404);
   if (anticipo.habilitado === true) {
-    if (anticipo.estado !== 'Completado') {
+    // Huérfano: el conductor de este anticipo ya no es par activo de su ruta (el par se
+    // reasignó a alguien más después de entregarle este anticipo) — nada del flujo
+    // normal (legalizar desde el móvil, cerrar la ruta) va a llegar a tocarlo nunca, así
+    // que se deja inhabilitar directo sin exigir "Completado". Decisión de la usuaria
+    // (2026-09-12): solo para este caso puntual — cualquier otro anticipo sigue
+    // exigiendo "Completado" (ver LOGICA.md, "Anticipos huérfanos al reasignar conductor").
+    const parVigente = await RutaVehiculoConductor.findOne({
+      where: { idRuta: anticipo.idRuta, idConductor: anticipo.idConductor, habilitado: true },
+    });
+    if (anticipo.estado !== 'Completado' && parVigente) {
       throw new AppError(
         'No se puede inhabilitar un anticipo que aún no ha sido cerrado',
         409,

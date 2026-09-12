@@ -313,23 +313,36 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
     }
   }
 
-  // pesoUsado: kg ya ocupados en CADA PAR vehículo+conductor (no en la ruta completa)
-  // por ventas activas (no canceladas) — usado por el selector de vehículo en Ventas
-  // para mostrar cuánta capacidad le queda a cada camión de la ruta.
+  // pesoUsado / paquetesAsignados: kg y cantidad de paquetes ACTIVOS en CADA PAR
+  // vehículo+conductor (no en la ruta completa) — pesoUsado lo usa el selector de
+  // vehículo en Ventas para mostrar cuánta capacidad le queda a cada camión; ambos los
+  // usa el frontend para avisar en vivo si un par no se puede quitar de la ruta (ver
+  // "No puedes quitar..." en update()).
+  //
+  // Un paquete cuenta como "activo" para su par si la venta dueña sigue habilitada Y no
+  // está Cancelada -- al inhabilitar una venta (soft-delete, ej. corregir un error de
+  // registro) sus paquetes dejan de "ocupar" su par de inmediato, sin esperar a que
+  // además quede Cancelada; si se vuelve a habilitar y la ruta sigue sirviendo, vuelven
+  // a contar solos (ver LOGICA.md, "Ventas — Cancelada e inhabilitar/habilitar").
   const parIds = data.flatMap(r => (r.paresVehiculoConductor || []).map(p => p.idRutaVehiculoConductor));
   if (parIds.length > 0) {
-    const paquetesConPeso = await Paquete.findAll({
+    const paquetesDeLosPares = await Paquete.findAll({
       where: { idRutaVehiculoConductor: { [Op.in]: parIds } },
       attributes: ['idRutaVehiculoConductor', 'peso'],
-      include: [{ model: EncomiendaVenta, as: 'encomienda', attributes: [], required: true, where: { estado: { [Op.ne]: 'Cancelada' } } }],
+      include: [{ model: EncomiendaVenta, as: 'encomienda', attributes: ['estado', 'habilitado'], required: true }],
     });
     const pesoPorPar = {};
-    paquetesConPeso.forEach(p => {
+    const conteoPorPar = {};
+    paquetesDeLosPares.forEach(p => {
+      const activa = p.encomienda?.habilitado !== false && p.encomienda?.estado !== 'Cancelada';
+      if (!activa) return;
+      conteoPorPar[p.idRutaVehiculoConductor] = (conteoPorPar[p.idRutaVehiculoConductor] || 0) + 1;
       pesoPorPar[p.idRutaVehiculoConductor] = (pesoPorPar[p.idRutaVehiculoConductor] || 0) + parseFloat(p.peso || 0);
     });
     data.forEach(r => {
       (r.paresVehiculoConductor || []).forEach(par => {
         par.dataValues.pesoUsado = pesoPorPar[par.idRutaVehiculoConductor] || 0;
+        par.dataValues.paquetesAsignados = conteoPorPar[par.idRutaVehiculoConductor] || 0;
       });
     });
   }
@@ -379,13 +392,13 @@ const validarDocumentosVehiculo = (vehiculo) => {
   }
 };
 
-// Suma el peso de los paquetes ya asignados a un par vehículo+conductor (excluyendo
-// ventas Canceladas, igual que encomiendaService.getPesoUsadoEnPar) — usado para saber
-// si un vehículo nuevo puede cargar con lo que ya estaba asignado al anterior.
+// Suma el peso de los paquetes ACTIVOS asignados a un par vehículo+conductor (venta
+// habilitada y no Cancelada, igual que encomiendaService.getPesoUsadoEnPar) — usado para
+// saber si un vehículo nuevo puede cargar con lo que ya estaba asignado al anterior.
 const getPesoAsignadoEnPar = async (idRutaVehiculoConductor, transaction) => {
   const paquetes = await Paquete.findAll({
     where: { idRutaVehiculoConductor },
-    include: [{ model: EncomiendaVenta, as: 'encomienda', where: { estado: { [Op.ne]: 'Cancelada' } }, attributes: [] }],
+    include: [{ model: EncomiendaVenta, as: 'encomienda', where: { habilitado: true, estado: { [Op.ne]: 'Cancelada' } }, attributes: [] }],
     attributes: ['peso'],
     transaction,
   });
@@ -1013,7 +1026,14 @@ const update = async (id, data) => {
 
       const paresAQuitar = paresActuales.filter(p => !idsConservados.has(p.idRutaVehiculoConductor));
       for (const par of paresAQuitar) {
-        const tienePaquetes = await Paquete.count({ where: { idRutaVehiculoConductor: par.idRutaVehiculoConductor }, transaction });
+        // Solo cuentan paquetes de ventas ACTIVAS (habilitadas y no Canceladas) — mismo
+        // criterio que pesoUsado/paquetesAsignados de getAll(). Si los únicos paquetes de
+        // este par son de una venta inhabilitada o Cancelada, el par sí se puede quitar.
+        const tienePaquetes = await Paquete.count({
+          where: { idRutaVehiculoConductor: par.idRutaVehiculoConductor },
+          include: [{ model: EncomiendaVenta, as: 'encomienda', attributes: [], required: true, where: { habilitado: true, estado: { [Op.ne]: 'Cancelada' } } }],
+          transaction,
+        });
         if (tienePaquetes > 0) {
           throw new AppError('No puedes quitar un vehículo de la ruta si ya tiene paquetes asignados en esta ruta.', 400);
         }
@@ -1221,10 +1241,15 @@ const updateEstado = async (id, estado) => {
         );
       }
 
-      // (b) Ningún vehículo del convoy puede salir vacío.
+      // (b) Ningún vehículo del convoy puede salir vacío. Solo cuentan paquetes de
+      // ventas activas (habilitadas y no Canceladas) — un par cuyo único paquete
+      // pertenece a una venta inhabilitada no debe contar como "con carga".
       const paresVacios = [];
       for (const par of pares) {
-        const n = await Paquete.count({ where: { idRutaVehiculoConductor: par.idRutaVehiculoConductor } });
+        const n = await Paquete.count({
+          where: { idRutaVehiculoConductor: par.idRutaVehiculoConductor },
+          include: [{ model: EncomiendaVenta, as: 'encomienda', attributes: [], required: true, where: { habilitado: true, estado: { [Op.ne]: 'Cancelada' } } }],
+        });
         if (n === 0) paresVacios.push(par);
       }
       if (paresVacios.length > 0) {
@@ -1263,9 +1288,15 @@ const updateEstado = async (id, estado) => {
       await Vehiculo.update({ estado: 'En Ruta', idDestinoActual: null }, { where: { idVehiculo: par.idVehiculo } });
       await Conductor.update({ estado: 'En Ruta', idDestinoActual: null }, { where: { idConductor: par.idConductor } });
     }
+    // Solo los anticipos de conductores que SIGUEN siendo par de esta ruta en este
+    // momento — si se reasignó el par a otro conductor después de entregarle el
+    // anticipo al anterior, ese anticipo queda "huérfano" (ver LOGICA.md, "Anticipos
+    // huérfanos al reasignar conductor") y no debe pasar a "En Legalización" como si
+    // ese conductor siguiera yendo en este viaje: nadie va a legalizarlo desde el
+    // móvil porque no es su ruta.
     await AnticipoExcedente.update(
       { estado: 'En Legalización' },
-      { where: { idRuta: ruta.idRuta, habilitado: true, estado: 'Entregado' } }
+      { where: { idRuta: ruta.idRuta, idConductor: { [Op.in]: pares.map((p) => p.idConductor) }, habilitado: true, estado: 'Entregado' } }
     );
     await EncomiendaVenta.update(
       { estado: 'En Ruta' },

@@ -192,6 +192,11 @@ const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, modal
       { '$cliente.nombre$': { [Op.iLike]: `%${trimmed}%` } },
       { '$cliente.apellido$': { [Op.iLike]: `%${trimmed}%` } },
       { '$ruta.origen$': { [Op.iLike]: `%${trimmed}%` } },
+      // Destino final de la VENTA (el del destinatario, que es lo que se ve en la
+      // columna "Destino" del listado) -- no el destino de la ruta, que puede ser
+      // otro si el destinatario queda en una parada intermedia del corredor.
+      { '$destinatario.destino.municipio$': { [Op.iLike]: `%${trimmed}%` } },
+      { '$destinatario.destino.departamento$': { [Op.iLike]: `%${trimmed}%` } },
     ];
     const partes = trimmed.split(/\s+/).filter(Boolean);
     if (partes.length > 1) {
@@ -258,13 +263,13 @@ const getById = async (id, { rol, idSede } = {}) => {
 };
 
 // Suma el peso de los paquetes ya asignados a un par vehículo+conductor específico (sin
-// contar ventas canceladas ni, si se indica, la propia venta que se está editando) — usado
-// para saber cuánta capacidad de ESE vehículo ya está ocupada antes de aceptar un paquete nuevo.
-// A diferencia del modelo anterior (capacidad por ruta completa), ahora cada vehículo del
-// convoy tiene su propio cupo independiente.
+// contar ventas canceladas ni inhabilitadas, ni, si se indica, la propia venta que se
+// está editando) — usado para saber cuánta capacidad de ESE vehículo ya está ocupada
+// antes de aceptar un paquete nuevo. A diferencia del modelo anterior (capacidad por
+// ruta completa), ahora cada vehículo del convoy tiene su propio cupo independiente.
 const getPesoUsadoEnPar = async (idRutaVehiculoConductor, excluirIdEncomienda, transaction) => {
   const { Op } = sequelize.Sequelize;
-  const ventaWhere = { estado: { [Op.ne]: 'Cancelada' } };
+  const ventaWhere = { habilitado: true, estado: { [Op.ne]: 'Cancelada' } };
   if (excluirIdEncomienda) {
     ventaWhere.idEncomiendaVenta = { [Op.ne]: excluirIdEncomienda };
   }
