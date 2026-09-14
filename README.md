@@ -36,7 +36,9 @@ API REST para la gestión operativa de EncomiExpress en OsvaldoC Mensajería y L
 | Rol | Funcionalidades |
 |------|----------------|
 | **Administrador** | - Gestión de usuarios, roles y permisos <br> - Gestión de clientes y conductores <br> - Gestión de vehículos y propietarios <br> - Gestión de destinos y rutas <br> - Control de encomiendas y ventas <br> - Control de anticipos y excedentes |
-| **Conductor** *(vía app móvil)* | - Consulta de anticipos asignados <br> - Cargue de soportes y legalización |
+| **Operador de sede** *(panel web recortado)* | - CRUD de Ventas y Clientes acotado a su propia sede <br> - Solo lectura de Rutas, salvo disparar el regreso de su sede <br> - Sin acceso a Dashboard ni al resto de módulos |
+| **Conductor** *(vía app móvil)* | - Consulta y legalización de anticipos asignados <br> - Entrega en dos fases: deja los paquetes de su ruta en cada sede, sin entregarlos puerta a puerta <br> - Confirma el retorno a base de los paquetes no entregados que trae de vuelta |
+| **Distribuidor** *(vía app móvil, encargado de sede)* | - Entrega final al destinatario de los paquetes que el conductor dejó en su sede <br> - Registro de intentos fallidos y novedades por paquete |
 | **General** | - Autenticación JWT con access token (1h) y refresh token (24h) <br> - Manejo de errores centralizado <br> - Validación de datos por middleware <br> - Documentación interactiva Swagger |
 
 ---
@@ -92,7 +94,7 @@ src/
 | Entidad | Descripción |
 |---|---|
 | `Usuario` | Usuarios del sistema con rol asignado |
-| `Rol` | Roles del sistema (admin, conductor) |
+| `Rol` | Roles del sistema: admin, conductor, distribuidor, operador_sede |
 | `Permiso` | Permisos granulares por módulo |
 | `RolPermiso` | Relación N:N entre roles y permisos |
 | `Conductor` | Perfil de conductor vinculado a un usuario |
@@ -101,11 +103,15 @@ src/
 | `Cliente` | Clientes remitentes de encomiendas |
 | `Destinatario` | Destinatarios de los envíos |
 | `Destino` | Municipios y tarifas base habilitadas |
-| `Ruta` | Rutas programadas con vehículo y conductor asignado |
+| `Ruta` | Rutas programadas, con su viaje de regreso opcional vinculado |
+| `RutaVehiculoConductor` | Convoy de una ruta — un par vehículo/conductor por cada vehículo que la cubre |
+| `RutaParada` | Paradas intermedias del corredor de una ruta |
 | `EncomiendaVenta` | Registro de ventas y encomiendas con guía generada |
-| `Paquete` | Paquetes asociados a cada encomienda |
+| `Paquete` | Paquetes asociados a cada encomienda, con su propio estado de entrega y de pago |
+| `PaqueteEntregaFinal` | Historial completo de intentos/entregas de un paquete por el distribuidor |
 | `AnticipoExcedente` | Anticipos entregados a conductores y su legalización |
-| `Configuracion` | Fila única con valores de negocio globales (hoy solo la tarifa por kg) |
+| `UsuarioSede` | Sedes que cubre un usuario distribuidor u operador de sede |
+| `Configuracion` | Fila única con las tarifas globales del negocio (por kg normal, por kg hierro, por paquete) |
 
 ---
 
@@ -133,7 +139,7 @@ src/
 |---|---|
 | **Sequelize vs TypeORM** | Sequelize tiene mayor compatibilidad con JavaScript puro y ecosistema más maduro para el stack del equipo |
 | **AppError centralizado** | Permite respuestas consistentes en todos los endpoints y diferencia entre errores operacionales y de sistema |
-| **Seed vía endpoint `/api/seed`** | Facilita la inicialización del admin en entornos de despliegue sin acceso directo a la base de datos |
+| **Seed vía endpoint `/api/seed`** | Complementa a `npm run db:seed` para desarrollo local sin acceso directo a la base de datos — bloqueado con 403 fuera de desarrollo (`NODE_ENV === 'production'`), nunca disponible en el entorno real |
 | **Autorización por rol y por permiso** | Permite control de acceso flexible: por rol para rutas generales, por permiso para acciones granulares |
 | **Access token 1h + refresh token 24h** | El access token de corta duración limita el riesgo si se compromete. El refresh permite renovación silenciosa sin re-login |
 | **Swagger JSDoc en rutas** | Los comentarios `@swagger` viven junto al código de cada ruta, evitando que la documentación quede desincronizada |
@@ -209,7 +215,7 @@ La documentación interactiva está disponible en:
 http://localhost:3000/api/docs
 ```
 
-Disponible únicamente en entorno de desarrollo. Incluye los 89 endpoints (67 rutas distintas) con parámetros, cuerpos de solicitud, respuestas y autenticación JWT integrada.
+Disponible únicamente en entorno de desarrollo. Incluye los 96 endpoints del sistema, con parámetros, cuerpos de solicitud, respuestas y autenticación JWT integrada.
 
 ---
 
