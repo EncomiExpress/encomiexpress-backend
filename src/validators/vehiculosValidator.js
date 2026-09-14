@@ -27,7 +27,7 @@ const createValidation = [
     .custom(noSoloRelleno('El modelo no puede contener solo espacios o guiones'))
     .matches(MODELO_REGEX).withMessage('El modelo solo admite letras, números, espacios y los signos . - /')
     .isLength({ max: 30 }).withMessage('El modelo no puede exceder 30 caracteres'),
-  body('tarjetaPropiedad').optional({ nullable: true, checkFalsy: true })
+  body('tarjetaPropiedad').notEmpty().withMessage('La tarjeta de propiedad es requerida')
     .matches(/^[0-9]{6,11}$/).withMessage('La tarjeta de propiedad debe ser solo números, entre 6 y 11 dígitos'),
   body('anio').optional().isInt({ min: 1900, max: 2100 }).withMessage('Año inválido'),
   body('color').optional().notEmpty().withMessage('Color es requerido')
@@ -57,7 +57,7 @@ const updateValidation = [
     .custom(noSoloRelleno('El modelo no puede contener solo espacios o guiones'))
     .matches(MODELO_REGEX).withMessage('El modelo solo admite letras, números, espacios y los signos . - /')
     .isLength({ max: 30 }).withMessage('El modelo no puede exceder 30 caracteres'),
-  body('tarjetaPropiedad').optional({ nullable: true, checkFalsy: true })
+  body('tarjetaPropiedad').optional().notEmpty().withMessage('La tarjeta de propiedad es requerida')
     .matches(/^[0-9]{6,11}$/).withMessage('La tarjeta de propiedad debe ser solo números, entre 6 y 11 dígitos'),
   body('anio').optional().isInt({ min: 1900, max: 2100 }).withMessage('Año inválido'),
   body('color').optional().notEmpty().withMessage('Color es requerido')
