@@ -91,6 +91,12 @@ Paquete.belongsTo(RutaVehiculoConductor, { foreignKey: 'idRutaVehiculoConductor'
 Usuario.hasMany(Paquete, { foreignKey: 'idUsuarioEntrega', as: 'paquetesEntregaSede' });
 Paquete.belongsTo(Usuario, { foreignKey: 'idUsuarioEntrega', as: 'usuarioEntrega' });
 
+// Conductor - Paquete (1:N) — conductor que confirmó "Llegó a Medellín" en una
+// ruta de regreso (Devuelto -> Devuelto a base). NULL si lo marcó el admin desde
+// el panel web. Ver plan-ventas-regreso-paquetes.md, Parte B.
+Conductor.hasMany(Paquete, { foreignKey: 'idConductorDevolucion', as: 'devolucionesRegistradas' });
+Paquete.belongsTo(Conductor, { foreignKey: 'idConductorDevolucion', as: 'conductorDevolucion' });
+
 // Paquete - PaqueteEntregaFinal (1:N) — historial completo de cada llamada a
 // registrarEntregaFinal (Entregado/Devuelto/Intento), ver models/paqueteEntregaFinal.js.
 Paquete.hasMany(PaqueteEntregaFinal, { foreignKey: 'idPaquete', as: 'historialEntrega' });
@@ -134,15 +140,10 @@ AnticipoExcedente.belongsTo(Ruta, { foreignKey: 'idRuta', as: 'ruta' });
 Cliente.hasMany(EncomiendaVenta, { foreignKey: 'idCliente', as: 'encomiendas' });
 EncomiendaVenta.belongsTo(Cliente, { foreignKey: 'idCliente', as: 'cliente' });
 
-// Destino - Cliente (1:N) — municipio del remitente, para saber a dónde devolver
-// un paquete si el destinatario nunca lo recoge (ver LOGICA.md).
-Destino.hasMany(Cliente, { foreignKey: 'idDestino', as: 'clientes' });
-Cliente.belongsTo(Destino, { foreignKey: 'idDestino', as: 'destino' });
-
-// Destino - Cliente/EncomiendaVenta por idSede (1:N) — sede (operador_sede) que
-// registró cada cliente/venta, alias distinto del idDestino de arriba (que es
-// el municipio de devolución del remitente, no quién lo registró). Ver
-// LOGICA.md, "Sedes remotas".
+// Destino - Cliente por idSede (1:N) — sede (operador_sede) que registró cada
+// cliente. Antes existía además una asociación por `idDestino` ("municipio del
+// remitente, para devoluciones"); se eliminó por redundante con esta — ver
+// LOGICA.md, "Decisión — Municipio de Cliente eliminado por completo".
 Destino.hasMany(Cliente, { foreignKey: 'idSede', as: 'clientesRegistrados' });
 Cliente.belongsTo(Destino, { foreignKey: 'idSede', as: 'sedeRegistro' });
 Destino.hasMany(EncomiendaVenta, { foreignKey: 'idSede', as: 'ventasRegistradas' });

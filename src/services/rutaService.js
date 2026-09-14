@@ -1,4 +1,4 @@
-const { Ruta, RutaVehiculoConductor, RutaParada, Vehiculo, Conductor, Destino, EncomiendaVenta, Destinatario, Usuario, AnticipoExcedente, Paquete, sequelize } = require('../models');
+const { Ruta, RutaVehiculoConductor, RutaParada, Vehiculo, Conductor, Destino, EncomiendaVenta, Destinatario, Usuario, UsuarioSede, Rol, AnticipoExcedente, Paquete, sequelize } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { verificarDependenciasRuta } = require('../middlewares/validateDependencies');
@@ -78,7 +78,11 @@ const intentarAutoCompletar = async (idRuta) => {
     const { total, completadas } = await calcularSedesRuta(idRuta);
     if (total === 0 || completadas < total) return { completada: false, motivo: 'sedes' };
 
-    await updateEstado(idRuta, 'Completada');
+    // { interno: true }: esto NO es un admin cambiando el estado a mano —
+    // salta la exclusividad de operador_sede sobre su propio regreso (ver
+    // updateEstado) porque no es ninguna de las dos partes actuando, es el
+    // sistema reaccionando a que ya no queda nada "Por entregar".
+    await updateEstado(idRuta, 'Completada', { interno: true });
     return { completada: true };
   } catch (error) {
     console.error(`Auto-completar ruta #${idRuta} no procedió: ${error.message}`);
@@ -115,7 +119,9 @@ const INCLUDE_PARADAS = {
 // se consulta abriendo esa otra ruta).
 const INCLUDE_REGRESO_IDA = {
   model: Ruta, as: 'rutaIda', required: false,
-  attributes: ['idRuta', 'origen', 'estado'],
+  // idDestino (además de para el chip): con qué sede matchear
+  // tieneOperadorSedePropio en getAll/getById — ver ahí.
+  attributes: ['idRuta', 'origen', 'estado', 'idDestino'],
   include: [{ model: Destino, as: 'destino', attributes: ['municipio'] }],
 };
 const INCLUDE_REGRESO_VUELTA = {
@@ -153,19 +159,23 @@ const ESTADO_VIAJE_REGRESO = 'Viaje de regreso';
 
 // Criterio "solo lo mío" de Rutas para operador_sede — DISTINTO del de
 // Ventas/Clientes (que filtran por quién los registró): acá se filtra por qué
-// rutas TOCAN geográficamente su municipio (como destino final o como parada),
-// más los regresos enlazados a esas idas — así la sede siempre ve la ida que
-// Medellín le trajo, aunque ella no la haya registrado. Nunca vacío para una
-// sede con operación. Ver LOGICA.md, "Sedes remotas".
+// rutas terminan en su municipio (destino final de la ida), más el regreso ya
+// enlazado a esa ida — así la sede siempre ve la ida que Medellín le trajo,
+// aunque ella no la haya registrado. Nunca vacío para una sede con operación.
+// Corrección 2026-09-12: antes también entraban las rutas donde la sede es
+// solo una PARADA intermedia (`ruta_parada`), pero eso no es accionable hoy —
+// no puede programar el regreso (`validarUbicacionParaRuta` exige ser destino
+// final, ver `crearRegresoDesdeSede`) ni asignarle ventas de regreso
+// (`esRegresoDeLaSede` exige lo mismo) — la sede veía una ruta sin nada que
+// hacer con ella. La recolección en paradas intermedias queda fuera de
+// alcance (ver plan-sedes-remotas.md, "Pendientes fuera de alcance"); cuando
+// se construya, este criterio debe revisarse. Ver LOGICA.md, "Sedes remotas".
 const buildSedeCondition = (idSede) => sequelize.literal(
   `("Ruta"."id_ruta" IN (
     SELECT r.id_ruta FROM ruta r
     WHERE r.id_destino = ${parseInt(idSede)}
-       OR EXISTS (SELECT 1 FROM ruta_parada rp WHERE rp.id_ruta = r.id_ruta AND rp.id_destino = ${parseInt(idSede)})
        OR r.id_ruta_ida IN (
-          SELECT r2.id_ruta FROM ruta r2
-          WHERE r2.id_destino = ${parseInt(idSede)}
-             OR EXISTS (SELECT 1 FROM ruta_parada rp2 WHERE rp2.id_ruta = r2.id_ruta AND rp2.id_destino = ${parseInt(idSede)})
+          SELECT r2.id_ruta FROM ruta r2 WHERE r2.id_destino = ${parseInt(idSede)}
        )
   ))`
 );
@@ -274,6 +284,30 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
     order: order.length > 0 ? order : [['idRuta', 'DESC']],
     distinct: true,
   });
+
+  // Para cada fila que ES un regreso, si la sede de su ida tiene su propio
+  // operador_sede, ni el admin puede cambiarle el estado (ver updateEstado) —
+  // el frontend usa esto para no ofrecerle siquiera el menú (useRutaColumns).
+  //
+  // Se aprovecha el mismo batch para el caso simétrico (2026-09-13, ver
+  // LOGICA.md): una IDA cuyo propio destino tiene operador_sede propio — ahí
+  // "Programar viaje de regreso" tampoco es del admin, es exclusivo de esa
+  // sede (crearRegresoDesdeSede). `miDestinoTieneOperadorSede` se calcula para
+  // toda ida (no solo regresos) con el mismo criterio, mirando directo
+  // `idDestino` en vez de `rutaIda.idDestino`.
+  const idsDestinoRelevante = [...new Set(
+    data.map(r => (r.idRutaIda && r.rutaIda) ? r.rutaIda.idDestino : r.idDestino).filter(Boolean)
+  )];
+  if (idsDestinoRelevante.length > 0) {
+    const sedesConOperador = await idsDestinoConOperadorSede(idsDestinoRelevante);
+    data.forEach(r => {
+      if (r.idRutaIda && r.rutaIda) {
+        r.dataValues.esRegresoDeSedePropia = sedesConOperador.has(r.rutaIda.idDestino);
+      } else {
+        r.dataValues.miDestinoTieneOperadorSede = sedesConOperador.has(r.idDestino);
+      }
+    });
+  }
 
   const enCursoIds = data.filter(r => r.estado === 'En Ruta').map(r => r.idRuta);
   if (enCursoIds.length > 0) {
@@ -717,12 +751,24 @@ const validarUbicacionParaRuta = async ({ pares, idRutaIda }) => {
   }
 };
 
-const create = async (data) => {
+const create = async (data, { rol, idSede } = {}) => {
   const { idDestino, origen, fechaSalida, horaSalida, horaLlegadaEstimada, fechaLlegadaEstimada, estado, observaciones, pares, paradas, idRutaIda } = data;
 
   validarHorarioRuta({ fechaSalida, horaSalida, fechaLlegadaEstimada, horaLlegadaEstimada, exigirFechaSalidaFutura: true });
   validarPares(pares);
   await validarRutaIda(idRutaIda);
+  // El regreso de una sede con operador_sede propio es EXCLUSIVO de esa sede —
+  // ni siquiera el admin puede crearlo desde el wizard general (mismo criterio
+  // ya aplicado a editar/cambiar-estado de un regreso ya existente, ver
+  // update()/updateEstado()). El único camino legítimo para esos destinos es
+  // crearRegresoDesdeSede(), que sí manda `rol: 'operador_sede'` acá abajo —
+  // por eso se salta el chequeo cuando ese es el caso.
+  if (idRutaIda && rol !== 'operador_sede') {
+    const idaParaChequeo = await Ruta.findByPk(idRutaIda, { attributes: ['idDestino'] });
+    if (idaParaChequeo && await tieneOperadorSedePropio(idaParaChequeo.idDestino)) {
+      throw new AppError('Esa ruta es el regreso de una sede con operador propio — solo esa sede puede programarlo.', 403);
+    }
+  }
   await validarUbicacionParaRuta({ pares, idRutaIda });
 
   const destino = await Destino.findByPk(idDestino);
@@ -795,14 +841,20 @@ const create = async (data) => {
 };
 
 // WS4 "Sedes remotas" — el operador_sede dispara el regreso de su sede con una
-// sola acción (solo pide fecha/hora de salida): arma acá el resto de los datos
-// (mismo convoy, paradas invertidas — igual patrón que
+// sola acción (fecha/hora de salida + fecha estimada de llegada, hora
+// opcional — mismos campos que PasoHorario del wizard del admin, ver ahí por
+// qué fechaLlegadaEstimada importa: sin ella, validarChoqueVehiculoConductor
+// trata el regreso como ocupación de un solo día): arma acá el resto de los
+// datos (mismo convoy, paradas invertidas — igual patrón que
 // ListarRutaProgramacion.handleProgramarRegreso en el wizard del admin) y
 // delega en create() para el resto (resolverOrigenRuta, validarUbicacionParaRuta,
 // transacción...). Ver LOGICA.md, "Sedes remotas".
-const crearRegresoDesdeSede = async (idRutaIda, { fechaSalida, horaSalida } = {}, { idSede } = {}) => {
+const crearRegresoDesdeSede = async (idRutaIda, { fechaSalida, horaSalida, fechaLlegadaEstimada, horaLlegadaEstimada } = {}, { idSede } = {}) => {
   if (!fechaSalida || !horaSalida) {
     throw new AppError('La fecha y la hora de salida del regreso son obligatorias', 400);
+  }
+  if (!fechaLlegadaEstimada) {
+    throw new AppError('La fecha estimada de llegada del regreso es obligatoria', 400);
   }
 
   const ida = await Ruta.findByPk(idRutaIda, { include: [INCLUDE_PARES, INCLUDE_PARADAS] });
@@ -816,13 +868,11 @@ const crearRegresoDesdeSede = async (idRutaIda, { fechaSalida, horaSalida } = {}
   if (yaTieneRegreso) {
     throw new AppError('Esa ruta ya tiene un viaje de regreso programado', 409);
   }
-  // La ida debe tocar geográficamente la sede de quien dispara el regreso —
-  // mismo criterio "solo lo mío" de Rutas (destino final o parada, ver
-  // buildSedeCondition). En la práctica solo la sede que es el destino final
-  // puede tener el convoy "fuera de base" ahí (validarUbicacionParaRuta, más
+  // La ida debe terminar en la sede de quien dispara el regreso (destino
+  // final, no una parada — ver corrección 2026-09-12 en buildSedeCondition):
+  // solo ahí el convoy queda "fuera de base" (validarUbicacionParaRuta, más
   // abajo, es la validación autoritativa) — esto solo da un mensaje más claro.
-  const tocaLaSede = ida.idDestino === idSede || (ida.paradas || []).some((p) => p.idDestino === idSede);
-  if (!tocaLaSede) {
+  if (ida.idDestino !== idSede) {
     throw new AppError('Esa ruta no llega a tu sede', 403);
   }
 
@@ -839,16 +889,48 @@ const crearRegresoDesdeSede = async (idRutaIda, { fechaSalida, horaSalida } = {}
     idRutaIda,
     fechaSalida,
     horaSalida,
+    fechaLlegadaEstimada,
+    horaLlegadaEstimada,
     pares,
     paradas,
-  });
+  }, { rol: 'operador_sede', idSede });
 };
 
-const update = async (id, data) => {
+// Campos que operador_sede puede tocar al editar su propio regreso — nada de
+// convoy/paradas/destino/origen/observaciones/estado/habilitado, eso sigue
+// siendo de Medellín. Ver update().
+const CAMPOS_EDITABLES_SEDE = ['fechaSalida', 'horaSalida', 'fechaLlegadaEstimada', 'horaLlegadaEstimada'];
+
+const update = async (id, data, { rol, idSede } = {}) => {
   const { origen, idDestino, fechaSalida, horaSalida, horaLlegadaEstimada, fechaLlegadaEstimada, estado, observaciones, habilitado, pares, paradas } = data;
 
   const ruta = await Ruta.findByPk(id);
   if (!ruta) throw new AppError('Ruta no encontrada', 404);
+
+  if (ruta.idRutaIda) {
+    const ida = await Ruta.findByPk(ruta.idRutaIda, { attributes: ['idDestino'] });
+    if (rol === 'operador_sede') {
+      // Solo su propio regreso (mismo criterio que updateEstado/crearRegresoDesdeSede)
+      // y solo fecha/hora — es lo único que de verdad le compete: cuándo sale y
+      // cuándo se espera que llegue. Convoy, paradas, destino y origen los hereda
+      // de la ida y no tiene por qué tocarlos.
+      const camposExtra = Object.keys(data).filter((k) => !CAMPOS_EDITABLES_SEDE.includes(k));
+      if (camposExtra.length > 0) {
+        throw new AppError('Solo puedes editar la fecha y hora de salida/llegada de tu regreso', 403);
+      }
+      if (!ida || ida.idDestino !== idSede) {
+        throw new AppError('Esa ruta no es un regreso de tu sede', 403);
+      }
+    } else if (ida && await tieneOperadorSedePropio(ida.idDestino)) {
+      // Admin: mismo bloqueo exclusivo que updateEstado — el regreso de una
+      // sede con operador propio no se edita desde Medellín, ni fecha/hora ni
+      // nada más.
+      throw new AppError('Esta ruta es el regreso de una sede con operador propio — solo esa sede puede editarla.', 403);
+    }
+  } else if (rol === 'operador_sede') {
+    // No es un regreso en absoluto (ej. la ida que trajo el convoy) — nunca es suya.
+    throw new AppError('No tienes permiso para editar esta ruta', 403);
+  }
 
   // Edición general solo permitida en Programada (nada comprometido aún) o
   // Cancelada (se puede reprogramar libremente). "En Ruta"/"Completada" ya
@@ -961,6 +1043,47 @@ const update = async (id, data) => {
     paradasIdDestino: paradasNormalizadas ? paradasNormalizadas.map((p) => p.idDestino) : [],
     idRutaIda: ruta.idRutaIda,
   });
+
+  // Ventas cuyo destino (destinatario.idDestino) queda fuera del recorrido tras
+  // esta edición -- ni el destino final ni ninguna parada la cubre ya. No se
+  // bloquea la edición (a diferencia de "pares": ahí sí hay paquetes físicos ya
+  // cargados en un vehículo puntual que se desbordaría si se lo quita del
+  // convoy; acá ninguna venta está atada a una parada en sí, solo a un
+  // municipio que la ruta puede dejar de visitar). Se deja editar la ruta
+  // libremente y la(s) venta(s) afectadas quedan `Cancelada` -- necesario para
+  // que NINGUNA cascada de la ruta (arranque a "En Ruta", cálculo de sedes
+  // completas, cierre de sede) las siga arrastrando: si se dejaran
+  // "Programada" con un destino que ya no es ninguna sede real de esta ruta,
+  // su paquete nunca podría entregarse en sede (no calza con ninguna parada
+  // actual) y quedaría "Por entregar" para siempre, sin bloquear que la ruta
+  // igual se dé por completada -- un paquete fantasma. `Cancelada` es
+  // exactamente el mecanismo que ya excluye una venta de todas esas cascadas
+  // (mismo que usa `rutaSigueSirviendo`). La usuaria pidió explícitamente que
+  // esto NO se vea como una venta cancelada de verdad: el frontend
+  // (ventaResolvers.js, motivoVentaCancelada) le da su propio motivo y
+  // etiqueta visible ("Reasignar ruta"), pero por dentro es el mismo estado —
+  // así se reactiva sola con el mismo mecanismo de un clic que ya existe para
+  // "la ruta ya volvió a servir" en cuanto se le agregue de nuevo esa parada o
+  // destino a la ruta. Los paquetes NUNCA se tocan (siguen con su
+  // idRutaVehiculoConductor intacto), así que al reactivarse quedan
+  // exactamente como estaban. Solo se revisa si de verdad puede haber
+  // cambiado a qué municipios llega la ruta.
+  let idsVentasHuerfanas = [];
+  if (idDestino !== undefined || paradasNormalizadas !== null) {
+    const paradasEfectivas = paradasNormalizadas !== null
+      ? paradasNormalizadas.map((p) => p.idDestino)
+      : (await RutaParada.findAll({ where: { idRuta: id }, attributes: ['idDestino'] })).map((p) => p.idDestino);
+    const municipiosCubiertos = new Set([idDestinoEfectivo, ...paradasEfectivas]);
+
+    const ventasDeLaRuta = await EncomiendaVenta.findAll({
+      where: { idRuta: id, habilitado: true, estado: { [Op.ne]: 'Cancelada' } },
+      include: [{ model: Destinatario, as: 'destinatario', attributes: ['idDestino'] }],
+      attributes: ['idEncomiendaVenta'],
+    });
+    idsVentasHuerfanas = ventasDeLaRuta
+      .filter((v) => v.destinatario && !municipiosCubiertos.has(v.destinatario.idDestino))
+      .map((v) => v.idEncomiendaVenta);
+  }
 
   const transaction = await sequelize.transaction();
   try {
@@ -1085,13 +1208,20 @@ const update = async (id, data) => {
       );
     }
 
+    if (idsVentasHuerfanas.length > 0) {
+      await EncomiendaVenta.update(
+        { estado: 'Cancelada' },
+        { where: { idEncomiendaVenta: { [Op.in]: idsVentasHuerfanas } }, transaction }
+      );
+    }
+
     await transaction.commit();
   } catch (error) {
     await transaction.rollback();
     throw error;
   }
 
-  return { ruta: await getById(id), ventasSincronizadas, reactivada: reactivarAutomaticamente };
+  return { ruta: await getById(id), ventasSincronizadas, ventasHuerfanas: idsVentasHuerfanas.length, reactivada: reactivarAutomaticamente };
 };
 
 // Mismo cálculo que yaDebioSalir() en jobs/autoIniciarRutas.js (offset fijo -05:00
@@ -1108,7 +1238,30 @@ const motivoSalidaVencida = (ruta) => {
   return (isNaN(salida.getTime()) || salida <= new Date()) ? 'hora' : null;
 };
 
-const updateEstado = async (id, estado) => {
+// ¿Cuáles de estos municipios tienen un operador_sede activo asignado
+// (usuario_sede)? El estado de SU regreso es responsabilidad exclusiva de esa
+// sede — ni siquiera Medellín lo toca, ni como respaldo manual (ver
+// updateEstado) ni como opción visible en el listado (ver getAll,
+// esRegresoDeSedePropia). Para un municipio sin operador_sede (la mayoría de
+// la red), el regreso sigue siendo 100% de Medellín, como cualquier otra ruta.
+const idsDestinoConOperadorSede = async (idsDestino) => {
+  const asignaciones = await UsuarioSede.findAll({
+    where: { idDestino: { [Op.in]: idsDestino }, habilitado: true },
+    include: [{
+      model: Usuario, as: 'usuario', required: true, where: { habilitado: true },
+      include: [{ model: Rol, as: 'rol', required: true, where: { codigo: 'operador_sede' } }],
+    }],
+    attributes: ['idDestino'],
+  });
+  return new Set(asignaciones.map(a => a.idDestino));
+};
+
+const tieneOperadorSedePropio = async (idDestino) => {
+  const sedes = await idsDestinoConOperadorSede([idDestino]);
+  return sedes.has(idDestino);
+};
+
+const updateEstado = async (id, estado, { rol, idSede, interno = false } = {}) => {
   const estadosValidos = ['Programada', 'En Ruta', 'Completada', 'Cancelada'];
   if (!estadosValidos.includes(estado)) {
     throw new AppError(`Estado inválido. Debe ser uno de: ${estadosValidos.join(', ')}`, 400);
@@ -1116,6 +1269,33 @@ const updateEstado = async (id, estado) => {
 
   const ruta = await Ruta.findByPk(id, { include: [INCLUDE_PARES] });
   if (!ruta) throw new AppError('Ruta no encontrada', 404);
+
+  // operador_sede solo puede "poner en ruta" su propio regreso (Programada ->
+  // En Ruta): es la única transición que de verdad puede observar (el
+  // convoy sale físicamente de su municipio). "Completada" normalmente ya
+  // llega sola vía intentarAutoCompletar en cuanto el conductor deja los
+  // paquetes en Medellín — no necesita tocarla. Arrancar una ida o
+  // cancelar/completar a mano sigue siendo de Medellín. Ver LOGICA.md,
+  // "Sedes remotas".
+  if (rol === 'operador_sede') {
+    if (estado !== 'En Ruta' || ruta.estado !== 'Programada') {
+      throw new AppError('No tienes permiso para cambiar esta ruta a ese estado', 403);
+    }
+    const ida = ruta.idRutaIda ? await Ruta.findByPk(ruta.idRutaIda, { attributes: ['idDestino'] }) : null;
+    if (!ida || ida.idDestino !== idSede) {
+      throw new AppError('Esa ruta no es un regreso de tu sede', 403);
+    }
+  } else if (ruta.idRutaIda && !interno) {
+    // Admin (no `interno`, o sea vino de un click real en el panel): bloqueado
+    // en un regreso cuya sede tiene su propio operador — ni siquiera como
+    // respaldo manual (ver tieneOperadorSedePropio). intentarAutoCompletar sí
+    // puede llegar aquí (marca `interno: true`): no es ninguna de las dos
+    // partes actuando a mano, es el sistema reaccionando solo.
+    const ida = await Ruta.findByPk(ruta.idRutaIda, { attributes: ['idDestino'] });
+    if (ida && await tieneOperadorSedePropio(ida.idDestino)) {
+      throw new AppError('Esta ruta es el regreso de una sede con operador propio — solo esa sede puede cambiar su estado.', 403);
+    }
+  }
 
   if (ruta.estado === 'Completada') {
     throw new AppError('No se puede cambiar el estado de una ruta completada', 400);
@@ -1432,11 +1612,27 @@ const updateEstado = async (id, estado) => {
   return getById(id);
 };
 
-const toggleHabilitado = async (id) => {
+const toggleHabilitado = async (id, { rol, idSede } = {}) => {
   const ruta = await Ruta.findByPk(id, {
     include: [INCLUDE_PARES, { model: Destino, as: 'destino' }],
   });
   if (!ruta) throw new AppError('Ruta no encontrada', 404);
+
+  // Misma exclusividad que update()/updateEstado: operador_sede solo
+  // inhabilita/habilita su propio regreso; admin queda bloqueado en el
+  // regreso de una sede con operador propio — ver LOGICA.md, "Sedes remotas".
+  if (ruta.idRutaIda) {
+    const ida = await Ruta.findByPk(ruta.idRutaIda, { attributes: ['idDestino'] });
+    if (rol === 'operador_sede') {
+      if (!ida || ida.idDestino !== idSede) {
+        throw new AppError('Esa ruta no es un regreso de tu sede', 403);
+      }
+    } else if (ida && await tieneOperadorSedePropio(ida.idDestino)) {
+      throw new AppError('Esta ruta es el regreso de una sede con operador propio — solo esa sede puede inhabilitarla.', 403);
+    }
+  } else if (rol === 'operador_sede') {
+    throw new AppError('No tienes permiso para inhabilitar esta ruta', 403);
+  }
 
   if (ruta.habilitado === true) {
     // Antes solo el frontend (ModalInhabilitarRuta.jsx) bloqueaba por ruta.estado
@@ -1485,17 +1681,15 @@ const toggleHabilitado = async (id) => {
 };
 
 const getAniosDisponibles = async ({ rol, idSede } = {}) => {
-  // Mismo criterio geográfico que buildSedeCondition ("toca mi municipio" +
-  // regresos enlazados) — sin esto, el filtro "Año" de operador_sede mostraba
-  // años de rutas que ni siquiera puede abrir. Ver LOGICA.md, "Sedes remotas".
+  // Mismo criterio que buildSedeCondition (destino final de la ida + su
+  // regreso enlazado, sin paradas — ver corrección 2026-09-12 ahí) — sin esto,
+  // el filtro "Año" de operador_sede mostraba años de rutas que ni siquiera
+  // puede abrir. Ver LOGICA.md, "Sedes remotas".
   const condicionSede = rol === 'operador_sede'
     ? `WHERE (
         id_destino = ${parseInt(idSede)}
-        OR EXISTS (SELECT 1 FROM ruta_parada rp WHERE rp.id_ruta = ruta.id_ruta AND rp.id_destino = ${parseInt(idSede)})
         OR id_ruta_ida IN (
-          SELECT r2.id_ruta FROM ruta r2
-          WHERE r2.id_destino = ${parseInt(idSede)}
-             OR EXISTS (SELECT 1 FROM ruta_parada rp2 WHERE rp2.id_ruta = r2.id_ruta AND rp2.id_destino = ${parseInt(idSede)})
+          SELECT r2.id_ruta FROM ruta r2 WHERE r2.id_destino = ${parseInt(idSede)}
         )
       )`
     : '';

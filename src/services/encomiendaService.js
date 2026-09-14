@@ -6,12 +6,6 @@ const { sendPaqueteDevueltoEmail } = require('../config/email');
 const { MAX_DIAS_ANTICIPACION } = require('../utils/horarioLaboral');
 
 const MODALIDADES_RECAUDO_VALIDAS = ['Pago Inmediato', 'Contraentrega'];
-// Municipio de origen de toda venta (oficina principal). Mismo string que fuerza
-// rutaService.resolverOrigenRuta para una ruta normal. No es una fila de `destino`
-// por diseño (el origen es texto libre en `ruta.origen`), pero sí puede existir una
-// fila `destino` "Medellín" en la BD real — y una venta nunca debe ir dirigida a
-// ella (uno no se despacha encomiendas a sí mismo). Ver LOGICA.md.
-const MUNICIPIO_ORIGEN = 'Medellín';
 // Tope de la "novedad"/observación de un paquete en Entrega en dos fases — mismo
 // valor que ya usa "Observaciones" en Ruta/Venta (ver rutasValidator.js), aunque
 // acá no hay un validators/paquetesValidator.js: este módulo valida a mano en el
@@ -89,7 +83,22 @@ const RUTA_INCLUDE = {
   model: Ruta,
   as: 'ruta',
   required: false,
-  include: [INCLUDE_PARES, { model: Destino, as: 'destino', required: false }],
+  include: [
+    INCLUDE_PARES,
+    { model: Destino, as: 'destino', required: false },
+    // Liviano a propósito (solo el id del municipio) -- el panel web lo usa para
+    // saber si el destino de esta venta sigue en el recorrido de la ruta
+    // (destino final o alguna parada) o si quedó huérfana al editar la ruta
+    // (ver ventaResolvers.js, motivoVentaCancelada). `separate: true` por el
+    // mismo motivo que INCLUDE_PARES: es un hasMany anidado dentro de RUTA_INCLUDE,
+    // sin eso multiplica filas en getAll() y corrompe la paginación (ver LOGICA.md).
+    { model: RutaParada, as: 'paradas', required: false, attributes: ['idDestino'], separate: true },
+    // Liviano a propósito (solo estado) — el panel web lo usa para saber si
+    // puede ofrecer "Marcar devuelto a Medellín" sobre un paquete No entregado
+    // de esta venta (Parte B, plan-ventas-regreso-paquetes.md): solo mientras
+    // el regreso de ESTA ida está "En Ruta".
+    { model: Ruta, as: 'rutaRegreso', required: false, attributes: ['idRuta', 'estado'] },
+  ],
 };
 
 // Vehículo/conductor específico de CADA paquete (una venta puede repartir sus paquetes
@@ -226,7 +235,7 @@ const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, modal
   const { count, rows: data } = await EncomiendaVenta.findAndCountAll({
     where,
     include: [
-      { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'destino' }] },
+      { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'sedeRegistro' }] },
       RUTA_INCLUDE,
       { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
       paqueteIncludeConAsignacion({ separate: true }),
@@ -238,13 +247,31 @@ const getAll = async ({ estado, idCliente, idRuta, habilitado, estadoPago, modal
     subQuery: false,
   });
 
+  // Para cada venta con algún paquete "Devuelto", ¿su sede tiene ahora mismo un
+  // regreso "En Ruta"? Lo usa ModalConsultarVenta.jsx para el botón "Marcar
+  // devuelto a Medellín" — ver idsDestinoConRegresoActivo.
+  const idsDestinoDevuelto = [...new Set(
+    data
+      .filter((v) => (v.paquetes || []).some((p) => p.estado === 'Devuelto'))
+      .map((v) => v.destinatario?.idDestino)
+      .filter((id) => id != null)
+  )];
+  if (idsDestinoDevuelto.length > 0) {
+    const sedesConRegreso = await idsDestinoConRegresoActivo(idsDestinoDevuelto);
+    data.forEach((v) => {
+      if (v.destinatario?.idDestino != null) {
+        v.dataValues.regresoActivoDesdeSede = sedesConRegreso.has(v.destinatario.idDestino);
+      }
+    });
+  }
+
   return { data, total: count };
 };
 
 const getById = async (id, { rol, idSede } = {}) => {
   const encomienda = await EncomiendaVenta.findByPk(id, {
     include: [
-      { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'destino' }] },
+      { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'sedeRegistro' }] },
       RUTA_INCLUDE,
       { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
       paqueteIncludeConAsignacion(),
@@ -257,6 +284,11 @@ const getById = async (id, { rol, idSede } = {}) => {
 
   if (rol === 'operador_sede' && encomienda.idSede !== idSede) {
     throw new AppError('No tienes acceso a esta venta', 403);
+  }
+
+  if (encomienda.destinatario?.idDestino != null && (encomienda.paquetes || []).some((p) => p.estado === 'Devuelto')) {
+    const sedesConRegreso = await idsDestinoConRegresoActivo([encomienda.destinatario.idDestino]);
+    encomienda.dataValues.regresoActivoDesdeSede = sedesConRegreso.has(encomienda.destinatario.idDestino);
   }
 
   return encomienda;
@@ -332,6 +364,29 @@ const validarRutaLlegaAlDestino = async (ruta, idDestinoVenta, transaction) => {
   }
 };
 
+// Versión booleana de rutaSigueSirviendo() + validarRutaLlegaAlDestino() juntas, para
+// los caminos que NO están asignando una ruta nueva (ahí sí tiene sentido lanzar el
+// error de validarRutaLlegaAlDestino tal cual) sino decidiendo si una venta puede
+// volver a "Programada" con la ruta que YA tenía (rehabilitar, reactivar). Antes esos
+// dos caminos solo miraban rutaSigueSirviendo() -- si la ruta en sí seguía sana
+// (Programada + habilitada) la venta volvía a Programada sin más, aunque esa ruta ya
+// no pasara por el municipio de esta venta (se le quitó como parada o como destino
+// final en una edición posterior, ver "Tercer motivo de Cancelada" en LOGICA.md). Un
+// bug real que la usuaria encontró probando: editó la ruta a un solo destino,
+// inhabilitó la venta afectada (que en ese momento aún no calificaba para el barrido
+// de rutaService.update() porque ese filtra por habilitado:true) y al rehabilitarla
+// volvió a "Programada" en vez de "Cancelada". require lazy de rutaService no hace
+// falta acá -- RutaParada ya está importado en este archivo.
+const rutaCubreDestinoVenta = async (ruta, idDestinoVenta, transaction) => {
+  if (!rutaSigueSirviendo(ruta)) return false;
+  try {
+    await validarRutaLlegaAlDestino(ruta, idDestinoVenta, transaction);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 // Un regreso solo transporta ventas nuevas cuando lo registra el operador_sede
 // de la sede desde la que ESE regreso sale (WS5, "Sedes remotas") — el destino
 // de la ida que enlaza es justo esa sede. Para cualquier otro caller (admin
@@ -341,6 +396,41 @@ const esRegresoDeLaSede = async (ruta, idSede, transaction) => {
   if (!ruta.idRutaIda || idSede === undefined) return false;
   const rutaIda = await Ruta.findByPk(ruta.idRutaIda, { attributes: ['idDestino'], transaction });
   return rutaIda?.idDestino === idSede;
+};
+
+// ¿Cuáles de estos municipios (destinos) tienen AHORA MISMO algún regreso "En
+// Ruta" saliendo de ahí (su destino final — origen del regreso, NO sus
+// paradas)? Usado para "Marcar devuelto a Medellín" (Parte B): el paquete
+// pudo llegar en una ida de hace semanas y esperar hasta un mes en bodega
+// mientras se insiste la entrega — para cuando por fin queda "Devuelto", el
+// regreso de ESA ida puntual pudo ya haber completado hace rato, mientras la
+// sede seguía recibiendo y despachando otros convoyes normalmente. Por eso el
+// corte correcto es geográfico (¿algo sale de esa sede ahora mismo?), no por
+// ida específica. A propósito NO cuenta ser solo una parada de la ida
+// (corregido 2026-09-13, revertido el mismo día): contarla habría exigido
+// además soportar "recolección en paradas intermedias" (que un convoy recoja
+// paquetes varados en un municipio por el que solo pasa) — decisión de la
+// usuaria de NO construir eso todavía, mismo criterio que ya excluye paradas
+// del "solo lo mío" de Rutas para operador_sede (ver rutaService.js,
+// buildSedeCondition). Ver registrarDevolucionPaquete/
+// getPaquetesRetornoConductor, y LOGICA.md, "Paquetes de retorno — corte por
+// sede, no por ida" (2026-09-13).
+const idsDestinoConRegresoActivo = async (idsDestino) => {
+  if (!idsDestino || idsDestino.length === 0) return new Set();
+  const { Op } = sequelize.Sequelize;
+  const regresos = await Ruta.findAll({
+    where: { estado: 'En Ruta', idRutaIda: { [Op.ne]: null } },
+    include: [{
+      model: Ruta, as: 'rutaIda', required: true, attributes: ['idDestino'],
+      where: { idDestino: { [Op.in]: idsDestino } },
+    }],
+    attributes: ['idRuta'],
+  });
+  const activos = new Set();
+  for (const r of regresos) {
+    if (r.rutaIda) activos.add(r.rutaIda.idDestino);
+  }
+  return activos;
 };
 
 const create = async (data, { rol, idSede } = {}) => {
@@ -404,11 +494,13 @@ const create = async (data, { rol, idSede } = {}) => {
     if (!destinoDestinatario) {
       throw new AppError('El destino del destinatario no existe', 400);
     }
-    // Excepción simétrica a la de arriba: en una venta de regreso de sede el
-    // destinatario SÍ va a Medellín a propósito (es el origen real de esa venta
-    // el que cambió, no Medellín — ver comentario de esRegresoDeLaSede arriba).
-    if (destinoDestinatario.municipio === MUNICIPIO_ORIGEN && !esVentaDeRegresoDeSede) {
-      throw new AppError(`El destino del destinatario no puede ser ${MUNICIPIO_ORIGEN}: es el municipio de origen de las ventas`, 400);
+    // Contra el origen REAL de la ruta elegida (ruta.origen), no contra Medellín a
+    // secas (A.1, plan-ventas-regreso-paquetes.md) — en una ruta normal el origen
+    // es Medellín, así que el comportamiento no cambia; en un regreso el origen es
+    // el municipio de la sede, y Medellín (destino real del regreso) queda
+    // permitido sin necesitar ninguna excepción aparte.
+    if (destinoDestinatario.municipio === ruta.origen) {
+      throw new AppError(`El destino del destinatario no puede ser ${ruta.origen}: es el municipio de origen de esta ruta`, 400);
     }
     await validarRutaLlegaAlDestino(ruta, destinatario.idDestino, transaction);
 
@@ -496,7 +588,7 @@ const create = async (data, { rol, idSede } = {}) => {
 
     const encomiendaCompleta = await EncomiendaVenta.findByPk(encomienda.idEncomiendaVenta, {
       include: [
-        { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'destino' }] },
+        { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'sedeRegistro' }] },
         RUTA_INCLUDE,
         { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
         paqueteIncludeConAsignacion(),
@@ -510,7 +602,7 @@ const create = async (data, { rol, idSede } = {}) => {
   }
 };
 
-const update = async (id, data) => {
+const update = async (id, data, { rol, idSede } = {}) => {
   const transaction = await sequelize.transaction();
 
   try {
@@ -529,6 +621,10 @@ const update = async (id, data) => {
 
     if (!encomienda) {
       throw new AppError('Encomienda no encontrada', 404);
+    }
+    // Mismo criterio que getById/getPageOf: operador_sede solo edita lo suyo.
+    if (rol === 'operador_sede' && encomienda.idSede !== idSede) {
+      throw new AppError('No tienes acceso a esta venta', 403);
     }
 
     // Cancelada sí se puede editar (a diferencia de antes) — es la forma de
@@ -579,8 +675,20 @@ const update = async (id, data) => {
     if (!rutaSigueSirviendo(rutaNueva)) {
       throw new AppError('Solo se puede asignar la venta a una ruta que esté Programada', 400);
     }
-    // Un viaje de regreso no transporta ventas — ver el mismo chequeo en create().
-    if (rutaNueva.idRutaIda) {
+    // Un viaje de regreso no transporta ventas nuevas — ver el mismo chequeo en
+    // create(). Acá solo aplica si la ruta REALMENTE está cambiando: de lo
+    // contrario, cualquier edición de una venta que ya vivía en su regreso
+    // legítimo (creada por operador_sede vía create()) quedaría bloqueada para
+    // siempre, así se edite un campo que no tiene nada que ver con la ruta — A.2,
+    // plan-ventas-regreso-paquetes.md. Misma excepción que create(): si SÍ está
+    // cambiando y la ruta nueva es un regreso, solo vale cuando quien edita es el
+    // operador_sede de la sede desde la que ese regreso sale — ej. reasignar una
+    // venta "Cancelada" (porque su regreso original se canceló) a OTRO regreso
+    // disponible de su misma sede — corregido 2026-09-12, ver LOGICA.md.
+    const rutaCambio = nuevoIdRuta !== encomienda.idRuta;
+    const esReasignacionARegresoDeLaSede = rutaCambio && rutaNueva.idRutaIda && rol === 'operador_sede'
+      && await esRegresoDeLaSede(rutaNueva, idSede, transaction);
+    if (rutaCambio && rutaNueva.idRutaIda && !esReasignacionARegresoDeLaSede) {
       throw new AppError('No se puede asignar una venta a un viaje de regreso: elige una ruta de ida', 400);
     }
     const nuevaFechaEstimadaEntrega = fechaEstimadaEntrega !== undefined ? fechaEstimadaEntrega : encomienda.fechaEstimadaEntrega;
@@ -647,8 +755,11 @@ const update = async (id, data) => {
         if (!destinoDestinatario) {
           throw new AppError('El destino del destinatario no existe', 400);
         }
-        if (destinoDestinatario.municipio === MUNICIPIO_ORIGEN) {
-          throw new AppError(`El destino del destinatario no puede ser ${MUNICIPIO_ORIGEN}: es el municipio de origen de las ventas`, 400);
+        // Contra el origen REAL de la ruta (rutaNueva.origen), no contra Medellín a
+        // secas — ver el mismo cambio y su porqué en create() (A.1,
+        // plan-ventas-regreso-paquetes.md).
+        if (destinoDestinatario.municipio === rutaNueva.origen) {
+          throw new AppError(`El destino del destinatario no puede ser ${rutaNueva.origen}: es el municipio de origen de esta ruta`, 400);
         }
         idDestinoResuelto = destinatario.idDestino;
       }
@@ -745,7 +856,7 @@ const update = async (id, data) => {
 
     const encomiendaActualizada = await EncomiendaVenta.findByPk(id, {
       include: [
-        { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'destino' }] },
+        { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'sedeRegistro' }] },
         RUTA_INCLUDE,
         { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
         paqueteIncludeConAsignacion(),
@@ -903,6 +1014,33 @@ const dejarPaquetesEnSede = async (idConductor, { idRuta, idDestino, novedades =
   }
   const parIds = pares.map((p) => p.idRutaVehiculoConductor);
   const vehiculoIds = [...new Set(pares.map((p) => p.idVehiculo))];
+
+  // El destino final SIEMPRE es la última sede del recorrido -- a diferencia del
+  // orden ENTRE paradas (que puede estar mal registrado; el conductor conoce la
+  // realidad del camino y puede cerrarlas en el orden que le convenga, sin bloqueo),
+  // la posición del destino final no es ambigua: nunca va antes que una parada.
+  // Se bloquea cerrarlo mientras a este mismo conductor le queden paquetes "Por
+  // entregar" en cualquier parada de esta ruta. No hace falta contemplar una parada
+  // "sin carga" acá -- la ruta ya garantiza que ninguna parada arranca vacía
+  // (SEDE_SIN_CARGA en rutaService.updateEstado), así que si hay paradas, todas
+  // tienen al menos un candidato que pasar por acá primero.
+  if (esDestinoFinal) {
+    const paradas = await RutaParada.findAll({ where: { idRuta }, attributes: ['idDestino'] });
+    if (paradas.length > 0) {
+      const idsDestinoParadas = paradas.map((p) => p.idDestino);
+      const pendientesEnParadas = await Paquete.count({
+        where: { idRutaVehiculoConductor: { [Op.in]: parIds }, estado: 'Por entregar' },
+        include: [{
+          model: EncomiendaVenta, as: 'encomienda', required: true,
+          where: { estado: { [Op.ne]: 'Cancelada' } },
+          include: [{ model: Destinatario, as: 'destinatario', required: true, where: { idDestino: { [Op.in]: idsDestinoParadas } } }],
+        }],
+      });
+      if (pendientesEnParadas > 0) {
+        throw new AppError('Todavía te quedan paquetes pendientes en alguna parada intermedia — déjalos ahí primero antes de cerrar el destino final.', 409);
+      }
+    }
+  }
 
   // Paquetes "Por entregar" de esos pares cuya venta va dirigida a esta sede
   // (Destinatario.idDestino) y no está cancelada.
@@ -1221,9 +1359,162 @@ const distribuidorCubrePaquete = async (idPaquete, idUsuarioDistribuidor) => {
   return !!cubre;
 };
 
+// Devuelto -> Devuelto a base (Parte B, plan-ventas-regreso-paquetes.md): un
+// paquete "No entregado" que un convoy de regreso trae físicamente de vuelta a
+// Medellín. Acción explícita por paquete, nunca automática al completar la
+// ruta de regreso. Puede registrarla:
+//   - un conductor de un convoy de regreso, desde el móvil (idConductor presente)
+//   - el admin, desde el panel web (esAdmin true, idConductorDevolucion queda NULL)
+// Ventana de acción: tiene que haber ALGÚN regreso "En Ruta" que SALGA AHORA
+// del municipio donde quedó varado este paquete (destino final de la ida a la
+// que pertenece esa sede — NO una parada, ver idsDestinoConRegresoActivo) —
+// corregido 2026-09-13: antes exigía el regreso de la MISMA ida que trajo el
+// paquete, pero un paquete puede esperar hasta un mes en bodega insistiendo
+// la entrega, y en ese tiempo la sede ya despachó y recibió otros convoyes
+// normalmente — atarlo a esa ida puntual lo dejaba varado para siempre en
+// cuanto ESE regreso específico se completaba, aunque después sí pasaran
+// regresos reales por el mismo municipio. El paquete NO cambia de
+// id_ruta/id_ruta_vehiculo_conductor: sigue asociado a su ruta de ida
+// original, para trazabilidad.
+const registrarDevolucionPaquete = async (idPaquete, { idConductor = null, esAdmin = false } = {}) => {
+  const { Op } = sequelize.Sequelize;
+  const paquete = await Paquete.findByPk(idPaquete, {
+    include: [{
+      model: EncomiendaVenta, as: 'encomienda', attributes: ['idEncomiendaVenta', 'idRuta'],
+      include: [{ model: Destinatario, as: 'destinatario', attributes: ['idDestino'] }],
+    }],
+  });
+  if (!paquete) throw new AppError('Paquete no encontrado', 404);
+
+  if (normalizarEstadoPaquete(paquete.estado) !== 'Devuelto') {
+    throw new AppError(
+      paquete.estado === 'Devuelto a base'
+        ? 'Este paquete ya fue confirmado de vuelta en Medellín'
+        : 'Solo se puede confirmar la devolución de un paquete "No entregado"',
+      409
+    );
+  }
+
+  const idDestinoSede = paquete.encomienda?.destinatario?.idDestino;
+  if (!idDestinoSede) {
+    throw new AppError('Este paquete no tiene un destino asociado', 409);
+  }
+
+  if (esAdmin) {
+    // Cualquier regreso "En Ruta" que salga de ese municipio sirve — el admin
+    // no conduce ningún convoy en particular, solo confirma que el paquete
+    // llegó.
+    const sedesActivas = await idsDestinoConRegresoActivo([idDestinoSede]);
+    if (!sedesActivas.has(idDestinoSede)) {
+      throw new AppError('No hay ningún regreso en curso desde la sede de este paquete', 409);
+    }
+  } else {
+    if (!idConductor) throw new AppError('No se pudo identificar al conductor', 403);
+    // Tiene que ser justo el regreso que ESTE conductor está manejando ahora
+    // mismo (no cualquier otro regreso que también salga del mismo
+    // municipio) — mismo criterio que getPaquetesRetornoConductor.
+    const parRegreso = await RutaVehiculoConductor.findOne({
+      where: { idConductor, habilitado: true },
+      include: [{
+        model: Ruta, as: 'ruta', required: true,
+        where: { estado: 'En Ruta', idRutaIda: { [Op.ne]: null } },
+        include: [{ model: Ruta, as: 'rutaIda', attributes: ['idDestino'] }],
+      }],
+    });
+    if (!parRegreso || parRegreso.ruta.rutaIda?.idDestino !== idDestinoSede) {
+      throw new AppError('No estás en un regreso activo desde la sede de este paquete', 403);
+    }
+  }
+
+  await paquete.update({
+    estado: 'Devuelto a base',
+    idConductorDevolucion: esAdmin ? null : idConductor,
+    fechaDevolucion: new Date(),
+  });
+
+  return Paquete.findByPk(idPaquete, {
+    include: [{
+      model: Conductor, as: 'conductorDevolucion',
+      include: [{ model: Usuario, as: 'usuario', attributes: ['idUsuario', 'nombre', 'apellido'] }],
+    }],
+  });
+};
+
+// "Paquetes de retorno" (B.4, plan-ventas-regreso-paquetes.md) -- tab Paquetes
+// del conductor en la app móvil, SOLO cuando su ruta activa ahora mismo es un
+// regreso ("En Ruta", idRutaIda seteado) y él está en su convoy. Trae los
+// paquetes "No entregado" (todavía accionables) Y "Devuelto a base" (ya
+// confirmados por él o por otro conductor/el admin -- el móvil los muestra
+// como "Ya confirmado por [nombre]", no los oculta) del municipio del que
+// SALE este regreso (destino final de la ida enlazada, NO sus paradas --
+// revertido 2026-09-13, ver idsDestinoConRegresoActivo: contar paradas exige
+// además "recolección en paradas intermedias", que la usuaria decidió no
+// construir todavía) -- corregido 2026-09-13: antes se filtraba por la ida
+// ESPECÍFICA que trajo cada paquete, pero un paquete puede esperar hasta un
+// mes en bodega insistiendo la entrega, mientras la sede ya despachó y
+// recibió otros convoyes -- cualquier conductor que ahora mismo salga de esa
+// misma sede debe poder confirmarlo, no solo el de la ida puntual que lo
+// trajo. Lista vacía = no hay ninguna ruta de regreso activa para este
+// conductor ahora mismo, o no quedó ningún paquete de ese tipo en su sede --
+// en ambos casos la sección desaparece del todo en el móvil, sin distinguir
+// el motivo.
+const getPaquetesRetornoConductor = async (idConductor) => {
+  const { Op } = sequelize.Sequelize;
+
+  const parRegreso = await RutaVehiculoConductor.findOne({
+    where: { idConductor, habilitado: true },
+    include: [{
+      model: Ruta, as: 'ruta', required: true,
+      where: { estado: 'En Ruta', idRutaIda: { [Op.ne]: null } },
+    }],
+  });
+  if (!parRegreso) return [];
+
+  const ida = await Ruta.findByPk(parRegreso.ruta.idRutaIda, { attributes: ['idDestino'] });
+  if (!ida) return [];
+
+  return Paquete.findAll({
+    where: { estado: { [Op.in]: ['Devuelto', 'Devuelto a base'] } },
+    include: [
+      {
+        // Mismo criterio que getByConductor (2026-09-13, ver LOGICA.md): una
+        // venta que se canceló o se inhabilitó DESPUÉS de que su paquete quedó
+        // "Devuelto" no debe seguir pidiéndole al conductor que confirme su
+        // regreso — ya no es responsabilidad de nadie resolverla por acá.
+        model: EncomiendaVenta, as: 'encomienda', required: true,
+        where: { habilitado: true, estado: { [Op.ne]: 'Cancelada' } },
+        include: [
+          // El conductor necesita saber a quién corresponde el paquete YA DE
+          // VUELTA en Medellín -- eso es el cliente (quien lo envió y a quien
+          // se le va a resolver acá), no el destinatario original en el
+          // municipio donde no se pudo entregar. Corregido 2026-09-13.
+          { model: Cliente, as: 'cliente', attributes: ['idCliente', 'nombre', 'apellido', 'telefono'] },
+          {
+            model: Destinatario, as: 'destinatario', required: true,
+            where: { idDestino: ida.idDestino },
+            include: [{ model: Destino, as: 'destino' }],
+          },
+        ],
+      },
+      {
+        model: Conductor, as: 'conductorDevolucion', required: false,
+        include: [{ model: Usuario, as: 'usuario', attributes: ['idUsuario', 'nombre', 'apellido'] }],
+      },
+    ],
+    order: [['idPaquete', 'DESC']],
+  });
+};
+
+// Trae "Devuelto" (no entregado, el paquete puede seguir allá en el destino) y
+// "Devuelto a base" (2026-09-13: la usuaria notó que en cuanto el conductor del
+// regreso confirma "Llegó a Medellín" el paquete desaparecía de este listado sin
+// dejar rastro visible salvo abriendo el modal puntual de la venta -- pero sigue
+// siendo, en los dos casos, un paquete que nunca llegó al destinatario, así que
+// el mismo listado le sirve a ambos; la columna Estado del frontend distingue
+// cuál es cuál). Ver paqueteStateUtils.js, ESTADOS_PAQUETE.
 const getPaquetesDevueltos = async ({ q, anio, mes, habilitado, page = 1, limit = 10 } = {}) => {
   const { Op } = sequelize.Sequelize;
-  const where = { estado: 'Devuelto' };
+  const where = { estado: { [Op.in]: ['Devuelto', 'Devuelto a base'] } };
   if (q) {
     const trimmed = q.trim();
     where[Op.or] = [
@@ -1262,12 +1553,23 @@ const getPaquetesDevueltos = async ({ q, anio, mes, habilitado, page = 1, limit 
         as: 'encomienda',
         required: true,
         where: whereEncomienda,
-        include: [{ model: Cliente, as: 'cliente' }],
+        include: [
+          { model: Cliente, as: 'cliente' },
+          // El municipio donde de verdad quedó varado el paquete (2026-09-13,
+          // reemplaza la columna "Ruta" del listado) — antes se mostraba el
+          // origen→destino de la ida completa, que puede confundir cuando el
+          // paquete en realidad quedó en una parada intermedia y no en el
+          // destino final de esa ida (ver LOGICA.md, "Paquetes de retorno —
+          // corte por sede, no por ida").
+          { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
+        ],
       },
+      // Quién y cuándo confirmó "Llegó a Medellín" (solo aplica a "Devuelto a
+      // base") -- mismo dato que ya se le muestra al conductor en la app móvil,
+      // ver getPaquetesRetornoConductor.
       {
-        model: RutaVehiculoConductor,
-        as: 'asignacion',
-        include: [{ model: Ruta, as: 'ruta', include: [{ model: Destino, as: 'destino' }] }],
+        model: Conductor, as: 'conductorDevolucion', required: false,
+        include: [{ model: Usuario, as: 'usuario', attributes: ['idUsuario', 'nombre', 'apellido'] }],
       },
     ],
     limit,
@@ -1282,17 +1584,21 @@ const getPaquetesDevueltos = async ({ q, anio, mes, habilitado, page = 1, limit 
 
 const getAniosDisponiblesPaquetesDevueltos = async () => {
   const rows = await sequelize.query(
-    "SELECT DISTINCT EXTRACT(YEAR FROM fecha_ultimo_estado)::int AS anio FROM paquete WHERE estado = 'Devuelto' ORDER BY anio DESC",
+    "SELECT DISTINCT EXTRACT(YEAR FROM fecha_ultimo_estado)::int AS anio FROM paquete WHERE estado IN ('Devuelto', 'Devuelto a base') ORDER BY anio DESC",
     { type: sequelize.QueryTypes.SELECT }
   );
   return rows.map((r) => r.anio);
 };
 
-const toggleHabilitado = async (id) => {
+const toggleHabilitado = async (id, { rol, idSede } = {}) => {
   const encomienda = await EncomiendaVenta.findByPk(id);
 
   if (!encomienda) {
     throw new AppError('Encomienda no encontrada', 404);
+  }
+  // Mismo criterio que getById/update: operador_sede solo inhabilita/habilita lo suyo.
+  if (rol === 'operador_sede' && encomienda.idSede !== idSede) {
+    throw new AppError('No tienes acceso a esta venta', 403);
   }
 
   let pasoACancelada = false;
@@ -1318,10 +1624,12 @@ const toggleHabilitado = async (id) => {
     // rutaService.update() la tocara (esa sincronización solo alcanza a las ventas
     // habilitadas). Se revisa acá, en el único momento en que vuelve a quedar "viva".
     const ruta = await Ruta.findByPk(encomienda.idRuta);
-    if (!rutaSigueSirviendo(ruta)) {
-      // La ruta ya no sirve para esta venta (salió/terminó/se canceló, o quedó
-      // inhabilitada) — queda Cancelada para forzar la reasignación (editable, ver
-      // update() más abajo).
+    const destinatarioRehabilitar = await Destinatario.findOne({ where: { idEncomiendaVenta: id }, attributes: ['idDestino'] });
+    if (!(await rutaCubreDestinoVenta(ruta, destinatarioRehabilitar?.idDestino))) {
+      // La ruta ya no sirve para esta venta (salió/terminó/se canceló, quedó
+      // inhabilitada, o sigue sana pero ya no cubre el municipio de esta venta —
+      // se le quitó como parada o como destino final) — queda Cancelada para
+      // forzar la reasignación (editable, ver update() más abajo).
       encomienda.estado = 'Cancelada';
       pasoACancelada = true;
     } else {
@@ -1342,7 +1650,7 @@ const toggleHabilitado = async (id) => {
 
   const encomiendaActualizada = await EncomiendaVenta.findByPk(id, {
     include: [
-      { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'destino' }] },
+      { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'sedeRegistro' }] },
       { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
       paqueteIncludeConAsignacion(),
       RUTA_INCLUDE,
@@ -1360,10 +1668,15 @@ const toggleHabilitado = async (id) => {
 // rutaSigueSirviendo() del lado del cliente — se revalida igual acá, fuente de
 // verdad, por si la ruta cambió de estado justo en el medio. Ver LOGICA.md, "Ventas
 // — Cancelada e inhabilitar/habilitar".
-const reactivar = async (id) => {
+const reactivar = async (id, { rol, idSede } = {}) => {
   const encomienda = await EncomiendaVenta.findByPk(id);
   if (!encomienda) {
     throw new AppError('Encomienda no encontrada', 404);
+  }
+  // Mismo criterio que getById/update/toggleHabilitado: operador_sede solo
+  // reactiva lo suyo.
+  if (rol === 'operador_sede' && encomienda.idSede !== idSede) {
+    throw new AppError('No tienes acceso a esta venta', 403);
   }
   if (encomienda.habilitado === false) {
     throw new AppError('Esta venta está inhabilitada: habilítala primero', 400);
@@ -1373,7 +1686,8 @@ const reactivar = async (id) => {
   }
 
   const ruta = await Ruta.findByPk(encomienda.idRuta);
-  if (!rutaSigueSirviendo(ruta)) {
+  const destinatarioReactivar = await Destinatario.findOne({ where: { idEncomiendaVenta: id }, attributes: ['idDestino'] });
+  if (!(await rutaCubreDestinoVenta(ruta, destinatarioReactivar?.idDestino))) {
     throw new AppError('La ruta de esta venta ya no está disponible: edítala para asignarle una ruta nueva', 400);
   }
 
@@ -1391,7 +1705,7 @@ const reactivar = async (id) => {
 
   return EncomiendaVenta.findByPk(id, {
     include: [
-      { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'destino' }] },
+      { model: Cliente, as: 'cliente', include: [{ model: Destino, as: 'sedeRegistro' }] },
       { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
       paqueteIncludeConAsignacion(),
       RUTA_INCLUDE,
@@ -1455,6 +1769,8 @@ module.exports = {
   registrarEntregaFinal,
   getHistorialEntregaFinal,
   distribuidorCubrePaquete,
+  registrarDevolucionPaquete,
+  getPaquetesRetornoConductor,
   getPaquetesDevueltos,
   getAniosDisponiblesPaquetesDevueltos,
 };

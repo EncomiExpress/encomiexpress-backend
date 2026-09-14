@@ -22,7 +22,15 @@ exports.getByConductor = async (req, res, next) => {
         // El Destino anidado en el destinatario es el municipio real de la venta
         // (parada intermedia o destino final) — el móvil agrupa por él para el
         // botón "dejar en sede" (ver driver_paquetes.dart).
-        { model: EncomiendaVenta, as: 'encomienda', include: [{ model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] }] },
+        // `required: true` + el `where` de abajo: un paquete cuya venta quedó
+        // Cancelada (ej. "destino fuera de ruta" al editar paradas, ver LOGICA.md)
+        // o inhabilitada no debe seguir apareciendo como pendiente en el móvil del
+        // conductor -- mismo criterio que ya aplican rutaService.getAll()/
+        // calcularSedesRuta() y el resto de chequeos de "Paquetes de ventas
+        // inhabilitadas no deben ocupar su par". Sin esto, un paquete de una venta
+        // huérfana se queda mostrado para siempre en una sede que ya ni pertenece
+        // al recorrido de la ruta (nunca se puede "dejar en sede" desde ahí).
+        { model: EncomiendaVenta, as: 'encomienda', required: true, where: { habilitado: true, estado: { [Op.ne]: 'Cancelada' } }, include: [{ model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] }] },
         { model: RutaVehiculoConductor, as: 'asignacion', include: [{ model: Ruta, as: 'ruta', include: [{ model: Destino, as: 'destino' }] }] },
       ],
       order: [['idPaquete', 'DESC']]
@@ -202,6 +210,59 @@ exports.getHistorialEntrega = async (req, res, next) => {
 
     const historial = await encomiendaService.getHistorialEntregaFinal(id);
     res.json({ success: true, data: historial });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/paquetes/retorno — "Paquetes de retorno" del conductor autenticado
+// (B.4, plan-ventas-regreso-paquetes.md): solo trae algo si su ruta activa
+// ahora mismo es un regreso "En Ruta". El idConductor sale del token, igual
+// que getByConductor.
+exports.getParaRetorno = async (req, res, next) => {
+  try {
+    const conductor = await Conductor.findOne({ where: { idUsuario: req.usuario.idUsuario } });
+    if (!conductor) {
+      return res.status(403).json({ success: false, message: 'Solo los conductores pueden acceder a los paquetes de retorno' });
+    }
+    const paquetes = await encomiendaService.getPaquetesRetornoConductor(conductor.idConductor);
+    res.json({ success: true, data: paquetes });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// PATCH /api/paquetes/:id/devolucion — Parte B, plan-ventas-regreso-paquetes.md.
+// Confirma que un paquete "No entregado" volvió físicamente a Medellín en el
+// convoy de regreso: Devuelto -> Devuelto a base. Dos caminos de acceso (no se
+// pueden expresar con un solo authorize/authorizePermission en la ruta, mismo
+// patrón que getHistorialEntrega):
+//   - conductor (acceder_app_movil): debe estar en el convoy de la ruta de
+//     regreso de ese paquete específico — se valida en el servicio.
+//   - admin (permiso actualizar_venta): sin restricción de convoy.
+exports.registrarDevolucion = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const rolCodigo = req.usuario.rol?.codigo;
+    const permisos = req.usuario.rol?.permisos?.map((p) => p.nombre) || [];
+    const esAdmin = permisos.includes('actualizar_venta');
+    const esConductor = rolCodigo === 'conductor';
+
+    if (!esAdmin && !esConductor) {
+      return res.status(403).json({ success: false, message: 'No tienes permiso para confirmar esta devolución' });
+    }
+
+    let idConductor = null;
+    if (!esAdmin) {
+      const conductor = await Conductor.findOne({ where: { idUsuario: req.usuario.idUsuario } });
+      if (!conductor) {
+        return res.status(403).json({ success: false, message: 'Solo los conductores pueden confirmar esta devolución' });
+      }
+      idConductor = conductor.idConductor;
+    }
+
+    const paquete = await encomiendaService.registrarDevolucionPaquete(id, { idConductor, esAdmin });
+    res.json({ success: true, message: 'Paquete confirmado de vuelta en Medellín', data: paquete });
   } catch (error) {
     next(error);
   }

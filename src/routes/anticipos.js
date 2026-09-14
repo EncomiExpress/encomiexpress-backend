@@ -176,13 +176,20 @@ router.patch('/:id/entregar-excedente', authenticate, authorize('admin'), author
  * @swagger
  * /anticipos/{id}/toggle-habilitado:
  *   patch:
- *     summary: Habilitar o inhabilitar anticipo (solo admin)
+ *     summary: Habilitar o inhabilitar anticipo. Al inhabilitar un anticipo que no está Completado ni es huérfano (Entregado/En Legalización), exige `motivo` en el body y lo cierra como "Cerrado sin entregar" en el mismo golpe.
  *     tags: [Anticipos]
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
  *         schema: { type: integer }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               motivo: { type: string, description: 'Obligatorio solo al inhabilitar un anticipo Entregado/En Legalización que no es huérfano' }
  *     responses:
  *       200:
  *         description: Estado cambiado correctamente

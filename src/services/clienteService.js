@@ -58,7 +58,7 @@ const getAll = async ({ habilitado, q, page = 1, limit = 10, sortBy, rol, idSede
   const order = buildOrder(sortBy);
   const { count, rows: data } = await Cliente.findAndCountAll({
     where,
-    include: [{ model: Destino, as: 'destino' }],
+    include: [{ model: Destino, as: 'sedeRegistro' }],
     limit,
     offset,
     order: order.length > 0 ? order : [['idCliente', 'DESC']],
@@ -68,7 +68,7 @@ const getAll = async ({ habilitado, q, page = 1, limit = 10, sortBy, rol, idSede
 };
 
 const getById = async (id, { rol, idSede } = {}) => {
-  const cliente = await Cliente.findByPk(id, { include: [{ model: Destino, as: 'destino' }] });
+  const cliente = await Cliente.findByPk(id, { include: [{ model: Destino, as: 'sedeRegistro' }] });
 
   if (!cliente) {
     throw new AppError('Cliente no encontrado', 404);
@@ -81,8 +81,9 @@ const getById = async (id, { rol, idSede } = {}) => {
   return cliente;
 };
 
-const create = async (data, { rol, idSede } = {}) => {
-  const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, direccion, idDestino } = data;
+const create = async (data, contexto = {}) => {
+  const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, direccion } = data;
+  const { rol, idSede } = contexto;
 
   const existingCliente = await Cliente.findOne({ where: { numeroIdentificacion } });
   if (existingCliente) {
@@ -116,17 +117,16 @@ const create = async (data, { rol, idSede } = {}) => {
     telefono,
     email,
     direccion,
-    idDestino,
     // Nunca lo que mande el body — sale del contexto de sesión de quien registra.
     idSede: rol === 'operador_sede' ? idSede : null,
     habilitado: true
   });
 
-  return Cliente.findByPk(nuevoCliente.idCliente, { include: [{ model: Destino, as: 'destino' }] });
+  return Cliente.findByPk(nuevoCliente.idCliente, { include: [{ model: Destino, as: 'sedeRegistro' }] });
 };
 
 const update = async (id, data, { rol, idSede } = {}) => {
-  const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, direccion, idDestino } = data;
+  const { tipoIdentificacion, numeroIdentificacion, nombre, apellido, telefono, email, direccion } = data;
 
   const cliente = await Cliente.findByPk(id);
   if (!cliente) {
@@ -178,10 +178,9 @@ const update = async (id, data, { rol, idSede } = {}) => {
     telefono: telefono || cliente.telefono,
     email: email || cliente.email,
     direccion: direccion || cliente.direccion,
-    idDestino: idDestino || cliente.idDestino
   });
 
-  return Cliente.findByPk(id, { include: [{ model: Destino, as: 'destino' }] });
+  return Cliente.findByPk(id, { include: [{ model: Destino, as: 'sedeRegistro' }] });
 };
 
 const toggleHabilitado = async (id, { rol, idSede } = {}) => {

@@ -6,11 +6,11 @@ const direccionRule = body('direccion').optional().isString().withMessage('Direc
   .custom(r.validarDireccionFormato);
 
 // Municipio del remitente — para saber a dónde devolver un paquete si el
-// destinatario nunca lo recoge (ver LOGICA.md). OJO: cada validación necesita su
-// propia instancia de body('idDestino') — express-validator devuelve una cadena
-// mutable, así que encadenarle métodos distintos en dos arrays que comparten la
-// MISMA instancia hace que el último encadenado (.optional() de update) pise la
-// configuración del otro (.notEmpty() de create), y ninguno de los dos exige nada.
+// destinatario nunca lo recoge (ver LOGICA.md). Ya NO viaja en el body: lo
+// resuelve el servidor (`clienteService.resolverIdDestinoCliente`) a partir de
+// quién registra (la sede del operador_sede, o Medellín en el flujo normal) —
+// nunca lo que mande el cliente HTTP. Ver LOGICA.md, "Decisión — Municipio de
+// Cliente ya no es editable".
 const createValidation = [
   r.tipoIdentificacion.required(r.TIPOS_DOC_CLIENTE),
   r.numeroIdentificacion.required(r.validarNitEstricto),
@@ -19,7 +19,6 @@ const createValidation = [
   r.telefono.optional(),
   r.email.optional(),
   direccionRule,
-  body('idDestino').notEmpty().withMessage('El municipio es requerido').isInt().withMessage('Municipio inválido'),
 ];
 
 const updateValidation = [
@@ -30,7 +29,6 @@ const updateValidation = [
   r.telefono.optional(),
   r.email.optional(),
   direccionRule,
-  body('idDestino').optional().isInt().withMessage('Municipio inválido'),
 ];
 
 module.exports = {

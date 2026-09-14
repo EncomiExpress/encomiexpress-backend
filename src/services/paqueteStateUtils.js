@@ -6,7 +6,13 @@ const AppError = require('../errors/appError');
 // encomiendaService.registrarEntregaFinal. No es terminal: determinarEstadoEncomienda
 // de abajo lo trata igual que "Por entregar" (la venta no se cierra hasta que el
 // paquete llegue a Entregado/Devuelto).
-const ESTADOS_PAQUETE = ['Por entregar', 'En sede de destino', 'Entregado', 'Devuelto'];
+//
+// "Devuelto a base" (B.2, plan-ventas-regreso-paquetes.md) es un estado terminal
+// aparte, alcanzable SOLO desde "Devuelto" ("No entregado"): el paquete físicamente
+// volvió a Medellín en el convoy de regreso sin haberse entregado al destinatario.
+// No afecta el estado de la venta (ya quedó "Completada con novedades" cuando el
+// paquete pasó a "Devuelto") — ver encomiendaService.registrarDevolucionPaquete.
+const ESTADOS_PAQUETE = ['Por entregar', 'En sede de destino', 'Entregado', 'Devuelto', 'Devuelto a base'];
 
 const ESTADO_ALIASES = {
   'por entregar': 'Por entregar',
@@ -17,6 +23,8 @@ const ESTADO_ALIASES = {
   'en sede': 'En sede de destino',
   'entregado': 'Entregado',
   'devuelto': 'Devuelto',
+  'devuelto a base': 'Devuelto a base',
+  'devuelto_a_base': 'Devuelto a base',
 };
 
 const normalizarEstadoPaquete = (estado) => {

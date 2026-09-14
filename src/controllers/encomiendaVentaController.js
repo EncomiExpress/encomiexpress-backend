@@ -56,7 +56,7 @@ exports.create = async (req, res, next) => {
 exports.update = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const encomienda = await encomiendaService.update(id, req.body);
+    const encomienda = await encomiendaService.update(id, req.body, contextoSede(req));
     res.json({ success: true, message: 'Encomienda actualizada exitosamente', data: encomienda });
   } catch (error) {
     next(error);
@@ -69,7 +69,7 @@ exports.toggleHabilitado = async (req, res, next) => {
     // pasoACancelada (ver encomiendaService.toggleHabilitado) ya no se anuncia acá —
     // mismo criterio que Rutas: el toast se queda corto, el aviso va antes de
     // confirmar, en ModalInhabilitarVenta.jsx.
-    const { encomienda } = await encomiendaService.toggleHabilitado(id);
+    const { encomienda } = await encomiendaService.toggleHabilitado(id, contextoSede(req));
     res.json({
       success: true,
       message: `Encomienda ${encomienda.habilitado ? 'habilitada' : 'inhabilitada'} exitosamente`,
@@ -83,7 +83,7 @@ exports.toggleHabilitado = async (req, res, next) => {
 exports.reactivar = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const encomienda = await encomiendaService.reactivar(id);
+    const encomienda = await encomiendaService.reactivar(id, contextoSede(req));
     res.json({ success: true, message: 'Venta reactivada exitosamente', data: encomienda });
   } catch (error) {
     next(error);

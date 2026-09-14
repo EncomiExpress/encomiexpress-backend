@@ -36,18 +36,11 @@ const Cliente = sequelize.define('Cliente', {
     type: DataTypes.STRING(255),
     allowNull: true
   },
-  // Municipio del remitente — mismo catálogo `destino` que usa Destinatario/Ruta.
-  // allowNull:true a nivel de columna por flexibilidad (mismo criterio que
-  // destinatario.id_destino); obligatorio en el flujo real vía clientesValidator.
-  // Hace falta para saber a qué municipio devolver un paquete si el destinatario
-  // pasa un mes sin recogerlo (ver LOGICA.md).
-  idDestino: {
-    type: DataTypes.INTEGER,
-    allowNull: true
-  },
   // Sede (operador_sede) que registró este cliente — NULL = registrado desde
-  // Medellín. Distinto de idDestino (municipio de devolución del remitente).
-  // Ver LOGICA.md, "Sedes remotas".
+  // Medellín. Antes existía además `idDestino` ("municipio de devolución del
+  // remitente", elegible a mano); se eliminó por redundante — con sedes remotas
+  // ese municipio siempre iba a ser el mismo que la sede que registra. Ver
+  // LOGICA.md, "Decisión — Municipio de Cliente ya no es editable".
   idSede: {
     type: DataTypes.INTEGER,
     allowNull: true

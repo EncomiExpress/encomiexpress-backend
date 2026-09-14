@@ -37,6 +37,14 @@ router.get('/sede/historial', authorize('distribuidor'), paqueteController.getHi
 router.patch('/sede', authorize('conductor'), upload.single('file'), paqueteController.dejarEnSede);
 
 /**
+ * GET /paquetes/retorno  (solo rol conductor)
+ * "Paquetes de retorno": solo devuelve algo cuando la ruta activa del
+ * conductor autenticado ahora mismo es un regreso "En Ruta". Declarada antes
+ * de las rutas con ":id" por la misma razón que "/sede". Ver getParaRetorno().
+ */
+router.get('/retorno', authorize('conductor'), paqueteController.getParaRetorno);
+
+/**
  * PATCH /paquetes/:id/evidencia
  * Subir foto de entrega (form-data file) — flujo del conductor.
  */
@@ -49,6 +57,15 @@ router.patch('/:id/evidencia', upload.single('file'), paqueteController.subirEvi
  * 'Entregado' | 'Devuelto' | 'Intento'. Ver registrarEntregaFinal().
  */
 router.patch('/:id/entrega-final', authorize('distribuidor'), upload.single('file'), paqueteController.registrarEntregaFinal);
+
+/**
+ * PATCH /paquetes/:id/devolucion  (conductor de la ruta de regreso, o admin)
+ * Confirma que un paquete "No entregado" volvió a Medellín en el convoy de
+ * regreso: Devuelto -> Devuelto a base. Ver registrarDevolucion() — la
+ * autorización dual (conductor vs. admin) se resuelve dentro del controller,
+ * igual que getHistorialEntrega. Parte B, plan-ventas-regreso-paquetes.md.
+ */
+router.patch('/:id/devolucion', paqueteController.registrarDevolucion);
 
 /**
  * GET /paquetes/:id/historial-entrega  (panel web -- módulo Ventas -- Y móvil

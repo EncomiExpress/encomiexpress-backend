@@ -56,7 +56,13 @@ const revisarRutasProgramadas = async () => {
     const info = rutasEstado.get(ruta.idRuta);
     if (!debeReintentar(ruta, info)) continue;
     try {
-      await rutaService.updateEstado(ruta.idRuta, 'En Ruta');
+      // { interno: true }: este job corre para CUALQUIER ruta Programada por
+      // fecha/hora, sea de un regreso de sede o no — no es un admin
+      // cambiando el estado a mano, así que no debe chocar con la
+      // exclusividad de operador_sede sobre su propio regreso (ver
+      // rutaService.updateEstado). El botón manual sigue siendo solo para
+      // arrancar antes de lo programado o reintentar si esto falla.
+      await rutaService.updateEstado(ruta.idRuta, 'En Ruta', { interno: true });
       console.log(`🚚 Ruta #${ruta.idRuta} ("${ruta.origen || 'sin origen'}") pasó automáticamente a "En Ruta"`);
       rutasEstado.delete(ruta.idRuta);
     } catch (error) {

@@ -91,6 +91,18 @@ const Paquete = sequelize.define('Paquete', {
   fechaUltimoIntento: {
     type: DataTypes.DATE,
     allowNull: true
+  },
+  // Conductor que confirmó "Llegó a Medellín" desde la app móvil (ruta de
+  // regreso). NULL cuando la devolución la registra el admin desde el panel web
+  // en vez de un conductor — ver encomiendaService.registrarDevolucionPaquete y
+  // plan-ventas-regreso-paquetes.md, Parte B.
+  idConductorDevolucion: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  fechaDevolucion: {
+    type: DataTypes.DATE,
+    allowNull: true
   }
 }, {
   tableName: 'paquete',

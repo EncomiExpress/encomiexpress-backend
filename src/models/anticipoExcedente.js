@@ -53,6 +53,13 @@ const AnticipoExcedente = sequelize.define('AnticipoExcedente', {
   fechaEntregaExcedente: {
     type: DataTypes.DATEONLY,
     allowNull: true
+  },
+  // Motivo obligatorio de "Cerrar sin haberse entregado" (2026-09-13) — solo se llena
+  // por esa vía puntual, cuando el admin declara que el conductor nunca recibió esta
+  // plata. Ver LOGICA.md, "Cerrar un anticipo que nunca se llegó a entregar".
+  motivoCierre: {
+    type: DataTypes.TEXT,
+    allowNull: true
   }
 }, {
   tableName: 'anticipo_excedente',

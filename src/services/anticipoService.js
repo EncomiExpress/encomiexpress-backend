@@ -263,7 +263,7 @@ const update = async (id, data) => {
     throw new AppError('Anticipo no encontrado', 404);
   }
 
-  if (['Excedente pendiente', 'Completado'].includes(anticipo.estado)) {
+  if (['Excedente pendiente', 'Completado', 'Cerrado sin entregar'].includes(anticipo.estado)) {
     throw new AppError(`No se puede editar un anticipo en estado "${anticipo.estado}".`, 400);
   }
 
@@ -350,6 +350,10 @@ const update = async (id, data) => {
   let autoEstado;
   let autoFechaLegalizacion;
   let newExcedente;
+  // A qué ruta apunta el auto-completado de más abajo -- ver ahí. Se resuelve
+  // acá (no en el momento de usarlo) porque `esIda`/`rutaDelAnticipo` viven
+  // dentro del bloque de abajo y quedan fuera de alcance después.
+  let idRutaParaAutoCompletar;
 
   if (valorGastado !== undefined) {
     // Candado: legalizar = subir valorGastado + soporte, y eso solo lo hace el
@@ -365,12 +369,43 @@ const update = async (id, data) => {
     // sí alcanzó a gastar hasta donde llegó. rutaService.updateEstado ya NO
     // fuerza el excedente al cancelar justamente para dejarle esta puerta
     // abierta (ver ahí, rama `estado === 'Cancelada'`).
-    const rutaDelAnticipo = await Ruta.findByPk(anticipo.idRuta, { attributes: ['idRuta', 'estado'] });
-    if (rutaDelAnticipo?.estado !== 'Cancelada') {
-      const { total, completadas } = await require('./rutaService').calcularSedesRuta(anticipo.idRuta);
+    //
+    // Anticipo ida+retorno (2026-09-13, ver LOGICA.md): el anticipo se sigue
+    // creando sobre la IDA únicamente, pero cubre el viaje completo — no basta
+    // con que la ida complete sus propias sedes, hay que esperar a que el
+    // regreso también termine de entregar. Si esta ruta YA es un regreso (caso
+    // raro: un anticipo creado directo sobre esa ruta), se queda con el
+    // chequeo de siempre sobre sí misma -- no existe "regreso del regreso"
+    // (mismo criterio que el guard `!esRegreso` de useRutaColumns.jsx).
+    const rutaDelAnticipo = await Ruta.findByPk(anticipo.idRuta, {
+      attributes: ['idRuta', 'estado', 'idRutaIda'],
+      include: [{ model: Ruta, as: 'rutaRegreso', attributes: ['idRuta', 'estado'] }],
+    });
+    const esIda = rutaDelAnticipo?.idRutaIda == null;
+    // El anticipo vive en la ida, pero lo que de verdad puede necesitar
+    // auto-completarse acá es el REGRESO (la ida normalmente ya está
+    // Completada desde antes de que el regreso siquiera arrancara) -- ver el
+    // uso más abajo, junto a `intentarAutoCompletar`.
+    idRutaParaAutoCompletar = esIda ? (rutaDelAnticipo.rutaRegreso?.idRuta ?? anticipo.idRuta) : anticipo.idRuta;
+    // Un regreso cancelado tampoco va a llegar nunca a "todas las sedes
+    // completas" -- mismo criterio que una ida cancelada, se salta el candado.
+    const rutaCancelada = esIda
+      ? (rutaDelAnticipo?.estado === 'Cancelada' || rutaDelAnticipo?.rutaRegreso?.estado === 'Cancelada')
+      : rutaDelAnticipo?.estado === 'Cancelada';
+    if (!rutaCancelada) {
+      if (esIda && !rutaDelAnticipo.rutaRegreso) {
+        throw new AppError(
+          'Aún no puedes legalizar el anticipo: cubre también el viaje de regreso, que todavía no se ha programado.',
+          409,
+          null,
+          'REGRESO_NO_PROGRAMADO'
+        );
+      }
+      const idRutaAValidar = esIda ? rutaDelAnticipo.rutaRegreso.idRuta : anticipo.idRuta;
+      const { total, completadas } = await require('./rutaService').calcularSedesRuta(idRutaAValidar);
       if (total > 0 && completadas < total) {
         throw new AppError(
-          `Aún no puedes legalizar el anticipo: faltan ${total - completadas} de ${total} sedes por completar. Deja todos los paquetes en las sedes de la ruta primero.`,
+          `Aún no puedes legalizar el anticipo: faltan ${total - completadas} de ${total} sedes por completar${esIda ? ' del regreso' : ''}. Deja todos los paquetes en las sedes de la ruta primero.`,
           409,
           null,
           'SEDES_INCOMPLETAS'
@@ -405,15 +440,27 @@ const update = async (id, data) => {
     fechaEntregaExcedente: cleanedFechaEntregaExcedente !== undefined ? cleanedFechaEntregaExcedente : anticipo.fechaEntregaExcedente
   });
 
-  // Llamada defensiva/best-effort: en la práctica casi siempre es un no-op, porque
-  // legalizar ya exige sedes completas (SEDES_INCOMPLETAS arriba) salvo que la ruta
-  // esté "Cancelada" — y en ambos casos la ruta normalmente ya se auto-completó
-  // antes (por dejarPaquetesEnSede/actualizarEstadoPaquete) o no aplica (Cancelada
-  // no es "En Ruta", intentarAutoCompletar sale de una). Se deja de todos modos por
-  // si acaso (ej. el otro disparador falló por una condición de carrera). require
-  // lazy para no atar el orden de carga.
+  // Corregido 2026-09-13 (la usuaria: un regreso que sale SIN NADA asignado
+  // nunca tiene ningún paquete que dispare dejarPaquetesEnSede/
+  // actualizarEstadoPaquete, así que jamás llega a auto-completarse por esa
+  // vía -- se queda "En Ruta" para siempre. En vez de completarlo apenas
+  // arranca (se descartó: no tiene sentido que una ruta se complete sola al
+  // segundo de salir, el vehículo todavía tiene que hacer el viaje de
+  // vuelta), el disparador correcto es que EL CONDUCTOR legalice el anticipo
+  // -- ese es el primer evento real que solo ocurre cuando de verdad ya
+  // volvió. Antes esta llamada usaba `anticipo.idRuta` (la IDA, donde vive el
+  // anticipo) en vez del REGRESO que de verdad puede seguir "En Ruta" -- la
+  // ida ya está Completada desde antes de que el regreso arrancara, así que
+  // apuntarle acá era casi siempre un no-op real, sin efecto sobre el
+  // problema real. `idRutaParaAutoCompletar` (calculado arriba) ya resuelve
+  // el id correcto. Sigue siendo best-effort/seguro para un regreso CON carga
+  // real: para ese caso dejarPaquetesEnSede ya lo completó antes de que la
+  // legalización llegara siquiera a ser posible (exige sedes completas), así
+  // que acá `intentarAutoCompletar` encuentra `estado !== 'En Ruta'` y no
+  // hace nada -- esto solo actúa de verdad cuando nada más lo hizo antes.
+  // require lazy para no atar el orden de carga. Ver LOGICA.md.
   if (autoEstado) {
-    await require('./rutaService').intentarAutoCompletar(anticipo.idRuta);
+    await require('./rutaService').intentarAutoCompletar(idRutaParaAutoCompletar || anticipo.idRuta);
   }
 
   return getAnticipoCompleto(id);
@@ -442,6 +489,20 @@ const entregarExcedente = async (id, { soporte }) => {
 };
 
 
+// Caso real distinto del "huérfano" (ver LOGICA.md, "Anticipos huérfanos al reasignar
+// conductor"): el admin registró un anticipo pensando en dárselo a un conductor, pero
+// al final no se lo dio, y para cuando se dio cuenta la ruta ya había arrancado (el
+// anticipo ya pasó a "En Legalización"). Nunca va a llegar a "Completado" -- eso
+// depende de que el conductor reporte valorGastado desde el móvil, algo absurdo de
+// pedirle si nunca recibió esa plata. Fusionado dentro de toggleHabilitado() (ver ahí)
+// en vez de ser una acción/botón aparte -- decisión de la usuaria (2026-09-13): un solo
+// botón ("Inhabilitar"), no dos. Solo aplica a Entregado/En Legalización -- "Excedente
+// pendiente" ya implica un valorGastado real reportado (sí hubo plata de por medio),
+// eso sigue bloqueado hasta resolverse por "Confirmar devolución/reposición".
+// Ver LOGICA.md, "Cerrar un anticipo que nunca se llegó a entregar".
+const ESTADOS_CERRABLES_SIN_ENTREGA = ['Entregado', 'En Legalización'];
+const MOTIVO_CIERRE_MAX_LENGTH = 500;
+
 // fileUrls: array de URLs recién subidas a Cloudinary — se agregan a las que
 // ya tenía el anticipo (nunca se pisan las anteriores).
 const updateSoporte = async (id, fileUrls) => {
@@ -456,7 +517,7 @@ const updateSoporte = async (id, fileUrls) => {
   return { soporte };
 };
 
-const toggleHabilitado = async (id) => {
+const toggleHabilitado = async (id, { motivo } = {}) => {
   const anticipo = await AnticipoExcedente.findByPk(id);
   if (!anticipo) throw new AppError('Anticipo no encontrado', 404);
   if (anticipo.habilitado === true) {
@@ -464,22 +525,51 @@ const toggleHabilitado = async (id) => {
     // reasignó a alguien más después de entregarle este anticipo) — nada del flujo
     // normal (legalizar desde el móvil, cerrar la ruta) va a llegar a tocarlo nunca, así
     // que se deja inhabilitar directo sin exigir "Completado". Decisión de la usuaria
-    // (2026-09-12): solo para este caso puntual — cualquier otro anticipo sigue
-    // exigiendo "Completado" (ver LOGICA.md, "Anticipos huérfanos al reasignar conductor").
+    // (2026-09-12): solo para este caso puntual (ver LOGICA.md, "Anticipos huérfanos al
+    // reasignar conductor").
     const parVigente = await RutaVehiculoConductor.findOne({
       where: { idRuta: anticipo.idRuta, idConductor: anticipo.idConductor, habilitado: true },
     });
-    if (anticipo.estado !== 'Completado' && parVigente) {
-      throw new AppError(
-        'No se puede inhabilitar un anticipo que aún no ha sido cerrado',
-        409,
-        [{
-          tipo: 'Estado del anticipo',
-          id: anticipo.idAnticipoExcedente,
-          descripcion: `El anticipo del ${anticipo.fechaEntrega || 'sin fecha'}, por $${anticipo.valorAnticipo}, está en estado "${anticipo.estado}" y no ha sido cerrado aún`
-        }],
-        'DEPENDENCY_CONFLICT'
-      );
+    const yaCerrado = ['Completado', 'Cerrado sin entregar'].includes(anticipo.estado);
+    if (!yaCerrado && parVigente) {
+      // No es huérfano y todavía no está cerrado -- "Cerrar sin entregar" (2026-09-13,
+      // ver LOGICA.md) vive fusionado en este mismo botón en vez de ser una acción
+      // aparte: si de verdad no hay plata real de por medio todavía (Entregado/En
+      // Legalización), inhabilitar exige declarar un motivo y el anticipo pasa a
+      // "Cerrado sin entregar" en el mismo golpe. "Excedente pendiente" ya implica un
+      // valorGastado real reportado -- sigue bloqueado, tiene que resolverse por
+      // "Confirmar devolución/reposición" primero, no por acá.
+      if (ESTADOS_CERRABLES_SIN_ENTREGA.includes(anticipo.estado)) {
+        const motivoLimpio = (motivo || '').trim();
+        if (!motivoLimpio) {
+          throw new AppError(
+            'Este anticipo no ha sido completado: para inhabilitarlo hace falta declarar que el conductor nunca recibió esta plata.',
+            409,
+            [{
+              tipo: 'Motivo requerido',
+              id: anticipo.idAnticipoExcedente,
+              descripcion: 'Inhabilitar este anticipo sin completarlo requiere un motivo'
+            }],
+            'MOTIVO_REQUERIDO'
+          );
+        }
+        if (motivoLimpio.length > MOTIVO_CIERRE_MAX_LENGTH) {
+          throw new AppError(`El motivo no puede superar los ${MOTIVO_CIERRE_MAX_LENGTH} caracteres.`, 400);
+        }
+        anticipo.estado = 'Cerrado sin entregar';
+        anticipo.motivoCierre = motivoLimpio;
+      } else {
+        throw new AppError(
+          'No se puede inhabilitar un anticipo que aún no ha sido cerrado',
+          409,
+          [{
+            tipo: 'Estado del anticipo',
+            id: anticipo.idAnticipoExcedente,
+            descripcion: `El anticipo del ${anticipo.fechaEntrega || 'sin fecha'}, por $${anticipo.valorAnticipo}, está en estado "${anticipo.estado}" y no ha sido cerrado aún`
+          }],
+          'DEPENDENCY_CONFLICT'
+        );
+      }
     }
   }
   anticipo.habilitado = !anticipo.habilitado;

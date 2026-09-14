@@ -46,27 +46,45 @@ exports.getById = async (req, res, next) => {
 
 exports.create = async (req, res) => {
   try {
-    const ruta = await rutaService.create(req.body);
+    const ruta = await rutaService.create(req.body, contextoSede(req));
     res.status(201).json({ success: true, message: 'Ruta creada exitosamente', data: ruta });
   } catch (error) {
     res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al crear ruta' });
   }
 };
 
+// Autorización dual (admin `actualizar_ruta` vs. operador_sede
+// `programar_regreso_sede`), mismo patrón que updateEstado — operador_sede
+// solo puede editar fecha/hora de su propio regreso, se revalida en el
+// servicio. Ver LOGICA.md, "Sedes remotas".
 exports.update = async (req, res) => {
   try {
     const { id } = req.params;
+    const permisos = req.usuario.rol?.permisos?.map((p) => p.nombre) || [];
+    const esAdmin = permisos.includes('actualizar_ruta');
+    const esOperadorSede = permisos.includes('programar_regreso_sede');
+    if (!esAdmin && !esOperadorSede) {
+      return res.status(403).json({ success: false, message: 'Acceso denegado' });
+    }
     // ventasSincronizadas/reactivada ya no se anuncian en el mensaje de éxito (decisión
     // de la usuaria: el toast quedaba muy largo) — la sincronización de fechas ya se
     // avisa de antemano en el formulario (PasoHorario.jsx) y la reactivación se ve
     // directo en la columna Estado; no hace falta repetirlo en el toast.
-    const { ruta } = await rutaService.update(id, req.body);
+    const { ruta } = await rutaService.update(id, req.body, esAdmin ? {} : { rol: 'operador_sede', idSede: req.sede?.idDestino });
     res.json({ success: true, message: 'Ruta actualizada exitosamente.', data: ruta });
   } catch (error) {
     res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al actualizar ruta' });
   }
 };
 
+// Autorización dual, resuelta acá en vez de con un solo authorizePermission en
+// la ruta (mismo patrón que paqueteController.registrarDevolucion):
+//   - admin (permiso actualizar_ruta): cualquier ruta, cualquier transición.
+//   - operador_sede (permiso programar_regreso_sede): solo "poner en ruta"
+//     (Programada -> En Ruta) el regreso de SU propia sede — es quien de
+//     verdad ve salir el convoy; arrancar la ida o completar/cancelar
+//     cualquier ruta sigue siendo de Medellín. Se valida en el servicio
+//     (rutaService.updateEstado) con el idSede de la sesión.
 exports.updateEstado = async (req, res) => {
   try {
     const { id } = req.params;
@@ -74,7 +92,13 @@ exports.updateEstado = async (req, res) => {
     if (!estado) {
       return res.status(400).json({ success: false, message: 'El campo "estado" es requerido' });
     }
-    const ruta = await rutaService.updateEstado(id, estado);
+    const permisos = req.usuario.rol?.permisos?.map((p) => p.nombre) || [];
+    const esAdmin = permisos.includes('actualizar_ruta');
+    const esOperadorSede = permisos.includes('programar_regreso_sede');
+    if (!esAdmin && !esOperadorSede) {
+      return res.status(403).json({ success: false, message: 'Acceso denegado' });
+    }
+    const ruta = await rutaService.updateEstado(id, estado, esAdmin ? {} : { rol: 'operador_sede', idSede: req.sede?.idDestino });
     res.json({ success: true, message: `Estado actualizado a "${ruta.estado}"`, data: ruta });
   } catch (error) {
     res.status(error.statusCode || 500).json({
@@ -86,13 +110,21 @@ exports.updateEstado = async (req, res) => {
   }
 };
 
+// Autorización dual (admin `inhabilitar_ruta` vs. operador_sede
+// `programar_regreso_sede`), mismo patrón que update()/updateEstado.
 exports.toggleHabilitado = async (req, res) => {
   try {
     const { id } = req.params;
+    const permisos = req.usuario.rol?.permisos?.map((p) => p.nombre) || [];
+    const esAdmin = permisos.includes('inhabilitar_ruta');
+    const esOperadorSede = permisos.includes('programar_regreso_sede');
+    if (!esAdmin && !esOperadorSede) {
+      return res.status(403).json({ success: false, message: 'Acceso denegado' });
+    }
     // seCancelaPorFechaVencida ya no se anuncia en el mensaje de éxito (decisión de la
     // usuaria: el toast quedaba muy largo) — ese aviso ahora se muestra de antemano en
     // el modal de confirmar (ModalInhabilitarRuta.jsx), antes de confirmar la acción.
-    const { ruta } = await rutaService.toggleHabilitado(id);
+    const { ruta } = await rutaService.toggleHabilitado(id, esAdmin ? {} : { rol: 'operador_sede', idSede: req.sede?.idDestino });
     res.json({ success: true, message: `Ruta ${ruta.habilitado ? 'habilitada' : 'inhabilitada'} exitosamente`, data: ruta });
   } catch (error) {
     res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Error al cambiar estado de la ruta' });
@@ -108,12 +140,14 @@ exports.getAniosDisponibles = async (req, res, next) => {
 };
 
 // WS4 "Sedes remotas" — el operador_sede dispara el regreso de su sede con una
-// sola acción (solo fecha/hora de salida). Ver LOGICA.md, "Sedes remotas".
+// sola acción (fecha/hora de salida + fecha/hora estimada de llegada — esta
+// última importa para el choque de vehículo/conductor entre rutas, ver
+// rutaService.crearRegresoDesdeSede). Ver LOGICA.md, "Sedes remotas".
 exports.crearRegresoDesdeSede = async (req, res, next) => {
   try {
     const { idRutaIda } = req.params;
-    const { fechaSalida, horaSalida } = req.body;
-    const regreso = await rutaService.crearRegresoDesdeSede(idRutaIda, { fechaSalida, horaSalida }, contextoSede(req));
+    const { fechaSalida, horaSalida, fechaLlegadaEstimada, horaLlegadaEstimada } = req.body;
+    const regreso = await rutaService.crearRegresoDesdeSede(idRutaIda, { fechaSalida, horaSalida, fechaLlegadaEstimada, horaLlegadaEstimada }, contextoSede(req));
     res.status(201).json({ success: true, message: 'Regreso programado exitosamente', data: regreso });
   } catch (error) {
     next(error);

@@ -75,7 +75,8 @@ exports.updateSoporte = async (req, res, next) => {
 exports.toggleHabilitado = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const anticipo = await anticipoService.toggleHabilitado(id);
+    const { motivo } = req.body;
+    const anticipo = await anticipoService.toggleHabilitado(id, { motivo });
     res.json({
       success: true,
       message: `Anticipo ${anticipo.habilitado ? 'habilitado' : 'inhabilitado'} exitosamente`,

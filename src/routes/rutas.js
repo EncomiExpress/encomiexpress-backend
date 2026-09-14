@@ -147,7 +147,10 @@ router.post('/', authorizePermission('registrar_ruta'), createValidation, valida
  *       200:
  *         description: Ruta actualizada
  */
-router.put('/:id', authorizePermission('actualizar_ruta'), updateValidation, validate, rutaController.update);
+// Autorización dual (admin vs. operador_sede) resuelta dentro del controller,
+// mismo motivo que /:id/estado — operador_sede solo edita fecha/hora de su
+// propio regreso. Ver LOGICA.md, "Sedes remotas".
+router.put('/:id', updateValidation, validate, rutaController.update);
 
 /**
  * @swagger
@@ -175,7 +178,11 @@ router.put('/:id', authorizePermission('actualizar_ruta'), updateValidation, val
  *       200:
  *         description: Estado actualizado
  */
-router.patch('/:id/estado', authorizePermission('actualizar_ruta'), rutaController.updateEstado);
+// Autorización dual (admin vs. operador_sede) resuelta dentro del controller,
+// mismo patrón que paqueteController.registrarDevolucion — operador_sede solo
+// puede "poner en ruta" (Programada -> En Ruta) el regreso de SU propia sede,
+// nunca otra transición ni otra ruta. Ver LOGICA.md, "Sedes remotas".
+router.patch('/:id/estado', rutaController.updateEstado);
 
 /**
  * @swagger
@@ -219,6 +226,8 @@ router.post('/:idRutaIda/regreso-sede', authorizePermission('programar_regreso_s
  *       200:
  *         description: Estado cambiado correctamente
  */
-router.patch('/:id/toggle-habilitado', authorizePermission('inhabilitar_ruta'), rutaController.toggleHabilitado);
+// Autorización dual (admin vs. operador_sede) resuelta dentro del controller —
+// operador_sede solo inhabilita/habilita su propio regreso.
+router.patch('/:id/toggle-habilitado', rutaController.toggleHabilitado);
 
 module.exports = router;

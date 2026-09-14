@@ -83,12 +83,11 @@ CREATE TABLE cliente (
   telefono              VARCHAR(20),
   email                 VARCHAR(150),
   direccion             VARCHAR(255),
-  -- Municipio del remitente — para saber a dónde devolver un paquete si el
-  -- destinatario nunca lo recoge (ver LOGICA.md).
-  id_destino            INTEGER,
   -- Sede (operador_sede) que registró este cliente — NULL = registrado desde
-  -- Medellín. Semántica de "quién lo registró", distinta de id_destino (municipio
-  -- de devolución del remitente). Ver LOGICA.md, "Sedes remotas".
+  -- Medellín. Antes existía además id_destino ("municipio de devolución del
+  -- remitente", elegible a mano); se eliminó por redundante — con sedes
+  -- remotas ese municipio siempre iba a ser el mismo que esta sede. Ver
+  -- LOGICA.md, "Decisión — Municipio de Cliente ya no es editable".
   id_sede               INTEGER,
   habilitado            BOOLEAN NOT NULL DEFAULT true
 );
@@ -201,7 +200,8 @@ CREATE TABLE anticipo_excedente (
   fecha_entrega           DATE,
   fecha_legalizacion      DATE,
   fecha_entrega_excedente DATE,
-  habilitado              BOOLEAN NOT NULL DEFAULT true
+  habilitado              BOOLEAN NOT NULL DEFAULT true,
+  motivo_cierre           TEXT
 );
 
 CREATE TABLE encomienda_venta (
@@ -262,6 +262,12 @@ CREATE TABLE paquete (
   ,intentos_entrega           INTEGER NOT NULL DEFAULT 0
   ,fecha_ultimo_intento       TIMESTAMPTZ
   ,estado_pago                VARCHAR(20) NOT NULL DEFAULT 'Pendiente'
+  -- Devuelto -> Devuelto a base (Parte B, plan-ventas-regreso-paquetes.md): el
+  -- paquete volvió a Medellín en el convoy de regreso sin entregarse al
+  -- destinatario. id_conductor_devolucion NULL cuando lo marca el admin desde
+  -- el panel web en vez de un conductor desde la app.
+  ,id_conductor_devolucion    INTEGER
+  ,fecha_devolucion           TIMESTAMPTZ
 );
 
 -- Historial completo de la entrega final de un paquete (ver LOGICA.md, "Historial
@@ -300,12 +306,13 @@ COMMENT ON COLUMN permiso.nombre IS 'ej: listar_usuario, registrar_cliente, actu
 COMMENT ON COLUMN usuario.password IS 'hash bcrypt';
 COMMENT ON COLUMN vehiculo.placa IS 'Colombia: 6 chars';
 COMMENT ON COLUMN anticipo_excedente.soporte IS 'Array JSONB de URLs de Cloudinary — uno o varios comprobantes';
+COMMENT ON COLUMN anticipo_excedente.motivo_cierre IS 'Solo se llena vía "Cerrar sin haberse entregado" (admin) — motivo obligatorio de por qué se cerró un anticipo que el conductor nunca recibió, sin pasar por Completado';
 COMMENT ON COLUMN ruta.estado IS 'Programada | En Ruta | Completada | Cancelada';
 COMMENT ON COLUMN ruta.origen IS 'Ciudad de origen de la ruta (texto libre, dato base: Medellín)';
 COMMENT ON COLUMN encomienda_venta.estado IS 'Programada | En Ruta | Entregada | Completada con novedades | Cancelada';
 COMMENT ON COLUMN encomienda_venta.modalidad_recaudo IS 'Pago Inmediato | Contraentrega';
 COMMENT ON COLUMN encomienda_venta.estado_pago IS 'Rollup derivado de paquete.estado_pago (paqueteStateUtils.determinarEstadoPago), nadie lo escribe a mano: Pendiente (genérico, en curso) | Pagada (todos pagados) | Pago parcial (mixto) | Sin pago (ninguno, todos cerrados sin cobro)';
-COMMENT ON COLUMN paquete.estado IS 'Por entregar | En sede de destino | Entregado | Devuelto';
+COMMENT ON COLUMN paquete.estado IS 'Por entregar | En sede de destino | Entregado | Devuelto | Devuelto a base (Devuelto -> Devuelto a base: paquete no entregado que volvió a Medellín en el convoy de regreso)';
 COMMENT ON COLUMN destinatario.id_destino IS 'Municipio al que se envía el paquete (mismo catálogo que ruta.id_destino) — decisión comercial capturada al vender, distinta de qué Ruta administrativa termine asignándose. Nullable a nivel de columna por flexibilidad (igual que ruta.fecha_llegada_estimada); obligatorio en el flujo real vía encomiendasValidator.';
 COMMENT ON COLUMN paquete.tipo_carga IS 'hierro | normal — determina qué tarifa por kg (tarifa_por_kg_hierro / tarifa_por_kg_normal) aplica en el cálculo de total';
 COMMENT ON COLUMN conductor.id_destino_actual IS 'Municipio donde quedó el conductor tras completar/cancelar una ruta que no volvió a base (NULL = en base / Medellín) — bloquea asignarlo a una ruta nueva desde Medellín hasta programar su regreso';
@@ -343,7 +350,6 @@ CREATE UNIQUE INDEX uq_parada_ruta_destino ON ruta_parada (id_ruta, id_destino);
 CREATE UNIQUE INDEX uq_parada_ruta_orden ON ruta_parada (id_ruta, orden);
 ALTER TABLE anticipo_excedente ADD FOREIGN KEY (id_conductor) REFERENCES conductor (id_conductor);
 ALTER TABLE anticipo_excedente ADD FOREIGN KEY (id_ruta) REFERENCES ruta (id_ruta);
-ALTER TABLE cliente ADD FOREIGN KEY (id_destino) REFERENCES destino (id_destino);
 ALTER TABLE encomienda_venta ADD FOREIGN KEY (id_cliente) REFERENCES cliente (id_cliente);
 ALTER TABLE encomienda_venta ADD FOREIGN KEY (id_ruta) REFERENCES ruta (id_ruta);
 ALTER TABLE destinatario ADD FOREIGN KEY (id_encomienda_venta) REFERENCES encomienda_venta (id_encomienda_venta);
@@ -355,6 +361,9 @@ ALTER TABLE paquete ADD FOREIGN KEY (id_ruta_vehiculo_conductor) REFERENCES ruta
 ALTER TABLE conductor ADD FOREIGN KEY (id_destino_actual) REFERENCES destino (id_destino);
 ALTER TABLE vehiculo  ADD FOREIGN KEY (id_destino_actual) REFERENCES destino (id_destino);
 ALTER TABLE paquete   ADD FOREIGN KEY (id_usuario_entrega) REFERENCES usuario (id_usuario);
+-- Conductor que confirmó "Llegó a Medellín" en una ruta de regreso (Parte B,
+-- plan-ventas-regreso-paquetes.md) — NULL si lo marcó el admin desde el panel web.
+ALTER TABLE paquete   ADD FOREIGN KEY (id_conductor_devolucion) REFERENCES conductor (id_conductor);
 ALTER TABLE paquete_entrega_final ADD FOREIGN KEY (id_paquete) REFERENCES paquete (id_paquete);
 ALTER TABLE paquete_entrega_final ADD FOREIGN KEY (id_usuario_distribuidor) REFERENCES usuario (id_usuario);
 CREATE INDEX ix_paquete_entrega_final_paquete ON paquete_entrega_final (id_paquete);
@@ -465,15 +474,28 @@ SELECT r.id_rol, p.id_permiso
 FROM rol r, permiso p
 WHERE r.codigo IN ('conductor', 'distribuidor') AND p.nombre = 'acceder_app_movil';
 
--- 'operador_sede' (4): Ventas/Rutas de solo lectura + la acción de regreso +
--- Clientes completo (acotado a los suyos, ver clienteService/rutaService). Sin
--- acceder_app_movil (es panel web) y sin actualizar/inhabilitar de Venta/Ruta
--- ni registrar_ruta — ver LOGICA.md, "Sedes remotas".
+-- 'operador_sede' (4): Ventas/Clientes con CRUD completo (acotado a lo suyo,
+-- ver encomiendaService/clienteService) + Rutas de solo lectura salvo la
+-- acción de regreso. Sin acceder_app_movil (es panel web) y sin
+-- actualizar/inhabilitar de Ruta ni registrar_ruta — ver LOGICA.md, "Sedes
+-- remotas". `actualizar_venta`/`inhabilitar_venta` (agregados 2026-09-12): no
+-- hay razón para que una sede no pueda editar/inhabilitar SU PROPIA venta,
+-- igual que ya puede con sus Clientes — encomiendaService.update()/
+-- toggleHabilitado()/reactivar() ya validan `encomienda.idSede === idSede`
+-- (403 si no) y update() ya deja reasignar la ruta a OTRO regreso de la misma
+-- sede cuando de verdad cambia (mismo criterio que create()). A propósito SIN
+-- `listar_destino`: ese permiso también gatea el ítem de menú "Destinos"
+-- (`navSections.js`, gestión del catálogo nacional completo con tarifas) —
+-- dárselo se lo expondría entero, muy por fuera del panel recortado. El
+-- selector "Destino" del wizard de Ventas no lo necesita: para operador_sede
+-- se arma en el frontend a partir de los `destino`/`paradas` que YA vienen
+-- anidados en sus rutas de regreso (`listar_ruta`, que sí tiene) — ver
+-- `destinosDesdeSede` en `ventaValidation.js`.
 INSERT INTO rol_permiso (id_rol, id_permiso)
 SELECT r.id_rol, p.id_permiso
 FROM rol r, permiso p
 WHERE r.codigo = 'operador_sede' AND p.nombre IN (
-  'listar_venta', 'registrar_venta', 'consultar_venta',
+  'listar_venta', 'registrar_venta', 'consultar_venta', 'actualizar_venta', 'inhabilitar_venta',
   'listar_ruta', 'consultar_ruta', 'programar_regreso_sede',
   'listar_cliente', 'registrar_cliente', 'consultar_cliente',
   'actualizar_cliente', 'inhabilitar_cliente'

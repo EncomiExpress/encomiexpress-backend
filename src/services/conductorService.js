@@ -377,12 +377,29 @@ const getMisAnticipos = async (idUsuario, rolNombre) => {
 
       // Avance de sedes de la ruta — el móvil lo usa para deshabilitar el botón
       // "legalizar" hasta que el conductor haya dejado todos los paquetes (mismo
-      // candado que aplica anticipoService.update). Solo tiene sentido con la
-      // ruta en curso. require lazy para evitar el ciclo de módulos.
+      // candado que aplica anticipoService.update). require lazy para evitar el
+      // ciclo de módulos.
       if (anticipo.ruta.estado === 'En Ruta') {
         const { total, completadas } = await require('./rutaService').calcularSedesRuta(anticipo.idRuta);
         anticipo.ruta.dataValues.sedesTotales = total;
         anticipo.ruta.dataValues.sedesCompletadas = completadas;
+      } else if (anticipo.ruta.estado === 'Completada' && anticipo.ruta.idRutaIda == null) {
+        // Anticipo ida+retorno (2026-09-13, ver LOGICA.md): con la ida ya
+        // completada, el candado real (anticipoService.update) pasa a exigir
+        // que el REGRESO también termine de entregar -- se replica el mismo
+        // chequeo acá para que el móvil pueda avisarle al conductor antes de
+        // que intente legalizar y el backend se lo rechace. Un regreso
+        // Cancelado no bloquea (mismo criterio que anticipoService.update, se
+        // salta el candado igual que con una ida Cancelada).
+        const rutaRegreso = await Ruta.findOne({ where: { idRutaIda: anticipo.idRuta }, attributes: ['idRuta', 'estado'] });
+        if (!rutaRegreso) {
+          anticipo.ruta.dataValues.esperandoRegreso = true;
+        } else if (rutaRegreso.estado !== 'Cancelada') {
+          const { total, completadas } = await require('./rutaService').calcularSedesRuta(rutaRegreso.idRuta);
+          anticipo.ruta.dataValues.sedesTotales = total;
+          anticipo.ruta.dataValues.sedesCompletadas = completadas;
+          anticipo.ruta.dataValues.sedesDelRegreso = true;
+        }
       }
     }
   }
