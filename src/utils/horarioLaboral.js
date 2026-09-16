@@ -24,6 +24,12 @@ const DIAS_MARGEN_ENTRE_RUTAS = 1;
 // sentido dejar programar una salida o llegada con meses/años de anticipación.
 const MAX_DIAS_ANTICIPACION = 90;
 
+// Descanso mínimo del conductor entre la hora en que llega de la ida y la hora en
+// que puede salir en el regreso (mismo vehículo/conductor, mismo día casi siempre)
+// -- sin esto, nada impedía programar el regreso minutos después de la llegada.
+// DEBE coincidir con encomiexpress-frontend/src/shared/utils/horarioLaboral.js
+const DESCANSO_MINIMO_REGRESO_MINUTOS = 60;
+
 const parseFechaLocal = (iso) => {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(y, m - 1, d);
@@ -41,4 +47,4 @@ const horaDentroDeRango = (iso, horaStr) => {
   return hora >= rango.min && hora <= rango.max;
 };
 
-module.exports = { HORARIO_LABORAL, MIN_DIAS_SALIDA_LLEGADA, DIAS_MARGEN_ENTRE_RUTAS, MAX_DIAS_ANTICIPACION, getRangoHorario, esDomingo, horaDentroDeRango };
+module.exports = { HORARIO_LABORAL, MIN_DIAS_SALIDA_LLEGADA, DIAS_MARGEN_ENTRE_RUTAS, MAX_DIAS_ANTICIPACION, DESCANSO_MINIMO_REGRESO_MINUTOS, getRangoHorario, esDomingo, horaDentroDeRango };

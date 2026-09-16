@@ -6,8 +6,8 @@ exports.getAll = async (req, res, next) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const sortBy = req.query.sortBy;
-    const { idConductor, idRuta, estado, habilitado, anio, mes, q } = req.query;
-    const result = await anticipoService.getAll({ idConductor, idRuta, estado, habilitado, anio, mes, q, page, limit, sortBy });
+    const { idConductor, idSalida, estado, habilitado, anio, mes, q } = req.query;
+    const result = await anticipoService.getAll({ idConductor, idSalida, estado, habilitado, anio, mes, q, page, limit, sortBy });
     res.json({ success: true, data: result.data, total: result.total });
   } catch (error) {
     next(error);
@@ -26,8 +26,8 @@ exports.getById = async (req, res, next) => {
 
 exports.create = async (req, res, next) => {
   try {
-    const { idRuta, idRutaVehiculoConductor, valorAnticipo, soporte, fechaEntrega } = req.body;
-    const anticipo = await anticipoService.create({ idRuta, idRutaVehiculoConductor, valorAnticipo, soporte, fechaEntrega });
+    const { idSalida, idSalidaVehiculoConductor, valorAnticipo, soporte, fechaEntrega } = req.body;
+    const anticipo = await anticipoService.create({ idSalida, idSalidaVehiculoConductor, valorAnticipo, soporte, fechaEntrega });
     res.status(201).json({ success: true, message: 'Anticipo creado exitosamente', data: anticipo });
   } catch (error) {
     next(error);

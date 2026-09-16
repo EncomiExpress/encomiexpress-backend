@@ -1,7 +1,31 @@
-const { Vehiculo, PropietarioVehiculo, Destino } = require('../models');
+const { Vehiculo, PropietarioVehiculo, Destino, SalidaVehiculoConductor, SalidaProgramada } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { verificarDependenciasVehiculo } = require('../middlewares/validateDependencies');
+
+// Todos los idVehiculo "ocupados en un ciclo activo" ahora mismo -- ver
+// salidaProgramadaService.estaOcupadoEnCicloActivo, mismo criterio pero calculado en
+// una sola pasada para toda la tabla en vez de por id (evita N+1 al filtrar una lista
+// completa). No se importa salidaProgramadaService acá directo para no arriesgar un
+// ciclo de módulos -- es la misma consulta, solo que sin filtro por id.
+const getIdsVehiculosOcupados = async () => {
+  const enCurso = await SalidaVehiculoConductor.findAll({
+    where: { habilitado: true },
+    include: [{ model: SalidaProgramada, as: 'salida', required: true, where: { estado: { [Op.in]: ['Programada', 'En Ruta'] } }, attributes: [] }],
+    attributes: ['idVehiculo'],
+  });
+  const idaConRegresoAbierto = await SalidaVehiculoConductor.findAll({
+    where: { habilitado: true },
+    include: [{
+      model: SalidaProgramada, as: 'salida', required: true,
+      where: { estado: 'Completada', idSalidaIda: null },
+      include: [{ model: SalidaProgramada, as: 'salidaRegreso', required: true, where: { estado: { [Op.in]: ['Programada', 'En Ruta'] } }, attributes: [] }],
+      attributes: [],
+    }],
+    attributes: ['idVehiculo'],
+  });
+  return new Set([...enCurso, ...idaConRegresoAbierto].map((p) => p.idVehiculo));
+};
 
 // Debe coincidir con capitalizarPrimeraLetra en shared/utils/formatters.js — se aplica
 // también acá (no solo en el frontend) para que quede igual sin importar si el dato
@@ -23,12 +47,21 @@ const buildOrder = (sortBy) => {
   return [[field, direction], ['idVehiculo', direction]];
 };
 
-const getAll = async ({ estado, tipo, habilitado, q, idPropietario, page = 1, limit = 10, sortBy } = {}) => {
+const getAll = async ({ estado, tipo, habilitado, q, idPropietario, disponibles, page = 1, limit = 10, sortBy } = {}) => {
   const where = {};
   if (estado) where.estado = estado;
   if (tipo) where.tipo = tipo;
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
   if (idPropietario) where.idPropietario = parseInt(idPropietario);
+  // `?disponibles=true` (Fase 3, decisión de diseño) -- ver getIdsVehiculosOcupados.
+  if (disponibles === 'true' || disponibles === true) {
+    const idsOcupados = await getIdsVehiculosOcupados();
+    if (idsOcupados.size > 0) {
+      where.idVehiculo = where.idVehiculo
+        ? { [Op.and]: [where.idVehiculo, { [Op.notIn]: [...idsOcupados] }] }
+        : { [Op.notIn]: [...idsOcupados] };
+    }
+  }
   if (q) {
     const trimmed = q.trim();
     const query = `%${trimmed}%`;

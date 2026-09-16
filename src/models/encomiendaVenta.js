@@ -11,7 +11,7 @@ const EncomiendaVenta = sequelize.define('EncomiendaVenta', {
     type: DataTypes.INTEGER,
     allowNull: false
   },
-  idRuta: {
+  idSalida: {
     type: DataTypes.INTEGER,
     allowNull: false
   },

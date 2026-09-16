@@ -1,4 +1,4 @@
-const { Conductor, Usuario, AnticipoExcedente, Ruta, RutaVehiculoConductor, Vehiculo, Destino } = require('../models');
+const { Conductor, Usuario, AnticipoExcedente, SalidaProgramada, SalidaVehiculoConductor, Ruta, Vehiculo, Destino } = require('../models');
 const { Op } = require('sequelize');
 const bcrypt = require('bcryptjs');
 const sequelize = require('../config/database');
@@ -21,7 +21,29 @@ const buildOrder = (sortBy) => {
   return [[resolvedField, direction], ['idConductor', direction]];
 };
 
-const getAll = async ({ estado, habilitado, q, page = 1, limit = 10, sortBy } = {}) => {
+// Todos los idConductor "ocupados en un ciclo activo" ahora mismo -- ver
+// salidaProgramadaService.estaOcupadoEnCicloActivo, mismo criterio pero calculado en
+// una sola pasada para toda la tabla en vez de por id.
+const getIdsConductoresOcupados = async () => {
+  const enCurso = await SalidaVehiculoConductor.findAll({
+    where: { habilitado: true },
+    include: [{ model: SalidaProgramada, as: 'salida', required: true, where: { estado: { [Op.in]: ['Programada', 'En Ruta'] } }, attributes: [] }],
+    attributes: ['idConductor'],
+  });
+  const idaConRegresoAbierto = await SalidaVehiculoConductor.findAll({
+    where: { habilitado: true },
+    include: [{
+      model: SalidaProgramada, as: 'salida', required: true,
+      where: { estado: 'Completada', idSalidaIda: null },
+      include: [{ model: SalidaProgramada, as: 'salidaRegreso', required: true, where: { estado: { [Op.in]: ['Programada', 'En Ruta'] } }, attributes: [] }],
+      attributes: [],
+    }],
+    attributes: ['idConductor'],
+  });
+  return new Set([...enCurso, ...idaConRegresoAbierto].map((p) => p.idConductor));
+};
+
+const getAll = async ({ estado, habilitado, q, disponibles, page = 1, limit = 10, sortBy } = {}) => {
   const where = {};
   if (estado) where.estado = estado;
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
@@ -45,6 +67,21 @@ const getAll = async ({ estado, habilitado, q, page = 1, limit = 10, sortBy } = 
       conditions.push({ [Op.and]: [{ '$usuario.apellido$': { [Op.iLike]: primero } }, { '$usuario.nombre$': { [Op.iLike]: resto } }] });
     }
     where[Op.or] = conditions;
+  }
+
+  // `?disponibles=true` (Fase 3, decisión de diseño): filtro opcional para que las
+  // listas de asignación del frontend (selector de conductor al crear/editar una
+  // salida) puedan excluir a quien ya está "ocupado en un ciclo activo" -- mismo
+  // criterio que salidaProgramadaService.estaOcupadoEnCicloActivo, pero calculado en
+  // batch acá (esa función solo resuelve un conductor/vehículo a la vez) para no
+  // hacer N+1 consultas contra una lista completa.
+  if (disponibles === 'true' || disponibles === true) {
+    const idsOcupados = await getIdsConductoresOcupados();
+    if (idsOcupados.size > 0) {
+      where.idConductor = where.idConductor
+        ? { [Op.and]: [where.idConductor, { [Op.notIn]: [...idsOcupados] }] }
+        : { [Op.notIn]: [...idsOcupados] };
+    }
   }
 
   const offset = (page - 1) * limit;
@@ -222,7 +259,7 @@ const getAnticipos = async (id) => {
 
   const anticipos = await AnticipoExcedente.findAll({
     where: { idConductor: id },
-    include: [{ model: Ruta, as: 'ruta' }]
+    include: [{ model: SalidaProgramada, as: 'salida', include: [{ model: Ruta, as: 'ruta' }] }]
   });
 
   return anticipos;
@@ -278,10 +315,10 @@ const getMiPerfil = async (idUsuario, rolNombre) => {
   // que se muestra es el del par vehículo+conductor de la ruta que el conductor tiene
   // "En Ruta" en este momento, si hay una (una ruta puede repartirse entre varios
   // vehículos; este es específicamente el que le tocó a este conductor).
-  const par = await RutaVehiculoConductor.findOne({
+  const par = await SalidaVehiculoConductor.findOne({
     where: { idConductor: conductor.idConductor, habilitado: true },
     include: [
-      { model: Ruta, as: 'ruta', where: { estado: 'En Ruta' }, attributes: [], required: true },
+      { model: SalidaProgramada, as: 'salida', where: { estado: 'En Ruta' }, attributes: [], required: true },
       { model: Vehiculo, as: 'vehiculo', attributes: ['idVehiculo', 'placa', 'marca', 'modelo', 'color', 'tipo', 'capacidad'] },
     ],
   });
@@ -356,34 +393,34 @@ const getMisAnticipos = async (idUsuario, rolNombre) => {
   const anticipos = await AnticipoExcedente.findAll({
     where: { idConductor: conductor.idConductor },
     include: [{
-      model: Ruta,
-      as: 'ruta',
-      include: [{ model: Destino, as: 'destino' }]
+      model: SalidaProgramada,
+      as: 'salida',
+      include: [{ model: Ruta, as: 'ruta', include: [{ model: Destino, as: 'destino' }] }]
     }],
     order: [['idAnticipoExcedente', 'DESC']]
   });
 
   // El vehículo de "mi" anticipo es el que le tocó a este conductor específicamente
-  // en esa ruta (una ruta puede repartirse entre varios vehículos) — ya no hay una
-  // asociación directa Ruta→Vehiculo, así que se resuelve aparte por cada anticipo,
-  // preservando la forma ruta.vehiculo que ya espera la app móvil.
+  // en esa salida (una salida puede repartirse entre varios vehículos) — ya no hay
+  // una asociación directa SalidaProgramada→Vehiculo, así que se resuelve aparte por
+  // cada anticipo, preservando la forma salida.vehiculo que ya espera la app móvil.
   for (const anticipo of anticipos) {
-    if (anticipo.ruta) {
-      const par = await RutaVehiculoConductor.findOne({
-        where: { idRuta: anticipo.idRuta, idConductor: conductor.idConductor, habilitado: true },
+    if (anticipo.salida) {
+      const par = await SalidaVehiculoConductor.findOne({
+        where: { idSalida: anticipo.idSalida, idConductor: conductor.idConductor, habilitado: true },
         include: [{ model: Vehiculo, as: 'vehiculo' }],
       });
-      anticipo.ruta.dataValues.vehiculo = par?.vehiculo || null;
+      anticipo.salida.dataValues.vehiculo = par?.vehiculo || null;
 
       // Avance de sedes de la ruta — el móvil lo usa para deshabilitar el botón
       // "legalizar" hasta que el conductor haya dejado todos los paquetes (mismo
       // candado que aplica anticipoService.update). require lazy para evitar el
       // ciclo de módulos.
-      if (anticipo.ruta.estado === 'En Ruta') {
-        const { total, completadas } = await require('./rutaService').calcularSedesRuta(anticipo.idRuta);
-        anticipo.ruta.dataValues.sedesTotales = total;
-        anticipo.ruta.dataValues.sedesCompletadas = completadas;
-      } else if (anticipo.ruta.estado === 'Completada' && anticipo.ruta.idRutaIda == null) {
+      if (anticipo.salida.estado === 'En Ruta') {
+        const { total, completadas } = await require('./salidaProgramadaService').calcularSedesRuta(anticipo.idSalida);
+        anticipo.salida.dataValues.sedesTotales = total;
+        anticipo.salida.dataValues.sedesCompletadas = completadas;
+      } else if (anticipo.salida.estado === 'Completada' && anticipo.salida.idSalidaIda == null) {
         // Anticipo ida+retorno (2026-09-13, ver LOGICA.md): con la ida ya
         // completada, el candado real (anticipoService.update) pasa a exigir
         // que el REGRESO también termine de entregar -- se replica el mismo
@@ -391,14 +428,14 @@ const getMisAnticipos = async (idUsuario, rolNombre) => {
         // que intente legalizar y el backend se lo rechace. Un regreso
         // Cancelado no bloquea (mismo criterio que anticipoService.update, se
         // salta el candado igual que con una ida Cancelada).
-        const rutaRegreso = await Ruta.findOne({ where: { idRutaIda: anticipo.idRuta }, attributes: ['idRuta', 'estado'] });
-        if (!rutaRegreso) {
-          anticipo.ruta.dataValues.esperandoRegreso = true;
-        } else if (rutaRegreso.estado !== 'Cancelada') {
-          const { total, completadas } = await require('./rutaService').calcularSedesRuta(rutaRegreso.idRuta);
-          anticipo.ruta.dataValues.sedesTotales = total;
-          anticipo.ruta.dataValues.sedesCompletadas = completadas;
-          anticipo.ruta.dataValues.sedesDelRegreso = true;
+        const salidaRegreso = await SalidaProgramada.findOne({ where: { idSalidaIda: anticipo.idSalida }, attributes: ['idSalida', 'estado'] });
+        if (!salidaRegreso) {
+          anticipo.salida.dataValues.esperandoRegreso = true;
+        } else if (salidaRegreso.estado !== 'Cancelada') {
+          const { total, completadas } = await require('./salidaProgramadaService').calcularSedesRuta(salidaRegreso.idSalida);
+          anticipo.salida.dataValues.sedesTotales = total;
+          anticipo.salida.dataValues.sedesCompletadas = completadas;
+          anticipo.salida.dataValues.sedesDelRegreso = true;
         }
       }
     }

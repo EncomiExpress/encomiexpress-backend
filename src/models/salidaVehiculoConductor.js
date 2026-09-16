@@ -1,13 +1,13 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 
-const RutaVehiculoConductor = sequelize.define('RutaVehiculoConductor', {
-  idRutaVehiculoConductor: {
+const SalidaVehiculoConductor = sequelize.define('SalidaVehiculoConductor', {
+  idSalidaVehiculoConductor: {
     type: DataTypes.INTEGER,
     primaryKey: true,
     autoIncrement: true
   },
-  idRuta: {
+  idSalida: {
     type: DataTypes.INTEGER,
     allowNull: false
   },
@@ -24,9 +24,9 @@ const RutaVehiculoConductor = sequelize.define('RutaVehiculoConductor', {
     defaultValue: true
   }
 }, {
-  tableName: 'ruta_vehiculo_conductor',
+  tableName: 'salida_vehiculo_conductor',
   timestamps: false,
   underscored: true
 });
 
-module.exports = RutaVehiculoConductor;
+module.exports = SalidaVehiculoConductor;

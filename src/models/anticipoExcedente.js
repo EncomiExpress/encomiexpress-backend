@@ -11,7 +11,7 @@ const AnticipoExcedente = sequelize.define('AnticipoExcedente', {
     type: DataTypes.INTEGER,
     allowNull: false
   },
-  idRuta: {
+  idSalida: {
     type: DataTypes.INTEGER,
     allowNull: false
   },

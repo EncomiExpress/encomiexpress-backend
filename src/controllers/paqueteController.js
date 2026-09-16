@@ -1,4 +1,4 @@
-const { Paquete, RutaVehiculoConductor, EncomiendaVenta, Destinatario, Ruta, Destino, Conductor } = require('../models');
+const { Paquete, SalidaVehiculoConductor, EncomiendaVenta, Destinatario, SalidaProgramada, Ruta, Destino, Conductor } = require('../models');
 const { Op } = require('sequelize');
 const encomiendaService = require('../services/encomiendaService');
 const AppError = require('../errors/appError');
@@ -13,11 +13,11 @@ exports.getByConductor = async (req, res, next) => {
     }
     const idConductor = conductor.idConductor;
 
-    const pares = await RutaVehiculoConductor.findAll({ where: { idConductor, habilitado: true }, attributes: ['idRutaVehiculoConductor'] });
-    const ids = pares.map(p => p.idRutaVehiculoConductor);
+    const pares = await SalidaVehiculoConductor.findAll({ where: { idConductor, habilitado: true }, attributes: ['idSalidaVehiculoConductor'] });
+    const ids = pares.map(p => p.idSalidaVehiculoConductor);
 
     const paquetes = await Paquete.findAll({
-      where: { idRutaVehiculoConductor: { [Op.in]: ids } },
+      where: { idSalidaVehiculoConductor: { [Op.in]: ids } },
       include: [
         // El Destino anidado en el destinatario es el municipio real de la venta
         // (parada intermedia o destino final) — el móvil agrupa por él para el
@@ -25,13 +25,13 @@ exports.getByConductor = async (req, res, next) => {
         // `required: true` + el `where` de abajo: un paquete cuya venta quedó
         // Cancelada (ej. "destino fuera de ruta" al editar paradas, ver LOGICA.md)
         // o inhabilitada no debe seguir apareciendo como pendiente en el móvil del
-        // conductor -- mismo criterio que ya aplican rutaService.getAll()/
+        // conductor -- mismo criterio que ya aplican salidaProgramadaService.getAll()/
         // calcularSedesRuta() y el resto de chequeos de "Paquetes de ventas
         // inhabilitadas no deben ocupar su par". Sin esto, un paquete de una venta
         // huérfana se queda mostrado para siempre en una sede que ya ni pertenece
         // al recorrido de la ruta (nunca se puede "dejar en sede" desde ahí).
         { model: EncomiendaVenta, as: 'encomienda', required: true, where: { habilitado: true, estado: { [Op.ne]: 'Cancelada' } }, include: [{ model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] }] },
-        { model: RutaVehiculoConductor, as: 'asignacion', include: [{ model: Ruta, as: 'ruta', include: [{ model: Destino, as: 'destino' }] }] },
+        { model: SalidaVehiculoConductor, as: 'asignacion', include: [{ model: SalidaProgramada, as: 'salida', include: [{ model: Ruta, as: 'ruta', include: [{ model: Destino, as: 'destino' }] }] }] },
       ],
       order: [['idPaquete', 'DESC']]
     });
@@ -51,7 +51,7 @@ exports.subirEvidencia = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Solo los conductores pueden actualizar sus paquetes' });
     }
 
-    const paquete = await Paquete.findByPk(id, { include: [{ model: RutaVehiculoConductor, as: 'asignacion' }] });
+    const paquete = await Paquete.findByPk(id, { include: [{ model: SalidaVehiculoConductor, as: 'asignacion' }] });
     if (!paquete) {
       return res.status(404).json({ success: false, message: 'Paquete no encontrado' });
     }
@@ -87,17 +87,17 @@ exports.dejarEnSede = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Solo los conductores pueden legalizar la entrega en sede' });
     }
 
-    const idRuta = parseInt(req.body.idRuta, 10);
+    const idSalida = parseInt(req.body.idSalida, 10);
     const idDestino = parseInt(req.body.idDestino, 10);
-    if (!idRuta || !idDestino) {
-      return res.status(400).json({ success: false, message: 'Los campos "idRuta" e "idDestino" son requeridos' });
+    if (!idSalida || !idDestino) {
+      return res.status(400).json({ success: false, message: 'Los campos "idSalida" e "idDestino" son requeridos' });
     }
 
     // Foto y novedades opcionales — el conductor puede legalizar sin subir nada.
     const fotoEntrega = req.file?.secure_url || null;
 
     const resultado = await encomiendaService.dejarPaquetesEnSede(conductor.idConductor, {
-      idRuta,
+      idSalida,
       idDestino,
       novedades: req.body.novedades || '',
       fotoEntrega,

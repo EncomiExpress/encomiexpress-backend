@@ -3,8 +3,8 @@ const { body } = require('express-validator');
 const createValidation = [
   body('valorAnticipo').notEmpty().withMessage('Valor del anticipo es requerido'),
   body('valorAnticipo').isFloat({ min: 0, max: 9999999 }).withMessage('El valor del anticipo debe estar entre 0 y 9.999.999'),
-  body('idRuta').notEmpty().withMessage('ID de ruta es requerido').isInt().withMessage('ID de ruta debe ser un número entero'),
-  body('idRutaVehiculoConductor').notEmpty().withMessage('Debes elegir el vehículo y conductor de la ruta').isInt().withMessage('ID de vehículo/conductor de ruta debe ser un número entero'),
+  body('idSalida').notEmpty().withMessage('ID de ruta es requerido').isInt().withMessage('ID de ruta debe ser un número entero'),
+  body('idSalidaVehiculoConductor').notEmpty().withMessage('Debes elegir el vehículo y conductor de la ruta').isInt().withMessage('ID de vehículo/conductor de ruta debe ser un número entero'),
   body('soporte').optional().isArray().withMessage('Soporte debe ser un array de URLs')
 ];
 
@@ -16,8 +16,8 @@ const updateValidation = [
   // propósito: en la práctica un anticipo no se gasta ni de cerca hasta los
   // 9.999.999.
   body('valorGastado').optional().isFloat({ min: 0, max: 999999 }).withMessage('Valor gastado debe ser un número entre 0 y 999.999'),
-  body('idRuta').optional().isInt().withMessage('ID de ruta debe ser un número entero'),
-  body('idRutaVehiculoConductor').optional().isInt().withMessage('ID de vehículo/conductor de ruta debe ser un número entero'),
+  body('idSalida').optional().isInt().withMessage('ID de ruta debe ser un número entero'),
+  body('idSalidaVehiculoConductor').optional().isInt().withMessage('ID de vehículo/conductor de ruta debe ser un número entero'),
   body('soporte').optional().isArray().withMessage('Soporte debe ser un array de URLs')
 ];
 

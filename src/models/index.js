@@ -16,8 +16,9 @@ const PropietarioVehiculo = require('./propietarioVehiculo');
 const Vehiculo = require('./vehiculo');
 const Destino = require('./destino');
 const Ruta = require('./ruta');
-const RutaVehiculoConductor = require('./rutaVehiculoConductor');
-const RutaParada = require('./rutaParada');
+const SalidaProgramada = require('./salidaProgramada');
+const SalidaVehiculoConductor = require('./salidaVehiculoConductor');
+const SalidaParada = require('./salidaParada');
 const UsuarioSede = require('./usuarioSede');
 const AnticipoExcedente = require('./anticipoExcedente');
 const EncomiendaVenta = require('./encomiendaVenta');
@@ -67,24 +68,30 @@ UsuarioSede.belongsTo(Destino, { foreignKey: 'idDestino', as: 'destino' });
 PropietarioVehiculo.hasMany(Vehiculo, { foreignKey: 'idPropietario', as: 'vehiculos' });
 Vehiculo.belongsTo(PropietarioVehiculo, { foreignKey: 'idPropietario', as: 'propietario' });
 
-// Ruta - RutaVehiculoConductor (1:N) — una ruta puede repartirse entre varios
-// vehículos, cada uno con su conductor (ver comentario en la tabla, init.sql).
-Ruta.hasMany(RutaVehiculoConductor, { foreignKey: 'idRuta', as: 'paresVehiculoConductor' });
-RutaVehiculoConductor.belongsTo(Ruta, { foreignKey: 'idRuta', as: 'ruta' });
+// Ruta - SalidaProgramada (1:N) — una misma ruta (plantilla) puede tener N
+// salidas programadas (agenda) en distintas fechas.
+Ruta.hasMany(SalidaProgramada, { foreignKey: 'idRuta', as: 'salidas' });
+SalidaProgramada.belongsTo(Ruta, { foreignKey: 'idRuta', as: 'ruta' });
 
-// Vehiculo - RutaVehiculoConductor (1:N)
-Vehiculo.hasMany(RutaVehiculoConductor, { foreignKey: 'idVehiculo', as: 'asignacionesRuta' });
-RutaVehiculoConductor.belongsTo(Vehiculo, { foreignKey: 'idVehiculo', as: 'vehiculo' });
+// SalidaProgramada - SalidaVehiculoConductor (1:N) — una salida puede repartirse
+// entre varios vehículos, cada uno con su conductor (ver comentario en la tabla,
+// init.sql).
+SalidaProgramada.hasMany(SalidaVehiculoConductor, { foreignKey: 'idSalida', as: 'paresVehiculoConductor' });
+SalidaVehiculoConductor.belongsTo(SalidaProgramada, { foreignKey: 'idSalida', as: 'salida' });
 
-// Conductor - RutaVehiculoConductor (1:N)
-Conductor.hasMany(RutaVehiculoConductor, { foreignKey: 'idConductor', as: 'asignacionesRuta' });
-RutaVehiculoConductor.belongsTo(Conductor, { foreignKey: 'idConductor', as: 'conductor' });
+// Vehiculo - SalidaVehiculoConductor (1:N)
+Vehiculo.hasMany(SalidaVehiculoConductor, { foreignKey: 'idVehiculo', as: 'asignacionesSalida' });
+SalidaVehiculoConductor.belongsTo(Vehiculo, { foreignKey: 'idVehiculo', as: 'vehiculo' });
 
-// RutaVehiculoConductor - Paquete (1:N) — cada paquete va asignado a un par
-// vehículo+conductor específico de la ruta (no todos los paquetes de una venta
-// van forzosamente al mismo vehículo).
-RutaVehiculoConductor.hasMany(Paquete, { foreignKey: 'idRutaVehiculoConductor', as: 'paquetes' });
-Paquete.belongsTo(RutaVehiculoConductor, { foreignKey: 'idRutaVehiculoConductor', as: 'asignacion' });
+// Conductor - SalidaVehiculoConductor (1:N)
+Conductor.hasMany(SalidaVehiculoConductor, { foreignKey: 'idConductor', as: 'asignacionesSalida' });
+SalidaVehiculoConductor.belongsTo(Conductor, { foreignKey: 'idConductor', as: 'conductor' });
+
+// SalidaVehiculoConductor - Paquete (1:N) — cada paquete va asignado a un par
+// vehículo+conductor específico de la salida (no todos los paquetes de una
+// venta van forzosamente al mismo vehículo).
+SalidaVehiculoConductor.hasMany(Paquete, { foreignKey: 'idSalidaVehiculoConductor', as: 'paquetes' });
+Paquete.belongsTo(SalidaVehiculoConductor, { foreignKey: 'idSalidaVehiculoConductor', as: 'asignacion' });
 
 // Usuario - Paquete (1:N) — distribuidor de sede (rol 'distribuidor') que hizo la
 // entrega final (Entregado/Devuelto) desde "En sede de destino".
@@ -107,6 +114,8 @@ PaqueteEntregaFinal.belongsTo(Usuario, { foreignKey: 'idUsuarioDistribuidor', as
 // Destino - Ruta (1:N)
 Destino.hasMany(Ruta, { foreignKey: 'idDestino', as: 'rutas' });
 Ruta.belongsTo(Destino, { foreignKey: 'idDestino', as: 'destino' });
+// (idDestino de la SalidaProgramada, si se necesita directo sin pasar por su
+// Ruta, se resuelve vía include anidado: SalidaProgramada -> Ruta -> Destino)
 
 // Destino - Conductor / Vehiculo (1:N) — municipio donde quedó el conductor o el
 // vehículo tras una ruta que no volvió a base (idDestinoActual). NULL = en base.
@@ -115,26 +124,31 @@ Conductor.belongsTo(Destino, { foreignKey: 'idDestinoActual', as: 'destinoActual
 Destino.hasMany(Vehiculo, { foreignKey: 'idDestinoActual', as: 'vehiculosEnSede' });
 Vehiculo.belongsTo(Destino, { foreignKey: 'idDestinoActual', as: 'destinoActual' });
 
-// Ruta - Ruta (auto-referencia 1:1) — el viaje de regreso de una ruta es otra fila
-// de Ruta, enlazada por idRutaIda. "rutaIda": desde el regreso, la ida que le dio
-// origen. "rutaRegreso": desde la ida, su regreso ya programado (si existe).
-Ruta.belongsTo(Ruta, { foreignKey: 'idRutaIda', as: 'rutaIda' });
-Ruta.hasOne(Ruta, { foreignKey: 'idRutaIda', as: 'rutaRegreso' });
+// SalidaProgramada - SalidaProgramada (auto-referencia 1:1) — el viaje de
+// regreso de una salida es otra fila de SalidaProgramada, enlazada por
+// idSalidaIda. "salidaIda": desde el regreso, la ida que le dio origen.
+// "salidaRegreso": desde la ida, su regreso ya programado (si existe). Ver
+// LOGICA.md, "Viaje de regreso vinculado".
+SalidaProgramada.belongsTo(SalidaProgramada, { foreignKey: 'idSalidaIda', as: 'salidaIda' });
+SalidaProgramada.hasOne(SalidaProgramada, { foreignKey: 'idSalidaIda', as: 'salidaRegreso' });
 
-// Ruta - RutaParada (1:N) — paradas intermedias del corredor (municipios donde el
-// convoy deja paquetes en el camino), además del idDestino final de arriba.
-Ruta.hasMany(RutaParada, { foreignKey: 'idRuta', as: 'paradas' });
-RutaParada.belongsTo(Ruta, { foreignKey: 'idRuta', as: 'ruta' });
-Destino.hasMany(RutaParada, { foreignKey: 'idDestino', as: 'paradasRuta' });
-RutaParada.belongsTo(Destino, { foreignKey: 'idDestino', as: 'destino' });
+// SalidaVehiculoConductor - SalidaParada (1:N) — paradas intermedias del
+// corredor de ESE par vehículo+conductor (municipios donde ese vehículo deja
+// paquetes en el camino), además del idDestino final que hereda de la Ruta de la
+// salida (compartido por todo el convoy). Dos pares de la misma salida pueden
+// tener recorridos distintos (ruta fraccionada).
+SalidaVehiculoConductor.hasMany(SalidaParada, { foreignKey: 'idSalidaVehiculoConductor', as: 'paradas' });
+SalidaParada.belongsTo(SalidaVehiculoConductor, { foreignKey: 'idSalidaVehiculoConductor', as: 'par' });
+Destino.hasMany(SalidaParada, { foreignKey: 'idDestino', as: 'paradasSalida' });
+SalidaParada.belongsTo(Destino, { foreignKey: 'idDestino', as: 'destino' });
 
 // Conductor - AnticipoExcedente (1:N)
 Conductor.hasMany(AnticipoExcedente, { foreignKey: 'idConductor', as: 'anticipos' });
 AnticipoExcedente.belongsTo(Conductor, { foreignKey: 'idConductor', as: 'conductor' });
 
-// Ruta - AnticipoExcedente (1:N)
-Ruta.hasMany(AnticipoExcedente, { foreignKey: 'idRuta', as: 'anticipos' });
-AnticipoExcedente.belongsTo(Ruta, { foreignKey: 'idRuta', as: 'ruta' });
+// SalidaProgramada - AnticipoExcedente (1:N)
+SalidaProgramada.hasMany(AnticipoExcedente, { foreignKey: 'idSalida', as: 'anticipos' });
+AnticipoExcedente.belongsTo(SalidaProgramada, { foreignKey: 'idSalida', as: 'salida' });
 
 // Cliente - EncomiendaVenta (1:N)
 Cliente.hasMany(EncomiendaVenta, { foreignKey: 'idCliente', as: 'encomiendas' });
@@ -149,9 +163,9 @@ Cliente.belongsTo(Destino, { foreignKey: 'idSede', as: 'sedeRegistro' });
 Destino.hasMany(EncomiendaVenta, { foreignKey: 'idSede', as: 'ventasRegistradas' });
 EncomiendaVenta.belongsTo(Destino, { foreignKey: 'idSede', as: 'sedeRegistro' });
 
-// Ruta - EncomiendaVenta (1:N)
-Ruta.hasMany(EncomiendaVenta, { foreignKey: 'idRuta', as: 'encomiendas' });
-EncomiendaVenta.belongsTo(Ruta, { foreignKey: 'idRuta', as: 'ruta' });
+// SalidaProgramada - EncomiendaVenta (1:N)
+SalidaProgramada.hasMany(EncomiendaVenta, { foreignKey: 'idSalida', as: 'encomiendas' });
+EncomiendaVenta.belongsTo(SalidaProgramada, { foreignKey: 'idSalida', as: 'salida' });
 
 // EncomiendaVenta - Destinatario (1:1)
 EncomiendaVenta.hasOne(Destinatario, { foreignKey: 'idEncomiendaVenta', as: 'destinatario' });
@@ -182,8 +196,9 @@ module.exports = {
   Vehiculo,
   Destino,
   Ruta,
-  RutaVehiculoConductor,
-  RutaParada,
+  SalidaProgramada,
+  SalidaVehiculoConductor,
+  SalidaParada,
   UsuarioSede,
   AnticipoExcedente,
   EncomiendaVenta,

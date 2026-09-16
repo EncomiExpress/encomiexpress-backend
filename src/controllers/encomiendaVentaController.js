@@ -17,7 +17,7 @@ exports.getAll = async (req, res, next) => {
     const filters = {
       estado: req.query.estado,
       idCliente: req.query.idCliente,
-      idRuta: req.query.idRuta,
+      idSalida: req.query.idSalida,
       habilitado: req.query.habilitado,
       estadoPago: req.query.estadoPago,
       modalidadRecaudo: req.query.modalidadRecaudo,

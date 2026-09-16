@@ -11,7 +11,7 @@ const Paquete = sequelize.define('Paquete', {
     type: DataTypes.INTEGER,
     allowNull: false
   },
-  idRutaVehiculoConductor: {
+  idSalidaVehiculoConductor: {
     type: DataTypes.INTEGER,
     allowNull: false
   },

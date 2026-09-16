@@ -11,78 +11,27 @@ router.use(authenticate);
  * @swagger
  * tags:
  *   name: Rutas
- *   description: Programación de rutas de transporte
+ *   description: Plantillas reutilizables de corredor (origen->destino). La agenda
+ *     concreta (fecha/hora/estado/convoy/paradas) vive en /salidas.
  */
 
 /**
  * @swagger
  * /rutas:
  *   get:
- *     summary: Listar rutas programadas
+ *     summary: Listar plantillas de ruta
  *     tags: [Rutas]
- *     parameters:
- *       - in: query
- *         name: page
- *         schema: { type: integer, default: 1 }
- *       - in: query
- *         name: limit
- *         schema: { type: integer, default: 10 }
- *       - in: query
- *         name: habilitado
- *         schema: { type: string, enum: ['true','false'] }
- *       - in: query
- *         name: estado
- *         schema: { type: string, enum: [activo, inactivo] }
  *     responses:
  *       200:
- *         description: Lista paginada de rutas
+ *         description: Lista paginada de rutas (plantilla)
  */
 router.get('/', authorizePermission('listar_ruta'), rutaController.getAll);
 
 /**
  * @swagger
- * /rutas/anios-disponibles:
- *   get:
- *     summary: Años distintos en que hay rutas registradas (para el filtro de Año en el listado)
- *     tags: [Rutas]
- *     responses:
- *       200:
- *         description: Lista de años, descendente
- */
-router.get('/anios-disponibles', authorizePermission('listar_ruta'), rutaController.getAniosDisponibles);
-
-/**
- * @swagger
- * /rutas/disponibilidad:
- *   get:
- *     summary: Rutas activas que ya tienen asignado alguno de los vehículos/conductores dados
- *     description: |
- *       Usado por el calendario de Registrar/Actualizar Ruta para pintar los días
- *       ocupados (ventana de enfriamiento) antes de intentar guardar.
- *     tags: [Rutas]
- *     parameters:
- *       - in: query
- *         name: idVehiculos
- *         schema: { type: string }
- *         description: IDs separados por coma
- *       - in: query
- *         name: idConductores
- *         schema: { type: string }
- *         description: IDs separados por coma
- *       - in: query
- *         name: idRutaExcluir
- *         schema: { type: integer }
- *     responses:
- *       200:
- *         description: Lista de rutas/pares ocupados
- */
-router.get('/disponibilidad', authorizePermission('listar_ruta'), rutaController.getDisponibilidad);
-
-/**
- * @swagger
  * /rutas/{id}:
  *   get:
- *     summary: Obtener ruta por ID
+ *     summary: Obtener una plantilla de ruta por ID
  *     tags: [Rutas]
  *     parameters:
  *       - in: path
@@ -91,38 +40,21 @@ router.get('/disponibilidad', authorizePermission('listar_ruta'), rutaController
  *         schema: { type: integer }
  *     responses:
  *       200:
- *         description: Datos de la ruta con conductor, vehículo y destino
+ *         description: Datos de la plantilla, con su destino
  *       404:
  *         description: Ruta no encontrada
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
  */
-router.get('/:id/page-of', authorizePermission('listar_ruta'), rutaController.getPageOf);
 router.get('/:id', authorizePermission('consultar_ruta'), rutaController.getById);
 
 /**
  * @swagger
  * /rutas:
  *   post:
- *     summary: Programar nueva ruta
+ *     summary: Registrar una nueva plantilla de ruta
  *     tags: [Rutas]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/RutaCreate'
  *     responses:
  *       201:
- *         description: Ruta programada exitosamente
- *       400:
- *         description: Conductor o vehículo no disponible
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Error'
+ *         description: Ruta creada exitosamente
  */
 router.post('/', authorizePermission('registrar_ruta'), createValidation, validate, rutaController.create);
 
@@ -130,92 +62,25 @@ router.post('/', authorizePermission('registrar_ruta'), createValidation, valida
  * @swagger
  * /rutas/{id}:
  *   put:
- *     summary: Actualizar ruta
+ *     summary: Actualizar una plantilla de ruta
  *     tags: [Rutas]
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
  *         schema: { type: integer }
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/RutaCreate'
  *     responses:
  *       200:
  *         description: Ruta actualizada
  */
-// Autorización dual (admin vs. operador_sede) resuelta dentro del controller,
-// mismo motivo que /:id/estado — operador_sede solo edita fecha/hora de su
-// propio regreso. Ver LOGICA.md, "Sedes remotas".
-router.put('/:id', updateValidation, validate, rutaController.update);
-
-/**
- * @swagger
- * /rutas/{id}/estado:
- *   patch:
- *     summary: Cambiar estado de la ruta
- *     tags: [Rutas]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema: { type: integer }
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [estado]
- *             properties:
- *               estado:
- *                 type: string
- *                 enum: [activo, inactivo]
- *     responses:
- *       200:
- *         description: Estado actualizado
- */
-// Autorización dual (admin vs. operador_sede) resuelta dentro del controller,
-// mismo patrón que paqueteController.registrarDevolucion — operador_sede solo
-// puede "poner en ruta" (Programada -> En Ruta) el regreso de SU propia sede,
-// nunca otra transición ni otra ruta. Ver LOGICA.md, "Sedes remotas".
-router.patch('/:id/estado', rutaController.updateEstado);
-
-/**
- * @swagger
- * /rutas/{idRutaIda}/regreso-sede:
- *   post:
- *     summary: Programa el regreso de una sede remota (operador_sede) — solo fecha/hora de salida
- *     tags: [Rutas]
- *     parameters:
- *       - in: path
- *         name: idRutaIda
- *         required: true
- *         schema: { type: integer }
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [fechaSalida, horaSalida]
- *             properties:
- *               fechaSalida: { type: string, format: date }
- *               horaSalida: { type: string }
- *     responses:
- *       201:
- *         description: Ruta de regreso creada
- */
-router.post('/:idRutaIda/regreso-sede', authorizePermission('programar_regreso_sede'), rutaController.crearRegresoDesdeSede);
+router.put('/:id', authorizePermission('actualizar_ruta'), updateValidation, validate, rutaController.update);
 
 /**
  * @swagger
  * /rutas/{id}/toggle-habilitado:
  *   patch:
- *     summary: Habilitar o inhabilitar ruta
+ *     summary: Habilitar o inhabilitar una plantilla de ruta
+ *     description: Se rechaza si la plantilla tiene alguna salida Programada/En Ruta.
  *     tags: [Rutas]
  *     parameters:
  *       - in: path
@@ -226,8 +91,6 @@ router.post('/:idRutaIda/regreso-sede', authorizePermission('programar_regreso_s
  *       200:
  *         description: Estado cambiado correctamente
  */
-// Autorización dual (admin vs. operador_sede) resuelta dentro del controller —
-// operador_sede solo inhabilita/habilita su propio regreso.
-router.patch('/:id/toggle-habilitado', rutaController.toggleHabilitado);
+router.patch('/:id/toggle-habilitado', authorizePermission('inhabilitar_ruta'), rutaController.toggleHabilitado);
 
 module.exports = router;

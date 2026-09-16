@@ -11,8 +11,8 @@ const MODALIDADES_RECAUDO_VALIDAS = ['Pago Inmediato', 'Contraentrega'];
 const createValidation = [
   body('idCliente').notEmpty().withMessage('Cliente es requerido'),
   body('idCliente').isInt().withMessage('ID de cliente debe ser un número entero'),
-  body('idRuta').notEmpty().withMessage('La ruta es obligatoria'),
-  body('idRuta').isInt().withMessage('ID de ruta debe ser un número entero'),
+  body('idSalida').notEmpty().withMessage('La ruta es obligatoria'),
+  body('idSalida').isInt().withMessage('ID de ruta debe ser un número entero'),
   body('fechaEstimadaEntrega').optional({ nullable: true }).isDate().withMessage('Fecha estimada de entrega inválida'),
   body('observaciones').optional({ nullable: true }).isString().withMessage('Observaciones debe ser un texto')
     .custom(noSoloRelleno('Las observaciones no pueden contener solo espacios o guiones')),
@@ -77,13 +77,13 @@ const createValidation = [
   body('paquetes.*.tipoCarga')
     .notEmpty().withMessage('Debes indicar el tipo de carga')
     .isIn(['hierro', 'normal']).withMessage('Tipo de carga inválido. Opciones: hierro, normal'),
-  body('paquetes.*.idRutaVehiculoConductor')
+  body('paquetes.*.idSalidaVehiculoConductor')
     .notEmpty().withMessage('Cada paquete debe tener un vehículo asignado')
     .isInt().withMessage('ID de vehículo/conductor de ruta debe ser un número entero'),
 ];
 
 const updateValidation = [
-  body('idRuta').optional().isInt().withMessage('ID de ruta debe ser un número entero'),
+  body('idSalida').optional().isInt().withMessage('ID de ruta debe ser un número entero'),
   body('fechaEstimadaEntrega').optional({ nullable: true }).isDate().withMessage('Fecha estimada de entrega inválida'),
   body('observaciones').optional({ nullable: true }).isString().withMessage('Observaciones debe ser un texto')
     .custom(noSoloRelleno('Las observaciones no pueden contener solo espacios o guiones')),
@@ -154,7 +154,7 @@ const updateValidation = [
   body('paquetes.*.tipoCarga')
     .notEmpty().withMessage('Debes indicar el tipo de carga')
     .isIn(['hierro', 'normal']).withMessage('Tipo de carga inválido. Opciones: hierro, normal'),
-  body('paquetes.*.idRutaVehiculoConductor')
+  body('paquetes.*.idSalidaVehiculoConductor')
     .notEmpty().withMessage('Cada paquete debe tener un vehículo asignado')
     .isInt().withMessage('ID de vehículo/conductor de ruta debe ser un número entero'),
 ];
