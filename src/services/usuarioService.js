@@ -119,6 +119,20 @@ const resolverSedes = async (rolCodigo, sedes) => {
   if (existentes !== limpias.length) {
     throw new AppError('La sede indicada no existe o está inhabilitada', 400);
   }
+  // Medellín es la bodega principal, no una sede remota -- un operador_sede "de
+  // Medellín" no tendría ningún regreso propio que disparar (sería, en la
+  // práctica, la misma operación que ya hace admin desde ahí). El frontend ya
+  // excluye a Medellín del Autocomplete para este rol (PasoContactoRol.jsx), pero
+  // eso solo filtra qué se puede elegir DE NUEVO -- una sede ya elegida bajo OTRO
+  // rol (ej. distribuidor) podía colarse sin revalidar si se cambiaba de rol sin
+  // volver a tocar el campo (bug encontrado 2026-09-17). Esta es la validación
+  // autoritativa, no solo la del frontend.
+  if (rolCodigo === 'operador_sede') {
+    const medellin = await Destino.findOne({ where: { municipio: 'Medellín', habilitado: true } });
+    if (medellin && limpias[0] === medellin.idDestino) {
+      throw new AppError('Un operador de sede no puede tener a Medellín como sede: es la bodega principal, no una sede remota.', 400);
+    }
+  }
   return limpias;
 };
 
