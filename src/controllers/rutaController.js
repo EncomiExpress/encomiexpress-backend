@@ -1,7 +1,7 @@
 const rutaService = require('../services/rutaService');
 
 // CRUD de la plantilla reutilizable de corredor (origen->destino). Todo lo demás
-// (agenda concreta: fecha/hora/estado/convoy/paradas) vive ahora en
+// (agenda concreta: fecha/hora/estado/convoy) vive ahora en
 // salidaProgramadaController.js / routes/salidas.js.
 
 exports.getAll = async (req, res, next) => {

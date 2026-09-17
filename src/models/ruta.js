@@ -1,8 +1,8 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 
-// Plantilla reutilizable de corredor (origen→destino) — sin fecha, hora, estado,
-// convoy ni paradas: eso vive en SalidaProgramada, una fila por cada viaje
+// Plantilla reutilizable de corredor (origen→destino) — sin fecha, hora, estado
+// ni convoy: eso vive en SalidaProgramada, una fila por cada viaje
 // concreto y reservable de esta ruta.
 const Ruta = sequelize.define('Ruta', {
   idRuta: {

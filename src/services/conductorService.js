@@ -412,14 +412,12 @@ const getMisAnticipos = async (idUsuario, rolNombre) => {
       });
       anticipo.salida.dataValues.vehiculo = par?.vehiculo || null;
 
-      // Avance de sedes de la ruta — el móvil lo usa para deshabilitar el botón
-      // "legalizar" hasta que el conductor haya dejado todos los paquetes (mismo
-      // candado que aplica anticipoService.update). require lazy para evitar el
-      // ciclo de módulos.
+      // ¿Le queda algo por entregar? El móvil lo usa para deshabilitar el botón
+      // "legalizar" hasta que el conductor haya dejado todos los paquetes en la
+      // sede de destino (mismo candado que aplica anticipoService.update). require
+      // lazy para evitar el ciclo de módulos.
       if (anticipo.salida.estado === 'En Ruta') {
-        const { total, completadas } = await require('./salidaProgramadaService').calcularSedesRuta(anticipo.idSalida);
-        anticipo.salida.dataValues.sedesTotales = total;
-        anticipo.salida.dataValues.sedesCompletadas = completadas;
+        anticipo.salida.dataValues.entregaPendiente = await require('./salidaProgramadaService').tienePaquetesPendientes(anticipo.idSalida);
       } else if (anticipo.salida.estado === 'Completada' && anticipo.salida.idSalidaIda == null) {
         // Anticipo ida+retorno (2026-09-13, ver LOGICA.md): con la ida ya
         // completada, el candado real (anticipoService.update) pasa a exigir
@@ -432,10 +430,8 @@ const getMisAnticipos = async (idUsuario, rolNombre) => {
         if (!salidaRegreso) {
           anticipo.salida.dataValues.esperandoRegreso = true;
         } else if (salidaRegreso.estado !== 'Cancelada') {
-          const { total, completadas } = await require('./salidaProgramadaService').calcularSedesRuta(salidaRegreso.idSalida);
-          anticipo.salida.dataValues.sedesTotales = total;
-          anticipo.salida.dataValues.sedesCompletadas = completadas;
-          anticipo.salida.dataValues.sedesDelRegreso = true;
+          anticipo.salida.dataValues.entregaPendiente = await require('./salidaProgramadaService').tienePaquetesPendientes(salidaRegreso.idSalida);
+          anticipo.salida.dataValues.esDelRegreso = true;
         }
       }
     }

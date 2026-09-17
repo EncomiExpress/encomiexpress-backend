@@ -1,4 +1,4 @@
-const { EncomiendaVenta, Destinatario, Paquete, PaqueteEntregaFinal, Cliente, SalidaProgramada, SalidaParada, SalidaVehiculoConductor, Ruta, Vehiculo, Conductor, Destino, Usuario, UsuarioSede, sequelize } = require('../models');
+const { EncomiendaVenta, Destinatario, Paquete, PaqueteEntregaFinal, Cliente, SalidaProgramada, SalidaVehiculoConductor, Ruta, Vehiculo, Conductor, Destino, Usuario, UsuarioSede, sequelize } = require('../models');
 const AppError = require('../errors/appError');
 const crypto = require('crypto');
 const { normalizarEstadoPaquete, determinarEstadoEncomienda, determinarEstadoPago } = require('./paqueteStateUtils');
@@ -71,19 +71,11 @@ const INCLUDE_PARES = {
   // SQL dentro de SALIDA_INCLUDE. En getAll(), paginado con LIMIT/OFFSET y
   // subQuery:false, esas filas de más se comían cupo de la página (ver LOGICA.md,
   // "getAll de Ventas devolvía páginas cortas por el convoy, getPageOf quedaba
-  // desincronizado"). También evita que el `paradas` anidado (hasMany dentro de
-  // este hasMany) multiplique filas otra vez.
+  // desincronizado").
   separate: true,
   include: [
     { model: Vehiculo, as: 'vehiculo' },
     { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
-    // Liviano a propósito (solo el id del municipio) -- el panel web lo usa para
-    // saber si el destino de esta venta sigue en el recorrido de ESTE par
-    // específico (destino final compartido o una de SUS paradas propias) o si
-    // quedó huérfana al editar la salida (ver ventaResolvers.js,
-    // motivoVentaCancelada). Las paradas ahora son por par, no por salida
-    // completa — ver LOGICA.md, "ruta fraccionada".
-    { model: SalidaParada, as: 'paradas', required: false, attributes: ['idDestino'] },
   ],
 };
 
@@ -203,9 +195,8 @@ const getAll = async ({ estado, idCliente, idSalida, habilitado, estadoPago, mod
       { '$cliente.nombre$': { [Op.iLike]: `%${trimmed}%` } },
       { '$cliente.apellido$': { [Op.iLike]: `%${trimmed}%` } },
       { '$salida.origen$': { [Op.iLike]: `%${trimmed}%` } },
-      // Destino final de la VENTA (el del destinatario, que es lo que se ve en la
-      // columna "Destino" del listado) -- no el destino de la salida, que puede ser
-      // otro si el destinatario queda en una parada intermedia del corredor.
+      // Destino final de la VENTA (el del destinatario), que es lo que se ve en la
+      // columna "Destino" del listado.
       { '$destinatario.destino.municipio$': { [Op.iLike]: `%${trimmed}%` } },
       { '$destinatario.destino.departamento$': { [Op.iLike]: `%${trimmed}%` } },
     ];
@@ -356,45 +347,20 @@ const validarCapacidadPares = async (idSalida, paquetes, transaction, excluirIdE
   }
 };
 
-// El municipio de destino de la venta tiene que ser el destino final de la salida
-// (que vive en su plantilla, compartido por todo el convoy) o una parada
-// intermedia de ALGÚN par del convoy — misma regla general que bloquea el frontend
-// (rutaLlegaAlDestino en ventaValidation.js / PasoEnvio.jsx). Esto es un chequeo
-// GENERAL de "esta salida sirve para ese municipio" (usado antes de saber a qué
-// par en particular se le va a asignar cada paquete, o en rutaCubreDestinoVenta
-// donde no hay paquetes de por medio) — la validación fina de que el PAR
-// específico elegido para CADA paquete de verdad llegue a su destino vive en
-// validarParLlegaADestino, más abajo.
-const validarRutaLlegaAlDestino = async (salida, idDestinoVenta, transaction) => {
+// Rutas directas: el municipio de destino de la venta tiene que ser EXACTAMENTE el
+// destino final de la salida (que vive en su plantilla, compartido por todo el
+// convoy) — ya no hay paradas intermedias que puedan cubrir un municipio distinto.
+// Esto es un chequeo GENERAL de "esta salida sirve para ese municipio" (usado antes
+// de saber a qué par en particular se le va a asignar cada paquete, o en
+// rutaCubreDestinoVenta donde no hay paquetes de por medio).
+const validarRutaLlegaAlDestino = async (salida, idDestinoVenta) => {
   if (!idDestinoVenta || idDestinoVenta === salida.ruta?.idDestino) return;
-  const parada = await SalidaParada.findOne({
-    where: { idDestino: idDestinoVenta },
-    include: [{ model: SalidaVehiculoConductor, as: 'par', attributes: [], required: true, where: { idSalida: salida.idSalida } }],
-    transaction,
-  });
-  if (!parada) {
-    throw new AppError('La ruta elegida no llega al municipio de destino de la venta ni pasa por él', 400);
-  }
+  throw new AppError('La ruta elegida no llega al municipio de destino de la venta', 400);
 };
 
-// Validación fina POR PAQUETE: el par vehículo+conductor específico al que se le
-// asigna este paquete (pkg.idSalidaVehiculoConductor) tiene que llegar de verdad al
-// municipio de destino de la venta -- por su recorrido propio (SUS paradas) o por
-// el destino final compartido de la salida. Ya no basta con que "algún" par de la
-// salida llegue ahí (eso lo cubre validarRutaLlegaAlDestino, un chequeo más laxo
-// usado antes de conocer el reparto por paquete) -- un conductor que va directo a
-// Rionegro no puede recibir un paquete para Guarne si es OTRO par del mismo convoy
-// el que pasa por Guarne. Ver LOGICA.md, "ruta fraccionada".
-const validarParLlegaADestino = async (idSalidaVehiculoConductor, salida, idDestinoVenta, transaction) => {
-  if (!idDestinoVenta || idDestinoVenta === salida.ruta?.idDestino) return;
-  const parada = await SalidaParada.findOne({
-    where: { idSalidaVehiculoConductor, idDestino: idDestinoVenta },
-    transaction,
-  });
-  if (!parada) {
-    throw new AppError('El vehículo elegido para ese paquete no pasa por el municipio de destino de la venta', 400);
-  }
-};
+// Validación fina POR PAQUETE: con rutas directas, todos los pares del convoy de una
+// misma salida llegan al mismo (único) destino final, así que basta con
+// validarRutaLlegaAlDestino a nivel de salida — no hace falta distinguir por par.
 
 // Versión booleana de salidaSigueSirviendo() + validarRutaLlegaAlDestino() juntas,
 // para los caminos que NO están asignando una salida nueva (ahí sí tiene sentido
@@ -403,12 +369,12 @@ const validarParLlegaADestino = async (idSalidaVehiculoConductor, salida, idDest
 // reactivar). Antes esos dos caminos solo miraban salidaSigueSirviendo() -- si la
 // salida en sí seguía sana (Programada + habilitada) la venta volvía a Programada
 // sin más, aunque esa salida ya no pasara por el municipio de esta venta (se le
-// quitó como parada o como destino final en una edición posterior, ver "Tercer
-// motivo de Cancelada" en LOGICA.md).
-const rutaCubreDestinoVenta = async (salida, idDestinoVenta, transaction) => {
+// cambió el destino final en una edición posterior, ver "Tercer motivo de
+// Cancelada" en LOGICA.md).
+const rutaCubreDestinoVenta = async (salida, idDestinoVenta) => {
   if (!salidaSigueSirviendo(salida)) return false;
   try {
-    await validarRutaLlegaAlDestino(salida, idDestinoVenta, transaction);
+    await validarRutaLlegaAlDestino(salida, idDestinoVenta);
     return true;
   } catch {
     return false;
@@ -430,8 +396,8 @@ const esRegresoDeLaSede = async (salida, idSede, transaction) => {
 };
 
 // ¿Cuáles de estos municipios (destinos) tienen AHORA MISMO algún regreso "En Ruta"
-// saliendo de ahí (su destino final — origen del regreso, NO sus paradas)? Usado
-// para "Marcar devuelto a Medellín" (Parte B) -- corte geográfico, no por ida
+// saliendo de ahí (su destino final, origen del regreso)? Usado para "Marcar
+// devuelto a Medellín" (Parte B) -- corte geográfico, no por ida
 // específica (ver registrarDevolucionPaquete/getPaquetesRetornoConductor, y
 // LOGICA.md, "Paquetes de retorno — corte por sede, no por ida", 2026-09-13).
 const idsDestinoConRegresoActivo = async (idsDestino) => {
@@ -514,18 +480,13 @@ const create = async (data, { rol, idSede } = {}) => {
     if (destinoDestinatario.municipio === salida.origen) {
       throw new AppError(`El destino del destinatario no puede ser ${salida.origen}: es el municipio de origen de esta ruta`, 400);
     }
-    await validarRutaLlegaAlDestino(salida, destinatario.idDestino, transaction);
+    await validarRutaLlegaAlDestino(salida, destinatario.idDestino);
 
     if (paquetes && paquetes.length > 0) {
       for (const pkg of paquetes) {
         if (!pkg.idSalidaVehiculoConductor) {
           throw new AppError('Cada paquete debe tener un vehículo asignado', 400);
         }
-        // El PAR específico elegido para este paquete tiene que llegar de verdad al
-        // destino de la venta (no basta con que la salida en general llegue, ver
-        // validarParLlegaADestino) -- clave con ruta fraccionada: dos pares de la
-        // misma salida pueden tener recorridos distintos.
-        await validarParLlegaADestino(pkg.idSalidaVehiculoConductor, salida, destinatario.idDestino, transaction);
       }
     }
     await validarCapacidadPares(idSalida, paquetes, transaction);
@@ -703,21 +664,18 @@ const update = async (id, data, { rol, idSede } = {}) => {
     validarFechaEntrega(nuevaFechaEstimadaEntrega, salidaNueva);
     const destinatarioExistente = await Destinatario.findOne({ where: { idEncomiendaVenta: id }, transaction });
 
-    // El destino efectivo (el que llega en el body, o el ya guardado) tiene que caer en
-    // la salida nueva — su destino final o una de sus paradas.
+    // El destino efectivo (el que llega en el body, o el ya guardado) tiene que ser
+    // el destino final de la salida nueva.
     const idDestinoEfectivo = (destinatario && destinatario.idDestino !== undefined)
       ? destinatario.idDestino
       : (destinatarioExistente ? destinatarioExistente.idDestino : null);
-    await validarRutaLlegaAlDestino(salidaNueva, idDestinoEfectivo, transaction);
+    await validarRutaLlegaAlDestino(salidaNueva, idDestinoEfectivo);
 
     if (paquetes && paquetes.length > 0) {
       for (const pkg of paquetes) {
         if (!pkg.idSalidaVehiculoConductor) {
           throw new AppError('Cada paquete debe tener un vehículo asignado', 400);
         }
-        // Mismo criterio de create(): el PAR específico de este paquete, no
-        // cualquiera de la salida.
-        await validarParLlegaADestino(pkg.idSalidaVehiculoConductor, salidaNueva, idDestinoEfectivo, transaction);
       }
     }
     // Si esta venta no manda paquetes nuevos, se valida con los que ya tenía (no
@@ -983,11 +941,11 @@ const actualizarEstadoPaquete = async (idPaquete, estado, { observacion = '', fo
 };
 
 // El conductor del tramo troncal legaliza DE UNA SOLA VEZ todos los paquetes que
-// dejó en la sede de un municipio (una parada intermedia o el destino final):
-// pasan de "Por entregar" -> "En sede de destino". La entrega final al
-// destinatario la hace después el distribuidor de esa sede (rol 'distribuidor'),
-// con la ruta ya cerrada. Foto y novedades son opcionales — el conductor solo
-// deja constancia de que descargó el lote. Ver LOGICA.md, "Entrega en dos fases".
+// dejó en la sede del destino final de su ruta: pasan de "Por entregar" -> "En
+// sede de destino". La entrega final al destinatario la hace después el
+// distribuidor de esa sede (rol 'distribuidor'), con la ruta ya cerrada. Foto y
+// novedades son opcionales — el conductor solo deja constancia de que descargó el
+// lote. Ver LOGICA.md, "Entrega en dos fases".
 const dejarPaquetesEnSede = async (idConductor, { idSalida, idDestino, novedades = '', fotoEntrega = null } = {}) => {
   const { Op } = sequelize.Sequelize;
 
@@ -1011,10 +969,7 @@ const dejarPaquetesEnSede = async (idConductor, { idSalida, idDestino, novedades
     throw new AppError('Solo se pueden dejar paquetes en sede mientras la ruta está "En Ruta"', 409);
   }
 
-  // Pares (vehículo+conductor) de ESTE conductor en ESTA salida -- se resuelven
-  // ANTES de validar la sede porque ahora las paradas son propias de cada par, no
-  // de la salida completa: hay que saber en cuáles pares está este conductor para
-  // poder mirar SU recorrido (no el de otro vehículo del mismo convoy).
+  // Pares (vehículo+conductor) de ESTE conductor en ESTA salida.
   const pares = await SalidaVehiculoConductor.findAll({
     where: { idSalida, idConductor, habilitado: true },
     attributes: ['idSalidaVehiculoConductor', 'idVehiculo'],
@@ -1025,42 +980,10 @@ const dejarPaquetesEnSede = async (idConductor, { idSalida, idDestino, novedades
   const parIds = pares.map((p) => p.idSalidaVehiculoConductor);
   const vehiculoIds = [...new Set(pares.map((p) => p.idVehiculo))];
 
-  // La sede tiene que ser el destino final de la salida (compartido por todo el
-  // convoy) o una parada propia de ALGUNO de los pares de ESTE conductor -- ya NO
-  // basta con que sea parada de la salida en general: un conductor no puede
-  // "descargar" en una sede que no está en SU propio recorrido, aunque otro
-  // vehículo del mismo convoy sí pase por ahí (ruta fraccionada, ver LOGICA.md).
-  const esDestinoFinal = salida.ruta?.idDestino === idDestino;
-  const esParada = !esDestinoFinal && (await SalidaParada.count({
-    where: { idSalidaVehiculoConductor: { [Op.in]: parIds }, idDestino },
-  })) > 0;
-  if (!esDestinoFinal && !esParada) {
+  // Rutas directas: la única sede posible es el destino final de la salida
+  // (compartido por todo el convoy).
+  if (salida.ruta?.idDestino !== idDestino) {
     throw new AppError('Esa sede no pertenece al recorrido de esta ruta', 409);
-  }
-
-  // El destino final SIEMPRE es la última sede del recorrido -- a diferencia del
-  // orden ENTRE paradas (que puede estar mal registrado; el conductor conoce la
-  // realidad del camino y puede cerrarlas en el orden que le convenga, sin bloqueo),
-  // la posición del destino final no es ambigua: nunca va antes que una parada.
-  // Se bloquea cerrarlo mientras a este mismo conductor le queden paquetes "Por
-  // entregar" en alguna de SUS PROPIAS paradas intermedias (no las de otro par del
-  // mismo convoy, que este conductor nunca podría haber descargado de todos modos).
-  if (esDestinoFinal) {
-    const paradas = await SalidaParada.findAll({ where: { idSalidaVehiculoConductor: { [Op.in]: parIds } }, attributes: ['idDestino'] });
-    if (paradas.length > 0) {
-      const idsDestinoParadas = paradas.map((p) => p.idDestino);
-      const pendientesEnParadas = await Paquete.count({
-        where: { idSalidaVehiculoConductor: { [Op.in]: parIds }, estado: 'Por entregar' },
-        include: [{
-          model: EncomiendaVenta, as: 'encomienda', required: true,
-          where: { estado: { [Op.ne]: 'Cancelada' } },
-          include: [{ model: Destinatario, as: 'destinatario', required: true, where: { idDestino: { [Op.in]: idsDestinoParadas } } }],
-        }],
-      });
-      if (pendientesEnParadas > 0) {
-        throw new AppError('Todavía te quedan paquetes pendientes en alguna parada intermedia — déjalos ahí primero antes de cerrar el destino final.', 409);
-      }
-    }
   }
 
   // Paquetes "Por entregar" de esos pares cuya venta va dirigida a esta sede
@@ -1379,8 +1302,8 @@ const distribuidorCubrePaquete = async (idPaquete, idUsuarioDistribuidor) => {
 //   - el admin, desde el panel web (esAdmin true, idConductorDevolucion queda NULL)
 // Ventana de acción: tiene que haber ALGÚN regreso "En Ruta" que SALGA AHORA
 // del municipio donde quedó varado este paquete (destino final de la ida a la
-// que pertenece esa sede — NO una parada, ver idsDestinoConRegresoActivo). El
-// paquete NO cambia de id_salida/id_salida_vehiculo_conductor: sigue asociado
+// que pertenece esa sede, ver idsDestinoConRegresoActivo). El paquete NO cambia
+// de id_salida/id_salida_vehiculo_conductor: sigue asociado
 // a su salida de ida original, para trazabilidad.
 const registrarDevolucionPaquete = async (idPaquete, { idConductor = null, esAdmin = false } = {}) => {
   const { Op } = sequelize.Sequelize;
@@ -1452,8 +1375,8 @@ const registrarDevolucionPaquete = async (idPaquete, { idConductor = null, esAdm
 // paquetes "No entregado" (todavía accionables) Y "Devuelto a base" (ya
 // confirmados por él o por otro conductor/el admin -- el móvil los muestra
 // como "Ya confirmado por [nombre]", no los oculta) del municipio del que
-// SALE este regreso (destino final de la ida enlazada, vía su plantilla, NO sus
-// paradas). Lista vacía = no hay ninguna salida de regreso activa para este
+// SALE este regreso (destino final de la ida enlazada, vía su plantilla).
+// Lista vacía = no hay ninguna salida de regreso activa para este
 // conductor ahora mismo, o no quedó ningún paquete de ese tipo en su sede.
 const getPaquetesRetornoConductor = async (idConductor) => {
   const { Op } = sequelize.Sequelize;
@@ -1554,10 +1477,8 @@ const getPaquetesDevueltos = async ({ q, anio, mes, habilitado, page = 1, limit 
           { model: Cliente, as: 'cliente' },
           // El municipio donde de verdad quedó varado el paquete (2026-09-13,
           // reemplaza la columna "Ruta" del listado) — antes se mostraba el
-          // origen→destino de la ida completa, que puede confundir cuando el
-          // paquete en realidad quedó en una parada intermedia y no en el
-          // destino final de esa ida (ver LOGICA.md, "Paquetes de retorno —
-          // corte por sede, no por ida").
+          // origen→destino de la ida completa (ver LOGICA.md, "Paquetes de
+          // retorno — corte por sede, no por ida").
           { model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] },
         ],
       },
@@ -1626,9 +1547,8 @@ const toggleHabilitado = async (id, { rol, idSede } = {}) => {
     const destinatarioRehabilitar = await Destinatario.findOne({ where: { idEncomiendaVenta: id }, attributes: ['idDestino'] });
     if (!(await rutaCubreDestinoVenta(salida, destinatarioRehabilitar?.idDestino))) {
       // La salida ya no sirve para esta venta (salió/terminó/se canceló, quedó
-      // inhabilitada, o sigue sana pero ya no cubre el municipio de esta venta —
-      // se le quitó como parada o como destino final) — queda Cancelada para
-      // forzar la reasignación (editable, ver update() más abajo).
+      // inhabilitada, o sigue sana pero le cambiaron el destino final) — queda
+      // Cancelada para forzar la reasignación (editable, ver update() más abajo).
       encomienda.estado = 'Cancelada';
       pasoACancelada = true;
     } else {

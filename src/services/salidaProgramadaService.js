@@ -1,5 +1,5 @@
 const {
-  SalidaProgramada, SalidaVehiculoConductor, SalidaParada, Ruta, Vehiculo, Conductor,
+  SalidaProgramada, SalidaVehiculoConductor, Ruta, Vehiculo, Conductor,
   Destino, EncomiendaVenta, Destinatario, Usuario, UsuarioSede, Rol, AnticipoExcedente,
   Paquete, sequelize
 } = require('../models');
@@ -8,7 +8,7 @@ const AppError = require('../errors/appError');
 const { verificarDependenciasSalida } = require('../middlewares/validateDependencies');
 const { tieneLicenciaVigente } = require('../utils/licenciaHelper');
 const { esDomingo, getRangoHorario, horaDentroDeRango, MIN_DIAS_SALIDA_LLEGADA, DIAS_MARGEN_ENTRE_RUTAS, MAX_DIAS_ANTICIPACION, DESCANSO_MINIMO_REGRESO_MINUTOS } = require('../utils/horarioLaboral');
-const { determinarEstadoEncomienda, determinarEstadoPago, paqueteLiberaRuta, resumenSedes } = require('./paqueteStateUtils');
+const { determinarEstadoEncomienda, determinarEstadoPago, paqueteLiberaRuta } = require('./paqueteStateUtils');
 
 // Absorbe TODA la lógica de negocio que antes vivía en rutaService.js (máquina de
 // estados, choque de vehículo/conductor, viaje de regreso, sedes remotas, etc.),
@@ -17,63 +17,32 @@ const { determinarEstadoEncomienda, determinarEstadoPago, paqueteLiberaRuta, res
 // origen->destino, ver rutaService.js). Ver LOGICA.md, "Ruta -> plantilla +
 // SalidaProgramada -> agenda" (Fase 3 del split).
 
-// "Sedes de una salida" = TODOS los municipios estructurales del recorrido (paradas
-// + destino final de su plantilla). Devuelve { total, completadas } — una sede está
-// completada cuando no le queda ningún paquete "Por entregar" (una parada sin carga
-// cuenta como completada de entrada). Ver LOGICA.md, "Entrega en dos fases".
-//
-// Consultas planas a propósito: un include con `attributes: []` sobre EncomiendaVenta
-// le quita la PK a Sequelize y deja de hidratar la asociación (bug que hacía que esto
-// devolviera { total: 0 } y la ruta nunca se auto-completara). Sin includes anidados
-// no hay ese riesgo.
-const calcularSedesRuta = async (idSalida) => {
-  const salida = await SalidaProgramada.findByPk(idSalida, {
-    attributes: ['idSalida', 'idRuta'],
-    include: [{ model: Ruta, as: 'ruta', attributes: ['idDestino'] }],
-  });
-  if (!salida || !salida.ruta) return { total: 0, completadas: 0 };
-
+// Rutas directas (2026-09-16): ya no existen paradas intermedias, así que una salida
+// entrega en UN SOLO municipio (el destino final de su plantilla). "¿Le queda algo
+// pendiente?" reemplaza al viejo concepto de "sedes" (plural) — antes había que
+// revisar cada parada por separado, ahora basta con mirar si algún paquete activo
+// de la salida sigue "Por entregar".
+const tienePaquetesPendientes = async (idSalida) => {
   const pares = await SalidaVehiculoConductor.findAll({
     where: { idSalida, habilitado: true },
     attributes: ['idSalidaVehiculoConductor'],
   });
   const parIds = pares.map((p) => p.idSalidaVehiculoConductor);
+  if (parIds.length === 0) return false;
 
-  // Unión de las sedes que toca CUALQUIER par del convoy (sus propias paradas) +
-  // el destino final compartido por todos — sin duplicar si dos pares comparten
-  // una misma parada.
-  const paradas = parIds.length > 0
-    ? await SalidaParada.findAll({ where: { idSalidaVehiculoConductor: { [Op.in]: parIds } }, attributes: ['idDestino'] })
-    : [];
-  const sedesRuta = [...new Set([...paradas.map((p) => p.idDestino), salida.ruta.idDestino])];
-  if (sedesRuta.length === 0) return { total: 0, completadas: 0 };
+  const pendientes = await Paquete.findAll({
+    where: { idSalidaVehiculoConductor: { [Op.in]: parIds }, estado: 'Por entregar' },
+    attributes: ['idEncomiendaVenta'],
+  });
+  if (pendientes.length === 0) return false;
 
-  // Municipios que todavía tienen al menos un paquete "Por entregar" (de una venta
-  // activa) — esas sedes NO están completadas.
-  let sedesConPendiente = [];
-  if (parIds.length > 0) {
-    const pendientes = await Paquete.findAll({
-      where: { idSalidaVehiculoConductor: { [Op.in]: parIds }, estado: 'Por entregar' },
-      attributes: ['idEncomiendaVenta'],
-    });
-    const ventaIds = [...new Set(pendientes.map((p) => p.idEncomiendaVenta))];
-    if (ventaIds.length > 0) {
-      const ventasActivas = await EncomiendaVenta.findAll({
-        where: { idEncomiendaVenta: { [Op.in]: ventaIds }, habilitado: true, estado: { [Op.ne]: 'Cancelada' } },
-        attributes: ['idEncomiendaVenta'],
-      });
-      const activaSet = new Set(ventasActivas.map((v) => v.idEncomiendaVenta));
-      const dests = await Destinatario.findAll({
-        where: { idEncomiendaVenta: { [Op.in]: ventaIds } },
-        attributes: ['idEncomiendaVenta', 'idDestino'],
-      });
-      sedesConPendiente = dests
-        .filter((d) => activaSet.has(d.idEncomiendaVenta))
-        .map((d) => d.idDestino);
-    }
-  }
-
-  return resumenSedes(sedesRuta, sedesConPendiente);
+  // Un paquete "Por entregar" de una venta ya Cancelada/inhabilitada no cuenta —
+  // mismo criterio que el resto del módulo (ver LOGICA.md).
+  const ventaIds = [...new Set(pendientes.map((p) => p.idEncomiendaVenta))];
+  const ventasActivas = await EncomiendaVenta.count({
+    where: { idEncomiendaVenta: { [Op.in]: ventaIds }, habilitado: true, estado: { [Op.ne]: 'Cancelada' } },
+  });
+  return ventasActivas > 0;
 };
 
 // Best-effort: pasa la salida a "Completada" automáticamente en cuanto no falta nada
@@ -93,8 +62,7 @@ const intentarAutoCompletar = async (idSalida) => {
     const salida = await SalidaProgramada.findByPk(idSalida, { attributes: ['idSalida', 'estado'] });
     if (!salida || salida.estado !== 'En Ruta') return { completada: false, motivo: 'estado' };
 
-    const { total, completadas } = await calcularSedesRuta(idSalida);
-    if (total === 0 || completadas < total) return { completada: false, motivo: 'sedes' };
+    if (await tienePaquetesPendientes(idSalida)) return { completada: false, motivo: 'pendientes' };
 
     // { interno: true }: esto NO es un admin cambiando el estado a mano — salta la
     // exclusividad de operador_sede sobre su propio regreso (ver updateEstado) porque
@@ -112,17 +80,9 @@ const intentarAutoCompletar = async (idSalida) => {
 // un tope razonable para no dejar el array crecer sin límite en el formulario.
 const MAX_PARES_RUTA = 10;
 
-// Máximo de paradas en el recorrido de UN par vehículo+conductor — mismo tope que
-// tenía la salida completa antes de que las paradas pasaran a ser por par (ver
-// validarParadas). Duplicado en salidasValidator.js (mismo patrón que MAX_PARES_RUTA
-// arriba, que también se duplica ahí).
-const MAX_PARADAS = 20;
-
-// separate:true -- paradas (hasMany) ahora vive ANIDADO dentro de cada par (hasMany
-// también), y sin separate acá esa doble multiplicación de filas rompía el LIMIT de
-// findAndCountAll igual que ya advertía el comentario histórico sobre subQuery en
-// getAll. Con separate:true este include corre como su propia consulta, paradas
-// incluida.
+// separate:true -- sin esto, el LIMIT de findAndCountAll se aplicaba sobre las filas
+// ya unidas con el convoy (una por cada par), no sobre las salidas distintas. Ver el
+// mismo comentario histórico en la versión vieja de este archivo (rutaService.js).
 const INCLUDE_PARES = {
   model: SalidaVehiculoConductor,
   as: 'paresVehiculoConductor',
@@ -132,13 +92,6 @@ const INCLUDE_PARES = {
   include: [
     { model: Vehiculo, as: 'vehiculo' },
     { model: Conductor, as: 'conductor', include: [{ model: Usuario, as: 'usuario' }] },
-    {
-      model: SalidaParada,
-      as: 'paradas',
-      required: false,
-      order: [['orden', 'ASC']],
-      include: [{ model: Destino, as: 'destino' }],
-    },
   ],
 };
 
@@ -153,8 +106,8 @@ const INCLUDE_RUTA = {
 };
 
 // Datos livianos del viaje enlazado (ida o regreso) — solo lo necesario para mostrar
-// un chip clickeable, sin anidar de nuevo sus propios pares/paradas (eso se consulta
-// abriendo esa otra salida).
+// un chip clickeable, sin anidar de nuevo su propio convoy (eso se consulta abriendo
+// esa otra salida).
 const INCLUDE_REGRESO_IDA = {
   model: SalidaProgramada, as: 'salidaIda', required: false,
   // idDestino (además de para el chip): con qué sede matchear tieneOperadorSedePropio
@@ -365,15 +318,6 @@ const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sor
       const salidasConPaquetesPendientes = new Set(pendientesPaquete.map(p => salidaDelPar.get(p.idSalidaVehiculoConductor)));
       data.forEach(r => { r.dataValues.paquetesPendientes = salidasConPaquetesPendientes.has(r.idSalida); });
     }
-
-    // Indicador "X de N sedes completadas" para las salidas En Ruta.
-    for (const r of data) {
-      if (r.estado === 'En Ruta') {
-        const { total, completadas } = await calcularSedesRuta(r.idSalida);
-        r.dataValues.sedesTotales = total;
-        r.dataValues.sedesCompletadas = completadas;
-      }
-    }
   }
 
   // pesoUsado / paquetesAsignados: kg y cantidad de paquetes ACTIVOS en CADA PAR
@@ -571,41 +515,6 @@ const validarPares = (pares) => {
   }
 };
 
-// Paradas intermedias del recorrido de UN PAR vehículo+conductor — opcionales. Si
-// vienen, cada una necesita un destino válido y no se puede repetir el mismo
-// municipio dos veces dentro del recorrido de ESE par (ver índice único
-// uq_parada_par_destino en init.sql) — dos pares DISTINTOS sí pueden compartir una
-// misma parada, cada uno va por separado (ruta fraccionada). El "orden" que manda
-// el cliente se ignora: se numera según la posición del array. Se llama una vez
-// POR PAR (no una sola vez a nivel de salida).
-const validarParadas = async (paradas, transaction) => {
-  if (paradas === undefined) return null;
-  if (!Array.isArray(paradas)) {
-    throw new AppError('Las paradas deben ser una lista', 400);
-  }
-  if (paradas.length > MAX_PARADAS) {
-    throw new AppError(`No puedes agregar más de ${MAX_PARADAS} paradas al recorrido de un mismo vehículo`, 400);
-  }
-  const idsDestino = paradas.map((p) => parseInt(p.idDestino));
-  if (idsDestino.some((id) => !id || isNaN(id))) {
-    throw new AppError('Cada parada necesita un destino válido', 400);
-  }
-  if (new Set(idsDestino).size !== idsDestino.length) {
-    throw new AppError('No puedes repetir el mismo municipio dos veces en el recorrido de un mismo vehículo', 400);
-  }
-  if (idsDestino.length === 0) return [];
-
-  for (const idDestino of idsDestino) {
-    const destino = await Destino.findByPk(idDestino, { transaction });
-    if (!destino) throw new AppError(`Destino #${idDestino} no encontrado`, 404);
-  }
-
-  return paradas.map((p, i) => ({
-    idDestino: parseInt(p.idDestino),
-    orden: i + 1,
-  }));
-};
-
 // Descanso mínimo del conductor: la salida del regreso no puede quedar a menos de
 // DESCANSO_MINIMO_REGRESO_MINUTOS de la hora en que llegó de la ida -- antes nada lo
 // impedía (solo se validaba que no chocara con OTRA ruta distinta). Si a la ida le
@@ -658,23 +567,14 @@ const resolverOrigenRuta = async (idSalidaIda, transaction) => {
 };
 
 // El origen (Medellín en una salida normal, o el destino de la ida en un regreso) no
-// puede ser también el destino final ni una de las paradas — sería un tramo de
-// longitud cero.
-const validarOrigenDistinto = async ({ idDestino, paradasIdDestino, idSalidaIda, transaction }) => {
+// puede ser también el destino final — sería un tramo de longitud cero.
+const validarOrigenDistinto = async ({ idDestino, idSalidaIda, transaction }) => {
   const origen = await resolverOrigenRuta(idSalidaIda, transaction);
 
   if (idDestino !== undefined && idDestino !== null) {
     const destino = await Destino.findByPk(idDestino, { attributes: ['idDestino', 'municipio'], transaction });
     if (destino && destino.municipio === origen) {
       throw new AppError(`El destino de la ruta no puede ser ${origen}: es el municipio de origen.`, 400, null, 'DESTINO_IGUAL_ORIGEN');
-    }
-  }
-
-  const ids = (paradasIdDestino || []).filter((v) => v !== null && v !== undefined);
-  if (ids.length > 0) {
-    const paradas = await Destino.findAll({ where: { idDestino: { [Op.in]: ids } }, attributes: ['idDestino', 'municipio'], transaction });
-    if (paradas.some((p) => p.municipio === origen)) {
-      throw new AppError(`Una parada no puede ser ${origen}: es el municipio de origen de la ruta.`, 400, null, 'PARADA_IGUAL_ORIGEN');
     }
   }
 };
@@ -776,16 +676,15 @@ const create = async (data, { rol, idSede } = {}) => {
   // REGLA NUEVA DE NEGOCIO (Fase 3, acordada explícitamente): un regreso hereda el/los
   // par(es) vehículo+conductor de la ida — el cliente NO elige convoy para un
   // regreso, sería físicamente absurdo (el convoy que hizo la ida es el que tiene que
-  // volver). Se copian automáticamente los pares habilitados de la ida (junto con el
-  // recorrido propio de CADA par, invertido); si el body manda `pares` de todos
-  // modos, se rechaza (400) salvo que coincida EXACTAMENTE (vehículo/conductor, no
-  // paradas) con el convoy de la ida. Mismo patrón que crearRegresoDesdeSede.
+  // volver). Se copian automáticamente los pares habilitados de la ida; si el body
+  // manda `pares` de todos modos, se rechaza (400) salvo que coincida EXACTAMENTE
+  // (vehículo/conductor) con el convoy de la ida. Mismo patrón que
+  // crearRegresoDesdeSede.
   let paresEfectivos = pares;
   if (idSalidaIda) {
     const paresIda = (salidaIdaCompleta?.paresVehiculoConductor || []).map((p) => ({
       idVehiculo: p.idVehiculo,
       idConductor: p.idConductor,
-      paradas: [...(p.paradas || [])].sort((a, b) => b.orden - a.orden).map((pp) => ({ idDestino: pp.idDestino })),
     }));
     if (Array.isArray(pares) && pares.length > 0) {
       const mismoConjunto = pares.length === paresIda.length && pares.every((p) =>
@@ -818,23 +717,8 @@ const create = async (data, { rol, idSede } = {}) => {
     await validarChoqueVehiculoConductor({ idVehiculo: par.idVehiculo, idConductor: par.idConductor, fechaSalida, fechaLlegadaEstimada });
   }
 
-  // Paradas: propias de CADA par (ya no un array a nivel de la salida completa) —
-  // se validan una por una, cada una contra el recorrido de SU par.
-  const paresConParadas = [];
-  const todasLasParadasIdDestino = [];
-  for (const par of paresEfectivos) {
-    const paradasNormalizadas = (await validarParadas(par.paradas)) || [];
-    // Una parada es un municipio ANTES de llegar, no el mismo lugar de llegada.
-    if (paradasNormalizadas.some((p) => p.idDestino === plantilla.idDestino)) {
-      throw new AppError('Una parada no puede ser el mismo destino final de la ruta', 400, null, 'PARADA_IGUAL_DESTINO');
-    }
-    paresConParadas.push({ ...par, paradasNormalizadas });
-    todasLasParadasIdDestino.push(...paradasNormalizadas.map((p) => p.idDestino));
-  }
-
   await validarOrigenDistinto({
     idDestino: plantilla.idDestino,
-    paradasIdDestino: todasLasParadasIdDestino,
     idSalidaIda,
   });
 
@@ -854,21 +738,11 @@ const create = async (data, { rol, idSede } = {}) => {
     }, { transaction });
     idSalidaCreada = salida.idSalida;
 
-    for (const par of paresConParadas) {
-      const nuevoPar = await SalidaVehiculoConductor.create(
+    for (const par of paresEfectivos) {
+      await SalidaVehiculoConductor.create(
         { idSalida: salida.idSalida, idVehiculo: par.idVehiculo, idConductor: par.idConductor },
         { transaction }
       );
-      if (par.paradasNormalizadas.length > 0) {
-        await SalidaParada.bulkCreate(
-          par.paradasNormalizadas.map(p => ({
-            idSalidaVehiculoConductor: nuevoPar.idSalidaVehiculoConductor,
-            idDestino: p.idDestino,
-            orden: p.orden,
-          })),
-          { transaction }
-        );
-      }
     }
 
     await transaction.commit();
@@ -882,8 +756,8 @@ const create = async (data, { rol, idSede } = {}) => {
 
 // WS4 "Sedes remotas" — el operador_sede dispara el regreso de su sede con una sola
 // acción (fecha/hora de salida + fecha estimada de llegada, hora opcional): arma acá
-// el resto de los datos (mismo convoy, paradas invertidas) y delega en create() para
-// el resto (resolverOrigenRuta, validarUbicacionParaRuta, transacción...).
+// el resto de los datos (mismo convoy de la ida) y delega en create() para el resto
+// (resolverOrigenRuta, validarUbicacionParaRuta, transacción...).
 //
 // DECISIÓN DE DISEÑO (Fase 3, no estaba explícita en el plan): create() ahora exige
 // `idRuta` (de qué PLANTILLA es la salida) — un regreso automático no tiene wizard
@@ -913,9 +787,9 @@ const crearRegresoDesdeSede = async (idSalidaIda, { fechaSalida, horaSalida, fec
     throw new AppError('Esa ruta ya tiene un viaje de regreso programado', 409);
   }
   validarDescansoRegreso(ida.fechaLlegadaEstimada, ida.horaLlegadaEstimada, fechaSalida, horaSalida);
-  // La ida debe terminar en la sede de quien dispara el regreso (destino final, no
-  // una parada): solo ahí el convoy queda "fuera de base" (validarUbicacionParaRuta,
-  // más abajo, es la validación autoritativa) — esto solo da un mensaje más claro.
+  // La ida debe terminar en la sede de quien dispara el regreso: solo ahí el convoy
+  // queda "fuera de base" (validarUbicacionParaRuta, más abajo, es la validación
+  // autoritativa) — esto solo da un mensaje más claro.
   if (ida.ruta?.idDestino !== idSede) {
     throw new AppError('Esa ruta no llega a tu sede', 403);
   }
@@ -934,12 +808,9 @@ const crearRegresoDesdeSede = async (idSalidaIda, { fechaSalida, horaSalida, fec
     plantillaRegreso = await Ruta.create({ idDestino: medellin.idDestino });
   }
 
-  // Cada par del regreso hereda el recorrido de ESE MISMO par en la ida, invertido —
-  // ya no hay un único array de paradas compartido por toda la salida.
   const pares = (ida.paresVehiculoConductor || []).map((p) => ({
     idVehiculo: p.idVehiculo,
     idConductor: p.idConductor,
-    paradas: [...(p.paradas || [])].sort((a, b) => b.orden - a.orden).map((pp) => ({ idDestino: pp.idDestino })),
   }));
 
   return create({
@@ -954,8 +825,8 @@ const crearRegresoDesdeSede = async (idSalidaIda, { fechaSalida, horaSalida, fec
 };
 
 // Campos que operador_sede puede tocar al editar su propio regreso — nada de
-// convoy/paradas/plantilla/observaciones/estado/habilitado, eso sigue siendo de
-// Medellín. Ver update().
+// convoy/plantilla/observaciones/estado/habilitado, eso sigue siendo de Medellín.
+// Ver update().
 const CAMPOS_EDITABLES_SEDE = ['fechaSalida', 'horaSalida', 'fechaLlegadaEstimada', 'horaLlegadaEstimada'];
 
 const update = async (id, data, { rol, idSede } = {}) => {
@@ -1002,7 +873,7 @@ const update = async (id, data, { rol, idSede } = {}) => {
     if (!plantillaNueva || !plantillaNueva.habilitado) throw new AppError('Ruta no encontrada', 404);
   }
 
-  // Un regreso (idSalidaIda) hereda pares/paradas de la ida (mismo criterio nuevo que
+  // Un regreso (idSalidaIda) hereda el convoy de la ida (mismo criterio nuevo que
   // create()) — nunca se le cambia el convoy desde acá.
   if (salida.idSalidaIda && Array.isArray(pares) && pares.length > 0) {
     throw new AppError('El regreso no permite cambiar su vehículo/conductor: hereda el de la ida.', 400);
@@ -1067,43 +938,17 @@ const update = async (id, data, { rol, idSede } = {}) => {
   if (!salida.idSalidaIda && pares !== undefined) validarPares(pares);
   const idDestinoEfectivo = plantillaNueva.idDestino;
 
-  // Paradas: propias de CADA par, vienen anidadas en `pares[].paradas`. Solo se
-  // pueden tocar si `pares` viene en el body (no hay forma de editar el recorrido
-  // de un par puntual sin mandar la lista completa de pares) y la salida no es un
-  // regreso (hereda las de la ida, igual que el resto del convoy). Cada elemento
-  // de `paresConParadas` trae `paradasNormalizadas` (null = ese par no toca sus
-  // paradas en esta edición, se deja tal cual estaban).
-  let paresConParadas = null;
-  if (!salida.idSalidaIda && pares !== undefined) {
-    paresConParadas = [];
-    for (const par of pares) {
-      const paradasNormalizadas = par.paradas !== undefined ? (await validarParadas(par.paradas)) : null;
-      if (paradasNormalizadas && paradasNormalizadas.some((p) => p.idDestino === idDestinoEfectivo)) {
-        throw new AppError('Una parada no puede ser el mismo destino final de la ruta', 400, null, 'PARADA_IGUAL_DESTINO');
-      }
-      paresConParadas.push({ ...par, paradasNormalizadas });
-    }
-  }
-
-  const paradasIdDestinoNuevas = (paresConParadas || [])
-    .filter((p) => p.paradasNormalizadas !== null)
-    .flatMap((p) => p.paradasNormalizadas.map((pp) => pp.idDestino));
-
   await validarOrigenDistinto({
     idDestino: idDestinoEfectivo,
-    paradasIdDestino: paradasIdDestinoNuevas,
     idSalidaIda: salida.idSalidaIda,
   });
 
-  // Ventas cuyo destino queda fuera del recorrido tras esta edición -- se dejan
-  // `Cancelada` (mismo mecanismo de "venta huérfana" de siempre, ver LOGICA.md). El
-  // recorrido efectivo (unión de las paradas de TODOS los pares activos + destino
-  // final) solo puede calcularse con certeza DESPUÉS de aplicar los cambios de
-  // pares/paradas, así que este cálculo se hace más abajo, ya dentro de la
-  // transacción.
+  // Ventas cuyo destino queda fuera de la ruta tras esta edición -- se dejan
+  // `Cancelada` (mismo mecanismo de "venta huérfana" de siempre, ver LOGICA.md).
+  // Solo puede cambiar la cobertura si cambia la plantilla (nuevo destino final) —
+  // el convoy (pares) ya no afecta a qué destino llega la salida.
   let idsVentasHuerfanas = [];
   const plantillaCambio = idRuta !== undefined && plantillaNueva.idRuta !== salida.idRuta;
-  const tocaCobertura = plantillaCambio || (!salida.idSalidaIda && pares !== undefined);
 
   const transaction = await sequelize.transaction();
   try {
@@ -1112,7 +957,7 @@ const update = async (id, data, { rol, idSede } = {}) => {
       const paresActualesPorId = new Map(paresActuales.map(p => [p.idSalidaVehiculoConductor, p]));
       const idsConservados = new Set();
 
-      for (const par of paresConParadas) {
+      for (const par of pares) {
         const parActual = par.idSalidaVehiculoConductor ? paresActualesPorId.get(par.idSalidaVehiculoConductor) : null;
         const esNuevo = !parActual;
         const cambioVehiculo = esNuevo || parActual.idVehiculo !== par.idVehiculo;
@@ -1148,32 +993,16 @@ const update = async (id, data, { rol, idSede } = {}) => {
           });
         }
 
-        let idParFinal;
         if (esNuevo) {
           const nuevo = await SalidaVehiculoConductor.create(
             { idSalida: id, idVehiculo: par.idVehiculo, idConductor: par.idConductor },
             { transaction }
           );
-          idParFinal = nuevo.idSalidaVehiculoConductor;
-          idsConservados.add(idParFinal);
+          idsConservados.add(nuevo.idSalidaVehiculoConductor);
         } else {
-          idParFinal = parActual.idSalidaVehiculoConductor;
-          idsConservados.add(idParFinal);
+          idsConservados.add(parActual.idSalidaVehiculoConductor);
           if (cambioVehiculo || cambioConductor) {
             await parActual.update({ idVehiculo: par.idVehiculo, idConductor: par.idConductor }, { transaction });
-          }
-        }
-
-        // Solo se toca el recorrido de ESTE par si vino `paradas` en su entrada del
-        // body (paradasNormalizadas !== null) -- un par nuevo sin `paradas` nace sin
-        // ninguna (aditivo, no obligatorio).
-        if (par.paradasNormalizadas !== null) {
-          await SalidaParada.destroy({ where: { idSalidaVehiculoConductor: idParFinal }, transaction });
-          if (par.paradasNormalizadas.length > 0) {
-            await SalidaParada.bulkCreate(
-              par.paradasNormalizadas.map(p => ({ idSalidaVehiculoConductor: idParFinal, idDestino: p.idDestino, orden: p.orden })),
-              { transaction }
-            );
           }
         }
       }
@@ -1200,20 +1029,10 @@ const update = async (id, data, { rol, idSede } = {}) => {
       }
     }
 
-    // Recorrido efectivo tras aplicar los cambios de arriba -- unión de las paradas
-    // de TODOS los pares que sigan activos + el destino final. Se consulta fresco en
-    // vez de reconstruirlo en memoria porque un par pudo quedar sin tocar sus
-    // paradas (se conservan las que ya tenía en BD).
-    if (tocaCobertura) {
-      const paresActivosFinal = await SalidaVehiculoConductor.findAll({
-        where: { idSalida: id, habilitado: true }, attributes: ['idSalidaVehiculoConductor'], transaction,
-      });
-      const parIdsFinal = paresActivosFinal.map((p) => p.idSalidaVehiculoConductor);
-      const paradasFinal = parIdsFinal.length > 0
-        ? await SalidaParada.findAll({ where: { idSalidaVehiculoConductor: { [Op.in]: parIdsFinal } }, attributes: ['idDestino'], transaction })
-        : [];
-      const municipiosCubiertos = new Set([idDestinoEfectivo, ...paradasFinal.map((p) => p.idDestino)]);
-
+    // Rutas directas: la única forma de que una venta quede fuera de la salida es
+    // que cambie la plantilla (destino final distinto) — el convoy ya no afecta a
+    // qué destino llega la salida.
+    if (plantillaCambio) {
       const ventasDeLaRuta = await EncomiendaVenta.findAll({
         where: { idSalida: id, habilitado: true, estado: { [Op.ne]: 'Cancelada' } },
         include: [{ model: Destinatario, as: 'destinatario', attributes: ['idDestino'] }],
@@ -1221,7 +1040,7 @@ const update = async (id, data, { rol, idSede } = {}) => {
         transaction,
       });
       idsVentasHuerfanas = ventasDeLaRuta
-        .filter((v) => v.destinatario && !municipiosCubiertos.has(v.destinatario.idDestino))
+        .filter((v) => v.destinatario && v.destinatario.idDestino !== idDestinoEfectivo)
         .map((v) => v.idEncomiendaVenta);
     }
 
@@ -1396,32 +1215,6 @@ const updateEstado = async (id, estado, { rol, idSede, interno = false } = {}) =
     }
 
     if (!salida.idSalidaIda) {
-      // Unión de las paradas de TODOS los pares del convoy + el destino final
-      // compartido — ver mismo criterio en calcularSedesRuta.
-      const parIdsRuta = pares.map((p) => p.idSalidaVehiculoConductor);
-      const paradasRuta = parIdsRuta.length > 0
-        ? await SalidaParada.findAll({ where: { idSalidaVehiculoConductor: { [Op.in]: parIdsRuta } }, attributes: ['idDestino'] })
-        : [];
-      const sedesRuta = [...new Set([...paradasRuta.map((p) => p.idDestino), salida.ruta.idDestino])];
-      const destsConCarga = await Destinatario.findAll({
-        attributes: ['idDestino'],
-        include: [{
-          model: EncomiendaVenta, as: 'encomienda', required: true, attributes: ['idEncomiendaVenta'],
-          where: { idSalida: parseInt(id), habilitado: true, estado: { [Op.ne]: 'Cancelada' } },
-        }],
-      });
-      const conCarga = new Set(destsConCarga.map((d) => d.idDestino));
-      const sedesVacias = sedesRuta.filter((s) => !conCarga.has(s));
-      if (sedesVacias.length > 0) {
-        const nombres = await Destino.findAll({ where: { idDestino: { [Op.in]: sedesVacias } }, attributes: ['idDestino', 'municipio'] });
-        throw new AppError(
-          'Cada parada y el destino final deben tener al menos una encomienda asignada antes de poner la ruta En Ruta.',
-          409,
-          nombres.map((n) => ({ tipo: 'sede', id: n.idDestino, descripcion: `${n.municipio}: sin paquetes en esta ruta` })),
-          'SEDE_SIN_CARGA'
-        );
-      }
-
       const paresVacios = [];
       for (const par of pares) {
         const n = await Paquete.count({
@@ -1726,7 +1519,7 @@ module.exports = {
   getPageOf,
   getAniosDisponibles,
   getDisponibilidad,
-  calcularSedesRuta,
+  tienePaquetesPendientes,
   intentarAutoCompletar,
   crearRegresoDesdeSede,
   estaOcupadoEnCicloActivo,

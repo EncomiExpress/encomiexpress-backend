@@ -105,7 +105,6 @@ src/
 | `Destino` | Municipios y tarifas base habilitadas |
 | `Ruta` | Rutas programadas, con su viaje de regreso opcional vinculado |
 | `RutaVehiculoConductor` | Convoy de una ruta — un par vehículo/conductor por cada vehículo que la cubre |
-| `RutaParada` | Paradas intermedias del corredor de una ruta |
 | `EncomiendaVenta` | Registro de ventas y encomiendas con guía generada |
 | `Paquete` | Paquetes asociados a cada encomienda, con su propio estado de entrega y de pago |
 | `PaqueteEntregaFinal` | Historial completo de intentos/entregas de un paquete por el distribuidor |

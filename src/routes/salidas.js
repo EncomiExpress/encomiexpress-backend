@@ -11,7 +11,7 @@ router.use(authenticate);
  * @swagger
  * tags:
  *   name: Salidas
- *   description: Agenda concreta de viajes (fecha/hora/estado/convoy/paradas) sobre
+ *   description: Agenda concreta de viajes (fecha/hora/estado/convoy) sobre
  *     una plantilla de /rutas.
  */
 
@@ -61,7 +61,7 @@ router.get('/:id/page-of', authorizePermission('listar_ruta'), salidaController.
  *         schema: { type: integer }
  *     responses:
  *       200:
- *         description: Datos de la salida, con su plantilla, convoy y paradas
+ *         description: Datos de la salida, con su plantilla y convoy
  *       404:
  *         description: Ruta no encontrada
  */

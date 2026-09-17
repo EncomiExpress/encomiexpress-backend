@@ -358,24 +358,24 @@ const update = async (id, data) => {
     // Candado: legalizar = subir valorGastado + soporte, y eso solo lo hace el
     // conductor desde el móvil (el panel admin no ofrece la acción una vez el
     // anticipo pasa a "En Legalización"). No puede hacerlo hasta dejar TODOS los
-    // paquetes en las sedes de la ruta — no tiene forma de reunir los soportes del
-    // viaje antes de llegar al destino final. Ver LOGICA.md, "Entrega en dos fases".
+    // paquetes en la sede de destino de la ruta — no tiene forma de reunir los
+    // soportes del viaje antes de llegar. Ver LOGICA.md, "Entrega en dos fases".
     // require lazy para no atar el orden de carga de módulos.
     //
     // Excepción: ruta "Cancelada" (2026-09-07) — un viaje cancelado a mitad de
-    // camino nunca va a llegar a "todas las sedes completas" (el viaje ya no
-    // sigue), así que el candado se salta: el conductor puede legalizar lo que sí
-    // alcanzó a gastar hasta donde llegó. salidaProgramadaService.updateEstado ya NO
-    // fuerza el excedente al cancelar justamente para dejarle esta puerta abierta
-    // (ver ahí, rama `estado === 'Cancelada'`).
+    // camino nunca va a llegar a completar su entrega (el viaje ya no sigue), así
+    // que el candado se salta: el conductor puede legalizar lo que sí alcanzó a
+    // gastar hasta donde llegó. salidaProgramadaService.updateEstado ya NO fuerza
+    // el excedente al cancelar justamente para dejarle esta puerta abierta (ver
+    // ahí, rama `estado === 'Cancelada'`).
     //
     // Anticipo ida+retorno (2026-09-13, ver LOGICA.md): el anticipo se sigue
     // creando sobre la IDA únicamente, pero cubre el viaje completo — no basta con
-    // que la ida complete sus propias sedes, hay que esperar a que el regreso
-    // también termine de entregar. Si esta salida YA es un regreso (caso raro: un
-    // anticipo creado directo sobre esa salida), se queda con el chequeo de
-    // siempre sobre sí misma -- no existe "regreso del regreso" (mismo criterio
-    // que el guard `!esRegreso` de useRutaColumns.jsx).
+    // que la ida termine de entregar, hay que esperar a que el regreso también
+    // termine. Si esta salida YA es un regreso (caso raro: un anticipo creado
+    // directo sobre esa salida), se queda con el chequeo de siempre sobre sí
+    // misma -- no existe "regreso del regreso" (mismo criterio que el guard
+    // `!esRegreso` de useRutaColumns.jsx).
     const salidaDelAnticipo = await SalidaProgramada.findByPk(anticipo.idSalida, {
       attributes: ['idSalida', 'estado', 'idSalidaIda'],
       include: [{ model: SalidaProgramada, as: 'salidaRegreso', attributes: ['idSalida', 'estado'] }],
@@ -386,8 +386,8 @@ const update = async (id, data) => {
     // desde antes de que el regreso siquiera arrancara) -- ver el uso más abajo,
     // junto a `intentarAutoCompletar`.
     idSalidaParaAutoCompletar = esIda ? (salidaDelAnticipo.salidaRegreso?.idSalida ?? anticipo.idSalida) : anticipo.idSalida;
-    // Un regreso cancelado tampoco va a llegar nunca a "todas las sedes completas"
-    // -- mismo criterio que una ida cancelada, se salta el candado.
+    // Un regreso cancelado tampoco va a llegar nunca a completar su entrega -- mismo
+    // criterio que una ida cancelada, se salta el candado.
     const rutaCancelada = esIda
       ? (salidaDelAnticipo?.estado === 'Cancelada' || salidaDelAnticipo?.salidaRegreso?.estado === 'Cancelada')
       : salidaDelAnticipo?.estado === 'Cancelada';
@@ -401,13 +401,13 @@ const update = async (id, data) => {
         );
       }
       const idSalidaAValidar = esIda ? salidaDelAnticipo.salidaRegreso.idSalida : anticipo.idSalida;
-      const { total, completadas } = await require('./salidaProgramadaService').calcularSedesRuta(idSalidaAValidar);
-      if (total > 0 && completadas < total) {
+      const pendiente = await require('./salidaProgramadaService').tienePaquetesPendientes(idSalidaAValidar);
+      if (pendiente) {
         throw new AppError(
-          `Aún no puedes legalizar el anticipo: faltan ${total - completadas} de ${total} sedes por completar${esIda ? ' del regreso' : ''}. Deja todos los paquetes en las sedes de la ruta primero.`,
+          `Aún no puedes legalizar el anticipo: todavía te quedan paquetes por dejar en la sede de destino${esIda ? ' del regreso' : ''}.`,
           409,
           null,
-          'SEDES_INCOMPLETAS'
+          'ENTREGA_PENDIENTE'
         );
       }
     }

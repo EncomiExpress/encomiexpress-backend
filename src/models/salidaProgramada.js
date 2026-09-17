@@ -2,7 +2,7 @@ const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 
 // La agenda: cada fila es una instancia concreta y reservable de una Ruta
-// (fecha/hora/estado/convoy/paradas propios). Absorbe todo lo que antes vivía
+// (fecha/hora/estado/convoy propios). Absorbe todo lo que antes vivía
 // en Ruta (fechaSalida, horaSalida, estado, etc.) — ver LOGICA.md, "Viaje de
 // regreso vinculado" (el vínculo ida/vuelta vive aquí, no en la plantilla,
 // porque casi toda la lógica de negocio necesita el estado/fecha del otro

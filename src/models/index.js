@@ -18,7 +18,6 @@ const Destino = require('./destino');
 const Ruta = require('./ruta');
 const SalidaProgramada = require('./salidaProgramada');
 const SalidaVehiculoConductor = require('./salidaVehiculoConductor');
-const SalidaParada = require('./salidaParada');
 const UsuarioSede = require('./usuarioSede');
 const AnticipoExcedente = require('./anticipoExcedente');
 const EncomiendaVenta = require('./encomiendaVenta');
@@ -132,16 +131,6 @@ Vehiculo.belongsTo(Destino, { foreignKey: 'idDestinoActual', as: 'destinoActual'
 SalidaProgramada.belongsTo(SalidaProgramada, { foreignKey: 'idSalidaIda', as: 'salidaIda' });
 SalidaProgramada.hasOne(SalidaProgramada, { foreignKey: 'idSalidaIda', as: 'salidaRegreso' });
 
-// SalidaVehiculoConductor - SalidaParada (1:N) — paradas intermedias del
-// corredor de ESE par vehículo+conductor (municipios donde ese vehículo deja
-// paquetes en el camino), además del idDestino final que hereda de la Ruta de la
-// salida (compartido por todo el convoy). Dos pares de la misma salida pueden
-// tener recorridos distintos (ruta fraccionada).
-SalidaVehiculoConductor.hasMany(SalidaParada, { foreignKey: 'idSalidaVehiculoConductor', as: 'paradas' });
-SalidaParada.belongsTo(SalidaVehiculoConductor, { foreignKey: 'idSalidaVehiculoConductor', as: 'par' });
-Destino.hasMany(SalidaParada, { foreignKey: 'idDestino', as: 'paradasSalida' });
-SalidaParada.belongsTo(Destino, { foreignKey: 'idDestino', as: 'destino' });
-
 // Conductor - AnticipoExcedente (1:N)
 Conductor.hasMany(AnticipoExcedente, { foreignKey: 'idConductor', as: 'anticipos' });
 AnticipoExcedente.belongsTo(Conductor, { foreignKey: 'idConductor', as: 'conductor' });
@@ -198,7 +187,6 @@ module.exports = {
   Ruta,
   SalidaProgramada,
   SalidaVehiculoConductor,
-  SalidaParada,
   UsuarioSede,
   AnticipoExcedente,
   EncomiendaVenta,

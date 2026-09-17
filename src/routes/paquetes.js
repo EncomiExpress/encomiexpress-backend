@@ -30,7 +30,7 @@ router.get('/sede/historial', authorize('distribuidor'), paqueteController.getHi
 /**
  * PATCH /paquetes/sede  (solo rol conductor, form-data opcional: file + novedades)
  * El conductor del tramo troncal marca DE UNA SOLA VEZ todos los paquetes que
- * dejó en la sede de un municipio (parada o destino final): "Por entregar" ->
+ * dejó en la sede del destino final de la ruta: "Por entregar" ->
  * "En sede de destino". Body: idSalida, idDestino. Ver dejarPaquetesEnSede().
  * Declarada antes de las rutas con ":id" para que "sede" no se lea como un id.
  */

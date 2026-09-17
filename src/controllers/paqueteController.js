@@ -20,16 +20,16 @@ exports.getByConductor = async (req, res, next) => {
       where: { idSalidaVehiculoConductor: { [Op.in]: ids } },
       include: [
         // El Destino anidado en el destinatario es el municipio real de la venta
-        // (parada intermedia o destino final) — el móvil agrupa por él para el
+        // (el destino final de la ruta) — el móvil agrupa por él para el
         // botón "dejar en sede" (ver driver_paquetes.dart).
         // `required: true` + el `where` de abajo: un paquete cuya venta quedó
-        // Cancelada (ej. "destino fuera de ruta" al editar paradas, ver LOGICA.md)
-        // o inhabilitada no debe seguir apareciendo como pendiente en el móvil del
-        // conductor -- mismo criterio que ya aplican salidaProgramadaService.getAll()/
-        // calcularSedesRuta() y el resto de chequeos de "Paquetes de ventas
-        // inhabilitadas no deben ocupar su par". Sin esto, un paquete de una venta
-        // huérfana se queda mostrado para siempre en una sede que ya ni pertenece
-        // al recorrido de la ruta (nunca se puede "dejar en sede" desde ahí).
+        // Cancelada o inhabilitada no debe seguir apareciendo como pendiente en el
+        // móvil del conductor -- mismo criterio que ya aplican
+        // salidaProgramadaService.getAll()/tienePaquetesPendientes() y el resto de
+        // chequeos de "Paquetes de ventas inhabilitadas no deben ocupar su par".
+        // Sin esto, un paquete de una venta huérfana se queda mostrado para
+        // siempre en una sede que ya ni pertenece a la ruta (nunca se puede
+        // "dejar en sede" desde ahí).
         { model: EncomiendaVenta, as: 'encomienda', required: true, where: { habilitado: true, estado: { [Op.ne]: 'Cancelada' } }, include: [{ model: Destinatario, as: 'destinatario', include: [{ model: Destino, as: 'destino' }] }] },
         { model: SalidaVehiculoConductor, as: 'asignacion', include: [{ model: SalidaProgramada, as: 'salida', include: [{ model: Ruta, as: 'ruta', include: [{ model: Destino, as: 'destino' }] }] }] },
       ],

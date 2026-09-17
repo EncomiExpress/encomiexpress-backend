@@ -12,7 +12,7 @@ router.use(authenticate);
  * tags:
  *   name: Rutas
  *   description: Plantillas reutilizables de corredor (origen->destino). La agenda
- *     concreta (fecha/hora/estado/convoy/paradas) vive en /salidas.
+ *     concreta (fecha/hora/estado/convoy) vive en /salidas.
  */
 
 /**
