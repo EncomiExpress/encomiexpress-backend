@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { Ruta, SalidaProgramada, SalidaVehiculoConductor, EncomiendaVenta, Vehiculo, Conductor, Destino, AnticipoExcedente, Paquete, sequelize } = require('../models');
+const { Ruta, SalidaProgramada, SalidaVehiculoConductor, EncomiendaVenta, Vehiculo, Conductor, Destino, AnticipoExcedente, sequelize } = require('../models');
 
 // ─── Funciones detalladas (devuelven { bloqueado, dependencias[] }) ────────────
 
@@ -164,13 +164,12 @@ const verificarDependenciasCliente = async (clienteId, { idSede } = {}) => {
 
   const encomiendas = await EncomiendaVenta.findAll({
     where,
-    attributes: ['idEncomiendaVenta', 'estado'],
-    include: [{ model: Paquete, as: 'paquetes', attributes: ['numeroGuia'], required: false, limit: 1 }]
+    attributes: ['idEncomiendaVenta', 'estado', 'numeroGuia']
   });
   const dependencias = encomiendas.map(e => ({
     tipo: 'Encomienda',
     id: e.idEncomiendaVenta,
-    descripcion: `Guía ${e.paquetes?.[0]?.numeroGuia || '#' + e.idEncomiendaVenta} (${e.estado})`
+    descripcion: `Guía ${e.numeroGuia || '#' + e.idEncomiendaVenta} (${e.estado})`
   }));
   return { bloqueado: dependencias.length > 0, dependencias };
 };
@@ -192,13 +191,12 @@ const verificarDependenciasSalida = async (idSalida) => {
       habilitado: true,
       estado: { [Op.notIn]: ['Entregada', 'Completada con novedades', 'Cancelada'] }
     },
-    attributes: ['idEncomiendaVenta', 'estado'],
-    include: [{ model: Paquete, as: 'paquetes', attributes: ['numeroGuia'], required: false, limit: 1 }]
+    attributes: ['idEncomiendaVenta', 'estado', 'numeroGuia']
   });
   const dependencias = encomiendas.map(e => ({
     tipo: 'Encomienda',
     id: e.idEncomiendaVenta,
-    descripcion: `Guía ${e.paquetes?.[0]?.numeroGuia || '#' + e.idEncomiendaVenta} (${e.estado})`
+    descripcion: `Guía ${e.numeroGuia || '#' + e.idEncomiendaVenta} (${e.estado})`
   }));
   return { bloqueado: dependencias.length > 0, dependencias };
 };

@@ -1,7 +1,7 @@
 const {
   SalidaProgramada, SalidaVehiculoConductor, Ruta, Vehiculo, Conductor,
   Destino, EncomiendaVenta, Destinatario, Usuario, UsuarioSede, Rol, AnticipoExcedente,
-  Paquete, sequelize
+  Paquete, Cliente, sequelize
 } = require('../models');
 const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
@@ -1116,7 +1116,9 @@ const updateEstado = async (id, estado, { rol, idSede, interno = false } = {}) =
     throw new AppError(`Estado inválido. Debe ser uno de: ${estadosValidos.join(', ')}`, 400);
   }
 
-  const salida = await SalidaProgramada.findByPk(id, { include: [INCLUDE_PARES, { model: Ruta, as: 'ruta' }] });
+  // `ruta.destino` (municipio) se necesita más abajo para los correos "tu
+  // paquete ya va en camino" que se disparan al arrancar la salida.
+  const salida = await SalidaProgramada.findByPk(id, { include: [INCLUDE_PARES, { model: Ruta, as: 'ruta', include: [{ model: Destino, as: 'destino' }] }] });
   if (!salida) throw new AppError('Ruta no encontrada', 404);
 
   if (rol === 'operador_sede') {
@@ -1235,8 +1237,7 @@ const updateEstado = async (id, estado, { rol, idSede, interno = false } = {}) =
 
     const ventasSinFecha = await EncomiendaVenta.findAll({
       where: { idSalida: parseInt(id), habilitado: true, estado: { [Op.ne]: 'Cancelada' }, fechaEstimadaEntrega: null },
-      attributes: ['idEncomiendaVenta'],
-      include: [{ model: Paquete, as: 'paquetes', attributes: ['numeroGuia'], required: false, limit: 1 }],
+      attributes: ['idEncomiendaVenta', 'numeroGuia'],
     });
     if (ventasSinFecha.length > 0) {
       throw new AppError(
@@ -1245,8 +1246,8 @@ const updateEstado = async (id, estado, { rol, idSede, interno = false } = {}) =
         ventasSinFecha.map(v => ({
           tipo: 'venta',
           id: v.idEncomiendaVenta,
-          guia: v.paquetes?.[0]?.numeroGuia || `#${v.idEncomiendaVenta}`,
-          descripcion: `Guía ${v.paquetes?.[0]?.numeroGuia || '#' + v.idEncomiendaVenta} no tiene fecha estimada de entrega asignada`,
+          guia: v.numeroGuia || `#${v.idEncomiendaVenta}`,
+          descripcion: `Guía ${v.numeroGuia || '#' + v.idEncomiendaVenta} no tiene fecha estimada de entrega asignada`,
         })),
         'MISSING_DELIVERY_DATE'
       );
@@ -1264,6 +1265,52 @@ const updateEstado = async (id, estado, { rol, idSede, interno = false } = {}) =
       { estado: 'En Ruta' },
       { where: { idSalida: salida.idSalida, habilitado: true, estado: 'Programada' } }
     );
+
+    // Correos "tu paquete ya va en camino" (cliente) / "tienes un paquete en
+    // camino" (destinatario) -- se disparan justo acá, cuando la salida
+    // REALMENTE arranca (no al registrar la venta, que puede quedar programada
+    // para varios días después y dejaría "ya va en camino" siendo falso). Nunca
+    // debe bloquear el cambio de estado si Brevo falla -- ver config/email.js,
+    // mismo patrón fire-and-forget que el resto de correos transaccionales.
+    try {
+      const { sendPaqueteEnviadoEmail, sendPaquetePorRecibirEmail } = require('../config/email');
+      const ventasEnviadas = await EncomiendaVenta.findAll({
+        where: { idSalida: salida.idSalida, habilitado: true, estado: 'En Ruta' },
+        include: [
+          { model: Cliente, as: 'cliente', attributes: ['nombre', 'apellido', 'email'] },
+          { model: Destinatario, as: 'destinatario', attributes: ['nombreDestinatario', 'correoDestinatario'] },
+        ],
+      });
+      const destinoMunicipio = salida.ruta?.destino?.municipio || '';
+      for (const venta of ventasEnviadas) {
+        if (venta.cliente?.email) {
+          try {
+            await sendPaqueteEnviadoEmail(venta.cliente.email, {
+              nombreCliente: `${venta.cliente.nombre} ${venta.cliente.apellido}`.trim(),
+              numeroGuia: venta.numeroGuia,
+              destinoMunicipio,
+              fechaEstimadaEntrega: venta.fechaEstimadaEntrega,
+            });
+          } catch (error) {
+            console.error(`No se pudo enviar el correo de "paquete enviado" (venta #${venta.idEncomiendaVenta}):`, error.message);
+          }
+        }
+        if (venta.destinatario?.correoDestinatario) {
+          try {
+            await sendPaquetePorRecibirEmail(venta.destinatario.correoDestinatario, {
+              nombreDestinatario: venta.destinatario.nombreDestinatario,
+              numeroGuia: venta.numeroGuia,
+              origenMunicipio: salida.origen,
+              fechaEstimadaEntrega: venta.fechaEstimadaEntrega,
+            });
+          } catch (error) {
+            console.error(`No se pudo enviar el correo de "paquete por recibir" (venta #${venta.idEncomiendaVenta}):`, error.message);
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`No se pudieron enviar los correos de salida "En Ruta" (salida #${salida.idSalida}):`, error.message);
+    }
   }
 
   if ((estado === 'Completada' || estado === 'Cancelada') && salida.estado === 'En Ruta') {
@@ -1289,7 +1336,7 @@ const updateEstado = async (id, estado, { rol, idSede, interno = false } = {}) =
         ventasConPendientes.map((venta) => ({
           tipo: 'venta',
           id: venta.idEncomiendaVenta,
-          descripcion: `La venta con guía ${venta.paquetes?.[0]?.numeroGuia || 'sin guía'} tiene paquetes sin dejar en la sede`,
+          descripcion: `La venta con guía ${venta.numeroGuia || 'sin guía'} tiene paquetes sin dejar en la sede`,
         })),
         'PACKAGES_PENDING'
       );

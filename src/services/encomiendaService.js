@@ -6,6 +6,20 @@ const { sendPaqueteDevueltoEmail } = require('../config/email');
 const { MAX_DIAS_ANTICIPACION } = require('../utils/horarioLaboral');
 
 const MODALIDADES_RECAUDO_VALIDAS = ['Pago Inmediato', 'Contraentrega'];
+// Póliza de seguro opcional sobre el valor declarado de la mercancía (1%), por
+// paquete individual -- decisión de negocio confirmada por el cliente (P5).
+const PORCENTAJE_POLIZA = 0.01;
+
+// El valor declarado lo captura el remitente en el wizard, pero el 1% de la
+// póliza SIEMPRE se calcula acá, nunca se confía en un valorPoliza que llegue en
+// el body -- así nadie puede manipular el monto de la póliza desde el payload.
+// Sin valor declarado (o 0/negativo), ambos campos quedan NULL: la póliza es
+// opcional y no aplica.
+const resolverPoliza = (pkg) => {
+  const valorDeclarado = pkg.valorDeclarado != null && pkg.valorDeclarado !== '' ? parseFloat(pkg.valorDeclarado) : null;
+  if (!valorDeclarado || valorDeclarado <= 0) return { valorDeclarado: null, valorPoliza: null };
+  return { valorDeclarado, valorPoliza: Math.round(valorDeclarado * PORCENTAJE_POLIZA * 100) / 100 };
+};
 // Tope de la "novedad"/observación de un paquete en Entrega en dos fases — mismo
 // valor que ya usa "Observaciones" en Ruta/Venta (ver rutasValidator.js/
 // salidasValidator.js), aunque acá no hay un validators/paquetesValidator.js: este
@@ -114,16 +128,16 @@ const paqueteIncludeConAsignacion = (extra = {}) => ({
   ...extra,
 });
 
-// Genera numeroGuia por año (EE-2026-483920), uno POR PAQUETE (no por venta) — cada
-// paquete físico necesita su propio número de guía/código de barras único, porque en la
-// práctica se despachan por separado.
+// Genera numeroGuia por año (EE-2026-483920), uno POR VENTA (no por paquete, ver
+// migración 005) — una venta puede tener varios paquetes, pero todos comparten
+// esta misma guía.
 //
 // Los 6 dígitos son ALEATORIOS, no un contador visible — un número secuencial revela
 // cuántos envíos se han hecho y en qué orden, algo que no hace falta exponer. Como el
 // espacio de 6 dígitos (1.000.000 de valores) es finito, se verifica que no exista ya
 // y se reintenta unas pocas veces en el caso (raro) de que choque con uno existente.
 // pg_advisory_xact_lock serializa este paso entre transacciones concurrentes del mismo
-// año, para que dos paquetes nunca puedan "reservar" el mismo número al mismo tiempo;
+// año, para que dos ventas nunca puedan "reservar" el mismo número al mismo tiempo;
 // se libera solo al terminar la transacción completa.
 const generarNumeroGuia = async (transaction) => {
   // Año en hora Colombia, no la del servidor (Render corre en UTC) — sin esto, la
@@ -139,16 +153,16 @@ const generarNumeroGuia = async (transaction) => {
   for (let intento = 0; intento < 5; intento++) {
     const secuencia = crypto.randomInt(0, 1000000).toString().padStart(6, '0');
     const numeroGuia = `EE-${anio}-${secuencia}`;
-    const existente = await Paquete.findOne({ where: { numeroGuia }, transaction });
+    const existente = await EncomiendaVenta.findOne({ where: { numeroGuia }, transaction });
     if (!existente) return numeroGuia;
   }
 
   throw new AppError('No se pudo generar un número de guía único, intenta de nuevo.', 500);
 };
 
-// "numeroGuia" ya no es columna de encomienda_venta (vive en paquete, uno por paquete) —
-// para poder seguir ordenando el listado por ese criterio, se ordena por la guía del
-// paquete más antiguo de cada venta (el "paquete 1"), vía subquery correlacionada.
+// "numeroGuia" es columna propia de encomienda_venta (P12) — un sort/campo normal,
+// sin subquery correlacionada (antes había que ir a buscar la guía del paquete más
+// antiguo de cada venta).
 const buildOrder = (sortBy) => {
   if (!sortBy) return [];
   const allowed = ['fechaRegistro', 'estado', 'estadoPago', 'numeroGuia', 'idEncomiendaVenta', 'habilitado'];
@@ -159,17 +173,6 @@ const buildOrder = (sortBy) => {
   // (ej. mismo fechaRegistro, mismo estado), Postgres puede devolverlas en distinto orden
   // relativo según el LIMIT/OFFSET de cada consulta — se ve como que una fila "salta" de
   // posición al cambiar el tamaño de página, aunque nada haya cambiado en los datos.
-  if (field === 'numeroGuia') {
-    return [
-      [
-        sequelize.literal(
-          '(SELECT numero_guia FROM paquete WHERE paquete.id_encomienda_venta = "EncomiendaVenta"."id_encomienda_venta" ORDER BY id_paquete ASC LIMIT 1)'
-        ),
-        direction,
-      ],
-      ['idEncomiendaVenta', direction],
-    ];
-  }
   if (field === 'idEncomiendaVenta') return [[field, direction]];
   return [[field, direction], ['idEncomiendaVenta', direction]];
 };
@@ -190,6 +193,7 @@ const getAll = async ({ estado, idCliente, idSalida, habilitado, estadoPago, mod
     const { Op } = sequelize.Sequelize;
     const trimmed = q.trim();
     const conditions = [
+      { numeroGuia: { [Op.iLike]: `%${trimmed}%` } },
       { estado: { [Op.iLike]: `%${trimmed}%` } },
       { estadoPago: { [Op.iLike]: `%${trimmed}%` } },
       { '$cliente.nombre$': { [Op.iLike]: `%${trimmed}%` } },
@@ -206,17 +210,6 @@ const getAll = async ({ estado, idCliente, idSalida, habilitado, estadoPago, mod
       const resto = `%${partes.slice(1).join(' ')}%`;
       conditions.push({ [Op.and]: [{ '$cliente.nombre$': { [Op.iLike]: primero } }, { '$cliente.apellido$': { [Op.iLike]: resto } }] });
       conditions.push({ [Op.and]: [{ '$cliente.apellido$': { [Op.iLike]: primero } }, { '$cliente.nombre$': { [Op.iLike]: resto } }] });
-    }
-
-    // numeroGuia vive en Paquete (uno por paquete), no en EncomiendaVenta — se busca
-    // aparte y se combina por idEncomiendaVenta, para que una venta aparezca en los
-    // resultados sin importar cuál de sus paquetes coincida con la búsqueda.
-    const paquetesCoincidentes = await Paquete.findAll({
-      where: { numeroGuia: { [Op.iLike]: `%${trimmed}%` } },
-      attributes: ['idEncomiendaVenta'],
-    });
-    if (paquetesCoincidentes.length > 0) {
-      conditions.push({ idEncomiendaVenta: { [Op.in]: paquetesCoincidentes.map((p) => p.idEncomiendaVenta) } });
     }
 
     where[Op.or] = conditions;
@@ -513,6 +506,9 @@ const create = async (data, { rol, idSede } = {}) => {
       {
         idCliente,
         idSalida,
+        // Una sola guía por VENTA (P12) — todos los paquetes de esta venta la
+        // comparten, no se genera una por paquete.
+        numeroGuia: await generarNumeroGuia(transaction),
         fechaEstimadaEntrega: fechaEstimadaEntregaFinal || null,
         observaciones: observaciones || null,
         total: total || 0,
@@ -544,11 +540,11 @@ const create = async (data, { rol, idSede } = {}) => {
 
     if (paquetes && paquetes.length > 0) {
       for (const pkg of paquetes) {
+        const { valorDeclarado, valorPoliza } = resolverPoliza(pkg);
         await Paquete.create(
           {
             idEncomiendaVenta: encomienda.idEncomiendaVenta,
             idSalidaVehiculoConductor: pkg.idSalidaVehiculoConductor,
-            numeroGuia: await generarNumeroGuia(transaction),
             descripcionContenido: pkg.descripcionContenido || null,
             peso: pkg.peso || null,
             alto: pkg.alto || null,
@@ -556,6 +552,8 @@ const create = async (data, { rol, idSede } = {}) => {
             profundidad: pkg.profundidad || null,
             tipoCarga: pkg.tipoCarga || 'normal',
             estadoPago: esPagoInmediato ? 'Pagado' : 'Pendiente',
+            valorDeclarado,
+            valorPoliza,
           },
           { transaction }
         );
@@ -765,18 +763,20 @@ const update = async (id, data, { rol, idSede } = {}) => {
     }
 
     if (paquetes && paquetes.length > 0) {
-      // Diff en vez de "borrar todo y recrear": cada paquete tiene su propio número de
-      // guía/código de barras físico, así que editar la venta (o incluso editar OTRO
-      // paquete) nunca debe reasignarle un número nuevo a uno que no cambió. Solo se
-      // crea guía nueva para paquetes realmente nuevos (sin idPaquete); los que ya
-      // existían se actualizan en el mismo registro (incluyendo si se reasignaron a
-      // otro vehículo del convoy), y los que ya no vienen en el payload (se quitaron
-      // en el formulario) se eliminan.
+      // Diff en vez de "borrar todo y recrear": cada paquete físico ya trae su propio
+      // idPaquete con estado/historial de entrega/foto/asignación de vehículo -- editar
+      // la venta (o incluso editar OTRO paquete) nunca debe perder ese rastro para uno
+      // que no cambió. Los que ya existían se actualizan en el mismo registro
+      // (incluyendo si se reasignaron a otro vehículo del convoy); los realmente
+      // nuevos (sin idPaquete) se crean; los que ya no vienen en el payload (se
+      // quitaron en el formulario) se eliminan. numeroGuia ya no aplica acá -- es de
+      // la venta completa, fijado una sola vez en create().
       const existentes = await Paquete.findAll({ where: { idEncomiendaVenta: id }, transaction });
       const existentesPorId = new Map(existentes.map((p) => [p.idPaquete, p]));
       const idsConservados = new Set();
 
       for (const pkg of paquetes) {
+        const { valorDeclarado, valorPoliza } = resolverPoliza(pkg);
         const datos = {
           idSalidaVehiculoConductor: pkg.idSalidaVehiculoConductor,
           descripcionContenido: pkg.descripcionContenido || null,
@@ -785,6 +785,8 @@ const update = async (id, data, { rol, idSede } = {}) => {
           ancho: pkg.ancho || null,
           profundidad: pkg.profundidad || null,
           tipoCarga: pkg.tipoCarga || 'normal',
+          valorDeclarado,
+          valorPoliza,
         };
 
         if (pkg.idPaquete && existentesPorId.has(pkg.idPaquete)) {
@@ -794,9 +796,11 @@ const update = async (id, data, { rol, idSede } = {}) => {
           // Paquete nuevo del diff: nace con el estadoPago de la modalidad
           // vigente de la venta (misma regla que create()), sin esperar a que la
           // modalidad "haya cambiado" — un paquete nuevo nunca tuvo un
-          // estadoPago previo que preservar.
+          // estadoPago previo que preservar. numeroGuia NO se toca acá: es de la
+          // venta (encomienda.numeroGuia, fijado desde create()), un paquete nuevo
+          // agregado al editar comparte la misma guía que sus hermanos.
           await Paquete.create(
-            { idEncomiendaVenta: id, numeroGuia: await generarNumeroGuia(transaction), estadoPago: estadoPagoPaqueteVigente, ...datos },
+            { idEncomiendaVenta: id, estadoPago: estadoPagoPaqueteVigente, ...datos },
             { transaction }
           );
         }
@@ -928,7 +932,7 @@ const actualizarEstadoPaquete = async (idPaquete, estado, { observacion = '', fo
       if (cliente?.email) {
         await sendPaqueteDevueltoEmail(cliente.email, {
           nombreCliente: `${cliente.nombre} ${cliente.apellido}`.trim(),
-          numeroGuia: paquete.numeroGuia,
+          numeroGuia: encomienda.numeroGuia,
           motivo: observacion || '',
         });
       }
@@ -1243,7 +1247,7 @@ const registrarEntregaFinal = async (idPaquete, { accion, novedad = '', fotoEntr
       if (cliente?.email) {
         await sendPaqueteDevueltoEmail(cliente.email, {
           nombreCliente: `${cliente.nombre} ${cliente.apellido}`.trim(),
-          numeroGuia: paquete.numeroGuia,
+          numeroGuia: encomienda.numeroGuia,
           motivo: novedad || '',
         });
       }
@@ -1437,8 +1441,10 @@ const getPaquetesDevueltos = async ({ q, anio, mes, habilitado, page = 1, limit 
   const where = { estado: { [Op.in]: ['Devuelto', 'Devuelto a base'] } };
   if (q) {
     const trimmed = q.trim();
+    // numeroGuia es de la venta dueña (P12), no del paquete -- se busca vía el
+    // include de abajo ($encomienda.numero_guia$), igual que cliente.nombre/apellido.
     where[Op.or] = [
-      { numeroGuia: { [Op.iLike]: `%${trimmed}%` } },
+      { '$encomienda.numero_guia$': { [Op.iLike]: `%${trimmed}%` } },
       { '$encomienda.cliente.nombre$': { [Op.iLike]: `%${trimmed}%` } },
       { '$encomienda.cliente.apellido$': { [Op.iLike]: `%${trimmed}%` } },
       { '$encomienda.cliente.email$': { [Op.iLike]: `%${trimmed}%` } },

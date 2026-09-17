@@ -80,6 +80,11 @@ const createValidation = [
   body('paquetes.*.idSalidaVehiculoConductor')
     .notEmpty().withMessage('Cada paquete debe tener un vehículo asignado')
     .isInt().withMessage('ID de vehículo/conductor de ruta debe ser un número entero'),
+  // Póliza de seguro opcional (1% del valor declarado) — solo el valor declarado
+  // viaja en el body, el 1% lo calcula el backend (ver encomiendaService.resolverPoliza).
+  body('paquetes.*.valorDeclarado')
+    .optional({ nullable: true })
+    .isFloat({ min: 0.01, max: 9999999 }).withMessage('El valor declarado debe estar entre 1 y 9.999.999'),
 ];
 
 const updateValidation = [
@@ -157,6 +162,9 @@ const updateValidation = [
   body('paquetes.*.idSalidaVehiculoConductor')
     .notEmpty().withMessage('Cada paquete debe tener un vehículo asignado')
     .isInt().withMessage('ID de vehículo/conductor de ruta debe ser un número entero'),
+  body('paquetes.*.valorDeclarado')
+    .optional({ nullable: true })
+    .isFloat({ min: 0.01, max: 9999999 }).withMessage('El valor declarado debe estar entre 1 y 9.999.999'),
 ];
 
 module.exports = {

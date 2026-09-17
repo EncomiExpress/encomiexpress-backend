@@ -10,9 +10,14 @@ const Ruta = sequelize.define('Ruta', {
     primaryKey: true,
     autoIncrement: true
   },
+  // Una plantilla por corredor: el servicio ya rechaza duplicados a mano
+  // (rutaService.create/update), pero `unique: true` lo respalda también a
+  // nivel de base de datos -- sin esto, dos creaciones casi simultáneas podían
+  // colarse entre el chequeo y el INSERT y dejar dos rutas al mismo destino.
   idDestino: {
     type: DataTypes.INTEGER,
-    allowNull: false
+    allowNull: false,
+    unique: true
   },
   observaciones: {
     type: DataTypes.TEXT,

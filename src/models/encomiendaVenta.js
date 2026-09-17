@@ -15,6 +15,15 @@ const EncomiendaVenta = sequelize.define('EncomiendaVenta', {
     type: DataTypes.INTEGER,
     allowNull: false
   },
+  // Número de guía POR VENTA (no por paquete, ver migración 005) — una venta
+  // puede tener varios paquetes, pero todos comparten esta misma guía. Formato
+  // EE-<año>-<secuencial aleatorio de 6 dígitos>, generado en
+  // encomiendaService.generarNumeroGuia.
+  numeroGuia: {
+    type: DataTypes.STRING(50),
+    allowNull: false,
+    unique: true
+  },
   fechaRegistro: {
     type: DataTypes.DATEONLY,
     defaultValue: DataTypes.NOW

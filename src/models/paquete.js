@@ -15,11 +15,6 @@ const Paquete = sequelize.define('Paquete', {
     type: DataTypes.INTEGER,
     allowNull: false
   },
-  numeroGuia: {
-    type: DataTypes.STRING(50),
-    allowNull: false,
-    unique: true
-  },
   descripcionContenido: {
     type: DataTypes.TEXT,
     allowNull: true
@@ -102,6 +97,16 @@ const Paquete = sequelize.define('Paquete', {
   },
   fechaDevolucion: {
     type: DataTypes.DATE,
+    allowNull: true
+  },
+  // Póliza de seguro opcional (1% del valor declarado), por paquete individual —
+  // ver encomiendaService.resolverPoliza. NULL en ambos cuando no se contrata.
+  valorDeclarado: {
+    type: DataTypes.DECIMAL(12, 2),
+    allowNull: true
+  },
+  valorPoliza: {
+    type: DataTypes.DECIMAL(12, 2),
     allowNull: true
   }
 }, {

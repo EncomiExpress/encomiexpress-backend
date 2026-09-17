@@ -170,6 +170,16 @@ const create = async (data) => {
     estado: 'Disponible',
   });
 
+  // Correo de bienvenida -- nunca debe bloquear el registro si Brevo falla o no
+  // hay API key configurada (mismo patrón fire-and-forget que el resto de correos
+  // transaccionales, ver config/email.js).
+  try {
+    const { sendBienvenidaEmail } = require('../config/email');
+    await sendBienvenidaEmail(usuario.email, { nombre: usuario.nombre, rolLabel: 'conductor' });
+  } catch (error) {
+    console.error(`No se pudo enviar el correo de bienvenida (conductor #${conductor.idConductor}):`, error.message);
+  }
+
   return Conductor.findByPk(conductor.idConductor, {
     include: [{ model: Usuario, as: 'usuario', attributes: { exclude: ['password'] } }],
   });

@@ -168,6 +168,16 @@ const create = async (data) => {
     return creado;
   });
 
+  // Correo de bienvenida -- nunca debe bloquear el registro si Brevo falla o no
+  // hay API key configurada (mismo patrón fire-and-forget que el resto de correos
+  // transaccionales, ver config/email.js).
+  try {
+    const { sendBienvenidaEmail } = require('../config/email');
+    await sendBienvenidaEmail(usuario.email, { nombre: usuario.nombre, rolLabel: rol.nombre.toLowerCase() });
+  } catch (error) {
+    console.error(`No se pudo enviar el correo de bienvenida (usuario #${usuario.idUsuario}):`, error.message);
+  }
+
   return {
     idUsuario: usuario.idUsuario,
     email: usuario.email,

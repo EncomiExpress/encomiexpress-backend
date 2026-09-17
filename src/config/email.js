@@ -30,6 +30,21 @@ const sendBrevoEmail = async ({ to, subject, html }) => {
 const ICONS = {
   candado: '🔒',
   paquete: '📦',
+  bienvenida: '🎉',
+  camion: '🚚',
+  buzon: '📬',
+  calendario: '📅',
+};
+
+// Formatea una fecha DATEONLY ("YYYY-MM-DD") a texto largo en español, sin pasar
+// por Date/timezone -- un Date de un DATEONLY puro se puede correr un día si el
+// runtime no está en UTC, así que se arma el texto directo del string.
+const formatFechaLarga = (fecha) => {
+  if (!fecha) return '';
+  const [anio, mes, dia] = String(fecha).split('-');
+  const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  const mesNombre = MESES[parseInt(mes, 10) - 1] || '';
+  return `${parseInt(dia, 10)} de ${mesNombre} de ${anio}`;
 };
 
 const buildEmailShell = ({ badgeBg, icon, heading, bodyHtml, extraHtml = '' }) => `
@@ -96,4 +111,101 @@ const sendPaqueteDevueltoEmail = async (email, { nombreCliente = '', numeroGuia 
   });
 };
 
-module.exports = { sendPasswordRecoveryEmail, sendPaqueteDevueltoEmail };
+// Bienvenida al crear un Usuario (panel: admin/operador_sede/distribuidor) o un
+// Conductor (que siempre nace con su propio Usuario, ver conductorService.create)
+// -- ambos ganan credenciales de acceso nuevas, así que ambos la reciben.
+// `rolLabel` es opcional y en minúscula sin artículo (ej. "conductor",
+// "distribuidor de sede") para que encaje en "te damos la bienvenida como ___".
+const sendBienvenidaEmail = async (email, { nombre = '', rolLabel = '' } = {}) => {
+  return sendBrevoEmail({
+    to: email,
+    subject: '¡Bienvenido a EncomiExpress!',
+    html: buildEmailShell({
+      badgeBg: '#05966920',
+      icon: ICONS.bienvenida,
+      heading: '¡Bienvenido a EncomiExpress!',
+      bodyHtml: `
+        ¡Hola${nombre ? ` <b>${nombre}</b>` : ''}! Le damos la bienvenida a la familia <b>EncomiExpress</b>${rolLabel ? ` como ${rolLabel}` : ''}.
+        <br><br>
+        Tu cuenta ya está activa y lista para usarse. Estamos muy contentos de tenerte en el equipo y confiamos en que, juntos, seguiremos haciendo de cada envío una entrega exitosa.
+        <br><br>
+        ¡Felicidades por unirte y bienvenido a bordo!
+      `,
+    }),
+  });
+};
+
+// Al conductor de la ida se le confirma la salida del paquete cuando la salida
+// pasa a "En Ruta" (no al registrar la venta -- ahí el camión puede salir varios
+// días después, y "ya va en camino" sería falso). Ver salidaProgramadaService.js,
+// updateEstado().
+const sendPaqueteEnviadoEmail = async (email, { nombreCliente = '', numeroGuia = '', destinoMunicipio = '', fechaEstimadaEntrega = '' } = {}) => {
+  return sendBrevoEmail({
+    to: email,
+    subject: 'Tu paquete ya va en camino - EncomiExpress',
+    html: buildEmailShell({
+      badgeBg: '#1A2E6E20',
+      icon: ICONS.camion,
+      heading: '¡Tu paquete ya va en camino!',
+      bodyHtml: `
+        Hola${nombreCliente ? ` <b>${nombreCliente}</b>` : ''}, te confirmamos que tu paquete con guía <b>${numeroGuia}</b>
+        ya salió${destinoMunicipio ? ` con destino a <b>${destinoMunicipio}</b>` : ''}.
+        ${fechaEstimadaEntrega ? `<br><br>Fecha estimada de entrega: <b>${formatFechaLarga(fechaEstimadaEntrega)}</b>.` : ''}
+        <br><br>Te mantendremos informado ante cualquier novedad durante el trayecto.
+      `,
+    }),
+  });
+};
+
+// Mismo disparador que sendPaqueteEnviadoEmail (salida "En Ruta"), pero para el
+// destinatario -- avisa que un paquete viene en camino hacia él, no que él envió
+// algo.
+const sendPaquetePorRecibirEmail = async (email, { nombreDestinatario = '', numeroGuia = '', origenMunicipio = '', fechaEstimadaEntrega = '' } = {}) => {
+  return sendBrevoEmail({
+    to: email,
+    subject: 'Tienes un paquete en camino - EncomiExpress',
+    html: buildEmailShell({
+      badgeBg: '#0EA5E920',
+      icon: ICONS.buzon,
+      heading: '¡Tienes un paquete en camino!',
+      bodyHtml: `
+        Hola${nombreDestinatario ? ` <b>${nombreDestinatario}</b>` : ''}, te escribimos para avisarte que tienes un paquete en camino
+        con guía <b>${numeroGuia}</b>${origenMunicipio ? ` desde ${origenMunicipio}` : ''}. Llegará muy pronto.
+        ${fechaEstimadaEntrega ? `<br><br>Fecha estimada de entrega: <b>${formatFechaLarga(fechaEstimadaEntrega)}</b>.` : ''}
+        <br><br>Gracias por confiar en EncomiExpress.
+      `,
+    }),
+  });
+};
+
+// Aviso a quien es dueño del documento (propietario del vehículo para SOAT/
+// Revisión Técnico-Mecánica/Seguro de Terceros, o el propio conductor para su
+// licencia) 8 días antes de que venza -- ver jobs/avisarDocumentosPorVencer.js.
+// Por ahora solo se le avisa al dueño del documento (no a un admin todavía, ver
+// LOGICA.md/decisión pendiente).
+const sendDocumentoPorVencerEmail = async (email, { nombre = '', tipoDocumento = '', identificador = '', fechaVencimiento = '' } = {}) => {
+  return sendBrevoEmail({
+    to: email,
+    subject: 'Un documento está por vencer - EncomiExpress',
+    html: buildEmailShell({
+      badgeBg: '#F59E0B20',
+      icon: ICONS.calendario,
+      heading: 'Documento próximo a vencer',
+      bodyHtml: `
+        Hola${nombre ? ` <b>${nombre}</b>` : ''}, te recordamos que ${tipoDocumento}${identificador ? ` de <b>${identificador}</b>` : ''}
+        vence el <b>${formatFechaLarga(fechaVencimiento)}</b> (en 8 días).
+        <br><br>
+        Por favor gestiona la renovación a tiempo para evitar que se bloquee la asignación a nuevas rutas.
+      `,
+    }),
+  });
+};
+
+module.exports = {
+  sendPasswordRecoveryEmail,
+  sendPaqueteDevueltoEmail,
+  sendBienvenidaEmail,
+  sendPaqueteEnviadoEmail,
+  sendPaquetePorRecibirEmail,
+  sendDocumentoPorVencerEmail,
+};
