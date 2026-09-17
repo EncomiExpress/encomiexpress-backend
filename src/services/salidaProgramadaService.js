@@ -7,7 +7,7 @@ const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { verificarDependenciasSalida } = require('../middlewares/validateDependencies');
 const { tieneLicenciaVigente } = require('../utils/licenciaHelper');
-const { esDomingo, getRangoHorario, horaDentroDeRango, MIN_DIAS_SALIDA_LLEGADA, DIAS_MARGEN_ENTRE_RUTAS, MAX_DIAS_ANTICIPACION, DESCANSO_MINIMO_REGRESO_MINUTOS } = require('../utils/horarioLaboral');
+const { esDomingo, getRangoHorario, horaDentroDeRango, MIN_DIAS_SALIDA_LLEGADA, DIAS_MARGEN_ENTRE_RUTAS, MAX_DIAS_ANTICIPACION } = require('../utils/horarioLaboral');
 const { determinarEstadoEncomienda, determinarEstadoPago, paqueteLiberaRuta } = require('./paqueteStateUtils');
 
 // Absorbe TODA la lógica de negocio que antes vivía en rutaService.js (máquina de
@@ -111,14 +111,17 @@ const INCLUDE_RUTA = {
 const INCLUDE_REGRESO_IDA = {
   model: SalidaProgramada, as: 'salidaIda', required: false,
   // idDestino (además de para el chip): con qué sede matchear tieneOperadorSedePropio
-  // en getAll/getById — ver ahí.
+  // en getAll/getById — ver ahí. idRuta: para armar el link "ver esta salida"
+  // (buildSalidaHighlightUrl) desde el chip -- Sequelize NO agrega solo la PK de un
+  // include anidado cuando su propio `attributes` está restringido (a diferencia del
+  // modelo raíz de la consulta), así que hay que pedirla explícito.
   attributes: ['idSalida', 'origen', 'estado'],
-  include: [{ model: Ruta, as: 'ruta', attributes: ['idDestino'], include: [{ model: Destino, as: 'destino', attributes: ['municipio'] }] }],
+  include: [{ model: Ruta, as: 'ruta', attributes: ['idRuta', 'idDestino'], include: [{ model: Destino, as: 'destino', attributes: ['municipio'] }] }],
 };
 const INCLUDE_REGRESO_VUELTA = {
   model: SalidaProgramada, as: 'salidaRegreso', required: false,
   attributes: ['idSalida', 'origen', 'estado'],
-  include: [{ model: Ruta, as: 'ruta', attributes: ['idDestino'], include: [{ model: Destino, as: 'destino', attributes: ['municipio'] }] }],
+  include: [{ model: Ruta, as: 'ruta', attributes: ['idRuta', 'idDestino'], include: [{ model: Destino, as: 'destino', attributes: ['municipio'] }] }],
 };
 
 const buildOrder = (sortBy) => {
@@ -167,7 +170,7 @@ const buildSedeCondition = (idSede) => sequelize.literal(
   ))`
 );
 
-const buildRutaWhere = ({ habilitado, estado, anio, mes, q, idConductor, idVehiculo, idDestino, idRuta, rol, idSede }) => {
+const buildRutaWhere = ({ habilitado, estado, anio, mes, q, idConductor, idVehiculo, idDestino, idRuta, regresoDeRuta, rol, idSede }) => {
   const where = {};
   if (habilitado !== undefined) where.habilitado = habilitado === 'true';
   if (estado && estado !== ESTADO_REGRESO_PENDIENTE && estado !== ESTADO_VIAJE_REGRESO) where.estado = estado;
@@ -182,6 +185,18 @@ const buildRutaWhere = ({ habilitado, estado, anio, mes, q, idConductor, idVehic
   if (idRuta) {
     const condicion = parseInt(idRuta);
     where.idRuta = where.idRuta ? { [Op.and]: [where.idRuta, condicion] } : condicion;
+  }
+  // "Rutas de regreso" (ListarRuta.jsx, 2026-09-17): en vez de filtrar por idRuta
+  // directo (que para un regreso siempre es la plantilla compartida "Medellín", igual
+  // para todas las sedes), filtra por "es un regreso cuya ida cuelga de ESTA ruta
+  // real" -- mismo criterio que rutaService.buildRutaSedeCondition pero acotado a una
+  // sola ruta puntual en vez de "cualquier sede". idRuta y regresoDeRuta son
+  // mutuamente excluyentes: el caller manda uno u otro según la pestaña activa.
+  if (regresoDeRuta) {
+    const condicion = sequelize.literal(
+      `"SalidaProgramada"."id_salida_ida" IN (SELECT id_salida FROM salida_programada WHERE id_ruta = ${parseInt(regresoDeRuta)})`
+    );
+    where.idSalida = where.idSalida ? { [Op.and]: [where.idSalida, condicion] } : condicion;
   }
   if (rol === 'operador_sede') where.idSalida = where.idSalida
     ? { [Op.and]: [where.idSalida, buildSedeCondition(idSede)] }
@@ -254,8 +269,8 @@ const buildRutaWhere = ({ habilitado, estado, anio, mes, q, idConductor, idVehic
   return where;
 };
 
-const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sortBy, q, idConductor, idVehiculo, idDestino, idRuta, rol, idSede } = {}) => {
-  const where = buildRutaWhere({ habilitado, estado, anio, mes, q, idConductor, idVehiculo, idDestino, idRuta, rol, idSede });
+const getAll = async ({ habilitado, estado, anio, mes, page = 1, limit = 10, sortBy, q, idConductor, idVehiculo, idDestino, idRuta, regresoDeRuta, rol, idSede } = {}) => {
+  const where = buildRutaWhere({ habilitado, estado, anio, mes, q, idConductor, idVehiculo, idDestino, idRuta, regresoDeRuta, rol, idSede });
 
   const offset = (page - 1) * limit;
   const order = buildOrder(sortBy);
@@ -495,6 +510,12 @@ const validarHorarioRuta = ({ fechaSalida, horaSalida, fechaLlegadaEstimada, hor
       const r = getRangoHorario(fechaLlegadaEstimada);
       throw new AppError(`La hora estimada de llegada debe estar entre las ${r.min} y las ${r.max}`, 400);
     }
+    // Mismo día: la llegada tiene que ser un rato después de la salida, no antes --
+    // MIN_DIAS_SALIDA_LLEGADA=0 permite que sea el mismo día (chequeo de arriba), pero
+    // eso no garantiza el orden de las horas dentro de ese día.
+    if (horaLlegadaEstimada && horaSalida && fechaLlegadaEstimada === fechaSalida && horaLlegadaEstimada <= horaSalida) {
+      throw new AppError('La hora estimada de llegada debe ser posterior a la hora de salida cuando es el mismo día', 400);
+    }
   }
 };
 
@@ -515,31 +536,18 @@ const validarPares = (pares) => {
   }
 };
 
-// Descanso mínimo del conductor: la salida del regreso no puede quedar a menos de
-// DESCANSO_MINIMO_REGRESO_MINUTOS de la hora en que llegó de la ida -- antes nada lo
-// impedía (solo se validaba que no chocara con OTRA ruta distinta). Si a la ida le
-// falta fecha/hora de llegada (dato viejo, o nunca se llenó), no hay contra qué
-// comparar y se deja pasar -- no es motivo para bloquear el regreso.
-const validarDescansoRegreso = (fechaLlegadaIda, horaLlegadaIda, fechaSalida, horaSalida) => {
-  if (!fechaLlegadaIda || !horaLlegadaIda || !fechaSalida || !horaSalida) return;
-  const llegada = new Date(`${fechaLlegadaIda}T${horaLlegadaIda}-05:00`);
-  const salida = new Date(`${fechaSalida}T${horaSalida}-05:00`);
-  const minimoMs = DESCANSO_MINIMO_REGRESO_MINUTOS * 60 * 1000;
-  if (salida.getTime() - llegada.getTime() < minimoMs) {
-    throw new AppError(
-      `El conductor necesita descansar al menos ${DESCANSO_MINIMO_REGRESO_MINUTOS} minutos entre la llegada de la ida (${horaLlegadaIda.slice(0, 5)} del ${fechaLlegadaIda}) y la salida del regreso.`,
-      400
-    );
-  }
-};
-
 // Si se manda idSalidaIda, valida que sea una salida real de la que ESTA sea el
 // regreso: debe existir, estar habilitada, ya "Completada" (el viaje de ida ya
 // terminó) y no tener ya otro regreso enlazado (uq_salida_ida en init.sql es el
-// respaldo a nivel de BD; esto da un mensaje claro antes de llegar ahí). También
-// exige el descanso mínimo del conductor si ya se conoce fecha/hora de salida del
-// regreso (ver validarDescansoRegreso).
-const validarSalidaIda = async (idSalidaIda, { fechaSalida, horaSalida } = {}) => {
+// respaldo a nivel de BD; esto da un mensaje claro antes de llegar ahí).
+//
+// 2026-09-17, a pedido de la usuaria: se quitó la exigencia de un descanso mínimo
+// del conductor entre la llegada de la ida y la salida del regreso (agregada por
+// Yefersn15 el día anterior). El sistema no guarda una hora de llegada REAL --
+// "Hora llegada est." es la única que existe -- así que medir el descanso desde ahí
+// bloqueaba casos donde el convoy en realidad había llegado antes de lo estimado.
+// Queda a criterio del admin/operador_sede al elegir fecha/hora del regreso.
+const validarSalidaIda = async (idSalidaIda) => {
   if (!idSalidaIda) return;
   const salidaIda = await SalidaProgramada.findByPk(idSalidaIda);
   if (!salidaIda || !salidaIda.habilitado) throw new AppError('La ruta de ida no existe o está inhabilitada', 404);
@@ -550,7 +558,6 @@ const validarSalidaIda = async (idSalidaIda, { fechaSalida, horaSalida } = {}) =
   if (yaTieneRegreso) {
     throw new AppError('Esa ruta ya tiene un viaje de regreso programado', 409);
   }
-  validarDescansoRegreso(salidaIda.fechaLlegadaEstimada, salidaIda.horaLlegadaEstimada, fechaSalida, horaSalida);
 };
 
 // El origen de una salida no lo elige el usuario (el campo va bloqueado en el
@@ -584,7 +591,39 @@ const validarOrigenDistinto = async ({ idDestino, idSalidaIda, transaction }) =>
 // vehiculo.idDestinoActual != null) no se puede asignar a una salida NUEVA desde
 // Medellín hasta que se le programe el regreso. Para un REGRESO es al revés: solo se
 // pueden asignar los que quedaron justo en el destino de la ida.
-const validarUbicacionParaRuta = async ({ pares, idSalidaIda }) => {
+//
+// idDestinoActual solo refleja el estado REAL de ahora mismo (se fija al completar
+// una salida) -- no alcanza a cubrir el caso de una salida NUEVA (B) programada para
+// una fecha futura cuando el vehículo/conductor ya tiene OTRA salida Programada/En
+// Ruta (A) que, cronológicamente, termina antes de B sin ser un regreso: ahora mismo
+// idDestinoActual puede seguir en null (A ni siquiera arrancó), pero para cuando B
+// tenga que arrancar, A ya lo habrá dejado fuera de base. validarChoqueVehiculoConductor
+// (más abajo) evita que A y B se solapen en fechas, pero es puramente temporal -- no
+// sabe que un viaje directo termina en OTRO municipio, no en Medellín. Por eso, para
+// una salida nueva (no un regreso), además de mirar el estado real también se
+// proyecta: de las otras salidas Programada/En Ruta de este vehículo/conductor que
+// arrancan ANTES que B, la más tardía -- si esa no es un regreso, B se rechaza igual
+// que si ya estuviera fuera de base ahora mismo (mismo tipo de error, unificado).
+const masTardiaAntesDe = (otrosPares, idKey, fechaSalida, horaSalida) => {
+  const porId = new Map();
+  const horaB = horaSalida || '00:00';
+  for (const p of otrosPares) {
+    const id = p[idKey];
+    if (!id) continue;
+    const s = p.salida;
+    const horaS = s.horaSalida || '00:00';
+    const esAntes = s.fechaSalida < fechaSalida || (s.fechaSalida === fechaSalida && horaS < horaB);
+    if (!esAntes) continue;
+    const actual = porId.get(id);
+    const horaActual = actual ? (actual.horaSalida || '00:00') : null;
+    if (!actual || s.fechaSalida > actual.fechaSalida || (s.fechaSalida === actual.fechaSalida && horaS > horaActual)) {
+      porId.set(id, s);
+    }
+  }
+  return porId;
+};
+
+const validarUbicacionParaRuta = async ({ pares, idSalidaIda, fechaSalida, horaSalida, idSalidaExcluir }) => {
   const idsVehiculo = pares.map((p) => parseInt(p.idVehiculo));
   const idsConductor = pares.map((p) => parseInt(p.idConductor));
 
@@ -610,6 +649,26 @@ const validarUbicacionParaRuta = async ({ pares, idSalidaIda }) => {
     idaIdDestino = salidaIda?.ruta?.idDestino ?? null;
   }
 
+  let ultimaVehiculoAntes = new Map();
+  let ultimaConductorAntes = new Map();
+  if (!idSalidaIda && fechaSalida) {
+    const otrosPares = await SalidaVehiculoConductor.findAll({
+      where: {
+        habilitado: true,
+        [Op.or]: [{ idVehiculo: { [Op.in]: idsVehiculo } }, { idConductor: { [Op.in]: idsConductor } }],
+        ...(idSalidaExcluir ? { idSalida: { [Op.ne]: idSalidaExcluir } } : {}),
+      },
+      include: [{
+        model: SalidaProgramada, as: 'salida', required: true,
+        where: { habilitado: true, estado: { [Op.in]: ['Programada', 'En Ruta'] } },
+        attributes: ['idSalida', 'origen', 'fechaSalida', 'horaSalida', 'idSalidaIda'],
+        include: [INCLUDE_RUTA],
+      }],
+    });
+    ultimaVehiculoAntes = masTardiaAntesDe(otrosPares, 'idVehiculo', fechaSalida, horaSalida);
+    ultimaConductorAntes = masTardiaAntesDe(otrosPares, 'idConductor', fechaSalida, horaSalida);
+  }
+
   const vehFuera = [];
   const condFuera = [];
 
@@ -620,6 +679,13 @@ const validarUbicacionParaRuta = async ({ pares, idSalidaIda }) => {
       }
     } else if (v.idDestinoActual) {
       vehFuera.push({ tipo: 'Vehículo', id: v.idVehiculo, descripcion: `El vehículo ${v.placa} quedó en ${v.destinoActual?.municipio || 'otro municipio'}: necesita un viaje de regreso antes de una ruta nueva desde Medellín` });
+    } else {
+      const previa = ultimaVehiculoAntes.get(v.idVehiculo);
+      if (previa && !previa.idSalidaIda) {
+        const destinoPrevia = previa.ruta?.destino?.municipio || 'otro municipio';
+        const etiquetaPrevia = previa.origen ? `${previa.origen} → ${destinoPrevia}` : `Salida #${previa.idSalida}`;
+        vehFuera.push({ tipo: 'Vehículo', id: v.idVehiculo, idRuta: previa.ruta?.idRuta ?? null, idSalidaConflicto: previa.idSalida, descripcion: `El vehículo ${v.placa} va a quedar en ${destinoPrevia} tras la salida ${etiquetaPrevia} (${previa.fechaSalida}): necesita su regreso programado antes de poder asignarlo a esta salida` });
+      }
     }
   }
   for (const c of conductores) {
@@ -630,18 +696,25 @@ const validarUbicacionParaRuta = async ({ pares, idSalidaIda }) => {
       }
     } else if (c.idDestinoActual) {
       condFuera.push({ tipo: 'Conductor', id: c.idConductor, descripcion: `${nom} quedó en ${c.destinoActual?.municipio || 'otro municipio'}: necesita un viaje de regreso antes de una ruta nueva desde Medellín` });
+    } else {
+      const previa = ultimaConductorAntes.get(c.idConductor);
+      if (previa && !previa.idSalidaIda) {
+        const destinoPrevia = previa.ruta?.destino?.municipio || 'otro municipio';
+        const etiquetaPrevia = previa.origen ? `${previa.origen} → ${destinoPrevia}` : `Salida #${previa.idSalida}`;
+        condFuera.push({ tipo: 'Conductor', id: c.idConductor, idRuta: previa.ruta?.idRuta ?? null, idSalidaConflicto: previa.idSalida, descripcion: `${nom} va a quedar en ${destinoPrevia} tras la salida ${etiquetaPrevia} (${previa.fechaSalida}): necesita su regreso programado antes de poder asignarlo a esta salida` });
+      }
     }
   }
 
   if (vehFuera.length > 0) {
     throw new AppError(
-      idSalidaIda ? 'Uno o más vehículos no están en el municipio desde el que sale el regreso' : 'Uno o más vehículos quedaron fuera de base y necesitan un viaje de regreso',
+      idSalidaIda ? 'Uno o más vehículos no están en el municipio desde el que sale el regreso' : 'Uno o más vehículos van a quedar fuera de base y necesitan un viaje de regreso antes de esta salida',
       409, vehFuera, 'VEHICULO_FUERA_DE_BASE'
     );
   }
   if (condFuera.length > 0) {
     throw new AppError(
-      idSalidaIda ? 'Uno o más conductores no están en el municipio desde el que sale el regreso' : 'Uno o más conductores quedaron fuera de base y necesitan un viaje de regreso',
+      idSalidaIda ? 'Uno o más conductores no están en el municipio desde el que sale el regreso' : 'Uno o más conductores van a quedar fuera de base y necesitan un viaje de regreso antes de esta salida',
       409, condFuera, 'CONDUCTOR_FUERA_DE_BASE'
     );
   }
@@ -655,7 +728,7 @@ const create = async (data, { rol, idSede } = {}) => {
   if (!plantilla || !plantilla.habilitado) throw new AppError('La ruta no existe o está inhabilitada', 404);
 
   validarHorarioRuta({ fechaSalida, horaSalida, fechaLlegadaEstimada, horaLlegadaEstimada, exigirFechaSalidaFutura: true });
-  await validarSalidaIda(idSalidaIda, { fechaSalida, horaSalida });
+  await validarSalidaIda(idSalidaIda);
 
   // El regreso de una sede con operador_sede propio es EXCLUSIVO de esa sede — ni
   // siquiera el admin puede crearlo desde el wizard general (mismo criterio ya
@@ -698,7 +771,7 @@ const create = async (data, { rol, idSede } = {}) => {
   }
 
   validarPares(paresEfectivos);
-  await validarUbicacionParaRuta({ pares: paresEfectivos, idSalidaIda });
+  await validarUbicacionParaRuta({ pares: paresEfectivos, idSalidaIda, fechaSalida, horaSalida });
 
   const destino = await Destino.findByPk(plantilla.idDestino);
   if (!destino) throw new AppError('Destino no encontrado', 404);
@@ -786,7 +859,6 @@ const crearRegresoDesdeSede = async (idSalidaIda, { fechaSalida, horaSalida, fec
   if (yaTieneRegreso) {
     throw new AppError('Esa ruta ya tiene un viaje de regreso programado', 409);
   }
-  validarDescansoRegreso(ida.fechaLlegadaEstimada, ida.horaLlegadaEstimada, fechaSalida, horaSalida);
   // La ida debe terminar en la sede de quien dispara el regreso: solo ahí el convoy
   // queda "fuera de base" (validarUbicacionParaRuta, más abajo, es la validación
   // autoritativa) — esto solo da un mensaje más claro.
@@ -879,7 +951,11 @@ const update = async (id, data, { rol, idSede } = {}) => {
     throw new AppError('El regreso no permite cambiar su vehículo/conductor: hereda el de la ida.', 400);
   }
   if (!salida.idSalidaIda && Array.isArray(pares) && pares.length > 0) {
-    await validarUbicacionParaRuta({ pares, idSalidaIda: salida.idSalidaIda });
+    // fechaSalida/horaSalida acá son las del body (undefined si esta edición no las
+    // toca) -- si no vinieron, se usa la que la salida ya tiene guardada.
+    const fechaSalidaEfectiva = fechaSalida || salida.fechaSalida;
+    const horaSalidaEfectiva = horaSalida || salida.horaSalida;
+    await validarUbicacionParaRuta({ pares, idSalidaIda: salida.idSalidaIda, fechaSalida: fechaSalidaEfectiva, horaSalida: horaSalidaEfectiva, idSalidaExcluir: salida.idSalida });
   }
 
   // undefined = el campo no vino en el body -> conservar el valor actual.
@@ -908,15 +984,6 @@ const update = async (id, data, { rol, idSede } = {}) => {
     fechaLlegadaEstimada: nuevaFechaLlegadaEstimada, horaLlegadaEstimada: nuevaHoraLlegadaEstimada,
     exigirFechaSalidaFutura: nuevaFechaSalida !== salida.fechaSalida,
   });
-  // Si esta salida ES un regreso y se le está tocando el horario de salida, sigue
-  // exigiendo el descanso mínimo contra la llegada real de su ida.
-  if (salida.idSalidaIda && (fechaSalida !== undefined || horaSalida !== undefined)) {
-    const idaDeEsteRegreso = await SalidaProgramada.findByPk(salida.idSalidaIda, {
-      attributes: ['fechaLlegadaEstimada', 'horaLlegadaEstimada'],
-    });
-    validarDescansoRegreso(idaDeEsteRegreso?.fechaLlegadaEstimada, idaDeEsteRegreso?.horaLlegadaEstimada, nuevaFechaSalida, nuevaHoraSalida);
-  }
-
   // Si se mueve la fecha de salida y/o llegada, la fechaEstimadaEntrega que ya tenía
   // prometida cada venta de esta salida deja de tener sentido -- se sincroniza a la
   // nueva fecha mínima (mismo criterio de siempre, ver versión vieja de este
@@ -1167,14 +1234,16 @@ const updateEstado = async (id, estado, { rol, idSede, interno = false } = {}) =
         include: [{ model: SalidaProgramada, as: 'salida', required: true, where: { habilitado: true, estado: 'En Ruta' }, include: [{ model: Ruta, as: 'ruta', include: [{ model: Destino, as: 'destino', attributes: ['municipio'] }] }] }],
       });
       if (conflictoVehiculo) {
-        const rutaLabel = conflictoVehiculo.salida.origen ? `${conflictoVehiculo.salida.origen} → ${conflictoVehiculo.salida.ruta?.destino?.municipio || 'Sin destino'}` : `Ruta #${conflictoVehiculo.idSalida}`;
+        const fechaLabel = conflictoVehiculo.salida.fechaSalida ? conflictoVehiculo.salida.fechaSalida.split('-').reverse().join('/') : '';
+        const salidaLabel = conflictoVehiculo.salida.origen ? `${conflictoVehiculo.salida.origen} → ${conflictoVehiculo.salida.ruta?.destino?.municipio || 'Sin destino'}${fechaLabel ? `, ${fechaLabel}` : ''}` : `Salida #${conflictoVehiculo.idSalida}`;
         throw new AppError(
-          `El vehículo ${par.vehiculo?.placa || ''} está en curso con la ruta ${rutaLabel}`,
+          `El vehículo ${par.vehiculo?.placa || ''} está en curso con la salida ${salidaLabel}`,
           409,
           [{
             tipo: 'Conflicto de vehículo',
             id: conflictoVehiculo.idSalida,
-            descripcion: `${par.vehiculo?.placa || 'Vehículo'} está en curso con la ruta ${rutaLabel}`
+            idRuta: conflictoVehiculo.salida.ruta?.idRuta ?? null,
+            descripcion: `${par.vehiculo?.placa || 'Vehículo'} está en curso con la salida ${salidaLabel}`
           }],
           'VEHICLE_IN_USE'
         );
@@ -1186,14 +1255,16 @@ const updateEstado = async (id, estado, { rol, idSede, interno = false } = {}) =
       });
       if (conflictoConductor) {
         const u = par.conductor?.usuario;
-        const rutaLabel = conflictoConductor.salida.origen ? `${conflictoConductor.salida.origen} → ${conflictoConductor.salida.ruta?.destino?.municipio || 'Sin destino'}` : `Ruta #${conflictoConductor.idSalida}`;
+        const fechaLabel = conflictoConductor.salida.fechaSalida ? conflictoConductor.salida.fechaSalida.split('-').reverse().join('/') : '';
+        const salidaLabel = conflictoConductor.salida.origen ? `${conflictoConductor.salida.origen} → ${conflictoConductor.salida.ruta?.destino?.municipio || 'Sin destino'}${fechaLabel ? `, ${fechaLabel}` : ''}` : `Salida #${conflictoConductor.idSalida}`;
         throw new AppError(
-          `El conductor ${u ? `${u.nombre} ${u.apellido}` : ''} está en curso con la ruta ${rutaLabel}`,
+          `El conductor ${u ? `${u.nombre} ${u.apellido}` : ''} está en curso con la salida ${salidaLabel}`,
           409,
           [{
             tipo: 'Conflicto de conductor',
             id: conflictoConductor.idSalida,
-            descripcion: `${u ? `${u.nombre} ${u.apellido}` : 'El conductor'} está en curso con la ruta ${rutaLabel}`
+            idRuta: conflictoConductor.salida.ruta?.idRuta ?? null,
+            descripcion: `${u ? `${u.nombre} ${u.apellido}` : 'El conductor'} está en curso con la salida ${salidaLabel}`
           }],
           'CONDUCTOR_IN_USE'
         );
@@ -1209,30 +1280,34 @@ const updateEstado = async (id, estado, { rol, idSede, interno = false } = {}) =
       }
     }
 
+    // 2026-09-17, a pedido de la usuaria: un viaje de regreso (idSalidaIda) ya NO
+    // está exento de estos dos chequeos. La excepción original (LOGICA.md, "un
+    // regreso sí puede arrancar vacío") existía porque no había forma de cargarle
+    // encomiendas a un regreso -- ahora que operador_sede puede registrar ventas
+    // contra su propio regreso (destino Medellín, ver ventaValidation.js), la misma
+    // regla de "no salir vacío" aplica igual que a cualquier salida normal.
     const encomiendaCount = await EncomiendaVenta.count({
       where: { idSalida: parseInt(id), habilitado: true }
     });
-    if (encomiendaCount === 0 && !salida.idSalidaIda) {
+    if (encomiendaCount === 0) {
       throw new AppError('No se puede iniciar la ruta sin encomiendas asignadas. Registra al menos una encomienda antes de poner la ruta En Ruta.', 400);
     }
 
-    if (!salida.idSalidaIda) {
-      const paresVacios = [];
-      for (const par of pares) {
-        const n = await Paquete.count({
-          where: { idSalidaVehiculoConductor: par.idSalidaVehiculoConductor },
-          include: [{ model: EncomiendaVenta, as: 'encomienda', attributes: [], required: true, where: { habilitado: true, estado: { [Op.ne]: 'Cancelada' } } }],
-        });
-        if (n === 0) paresVacios.push(par);
-      }
-      if (paresVacios.length > 0) {
-        throw new AppError(
-          'Todos los vehículos del convoy deben llevar al menos un paquete antes de poner la ruta En Ruta.',
-          409,
-          paresVacios.map((par) => ({ tipo: 'vehiculo', id: par.idVehiculo, descripcion: `${par.vehiculo?.placa || 'Vehículo'}: sin paquetes asignados` })),
-          'VEHICULO_SIN_CARGA'
-        );
-      }
+    const paresVacios = [];
+    for (const par of pares) {
+      const n = await Paquete.count({
+        where: { idSalidaVehiculoConductor: par.idSalidaVehiculoConductor },
+        include: [{ model: EncomiendaVenta, as: 'encomienda', attributes: [], required: true, where: { habilitado: true, estado: { [Op.ne]: 'Cancelada' } } }],
+      });
+      if (n === 0) paresVacios.push(par);
+    }
+    if (paresVacios.length > 0) {
+      throw new AppError(
+        'Todos los vehículos del convoy deben llevar al menos un paquete antes de poner la ruta En Ruta.',
+        409,
+        paresVacios.map((par) => ({ tipo: 'vehiculo', id: par.idVehiculo, descripcion: `${par.vehiculo?.placa || 'Vehículo'}: sin paquetes asignados` })),
+        'VEHICULO_SIN_CARGA'
+      );
     }
 
     const ventasSinFecha = await EncomiendaVenta.findAll({
@@ -1389,27 +1464,27 @@ const toggleHabilitado = async (id, { rol, idSede } = {}) => {
   const salida = await SalidaProgramada.findByPk(id, {
     include: [INCLUDE_PARES, { model: Ruta, as: 'ruta', include: [{ model: Destino, as: 'destino' }] }],
   });
-  if (!salida) throw new AppError('Ruta no encontrada', 404);
+  if (!salida) throw new AppError('Salida no encontrada', 404);
 
   if (salida.idSalidaIda) {
     const ida = await SalidaProgramada.findByPk(salida.idSalidaIda, { include: [{ model: Ruta, as: 'ruta', attributes: ['idDestino'] }] });
     if (rol === 'operador_sede') {
       if (!ida || ida.ruta?.idDestino !== idSede) {
-        throw new AppError('Esa ruta no es un regreso de tu sede', 403);
+        throw new AppError('Esa salida no es un regreso de tu sede', 403);
       }
     } else if (ida?.ruta && await tieneOperadorSedePropio(ida.ruta.idDestino)) {
-      throw new AppError('Esta ruta es el regreso de una sede con operador propio — solo esa sede puede inhabilitarla.', 403);
+      throw new AppError('Esta salida es el regreso de una sede con operador propio — solo esa sede puede inhabilitarla.', 403);
     }
   } else if (rol === 'operador_sede') {
-    throw new AppError('No tienes permiso para inhabilitar esta ruta', 403);
+    throw new AppError('No tienes permiso para inhabilitar esta salida', 403);
   }
 
   if (salida.habilitado === true) {
     if (salida.estado === 'En Ruta') {
       throw new AppError(
-        'No se puede inhabilitar esta ruta porque está en curso. Complétala o cancélala primero.',
+        'No se puede inhabilitar esta salida porque está en curso. Complétala o cancélala primero.',
         409,
-        [{ tipo: 'Ruta activa', id: salida.idSalida, descripcion: 'Esta ruta está "En Ruta" y no ha finalizado' }],
+        [{ tipo: 'Salida activa', id: salida.idSalida, idRuta: salida.ruta?.idRuta ?? null, descripcion: 'Esta salida está "En Ruta" y no ha finalizado' }],
         'DEPENDENCY_CONFLICT'
       );
     }
@@ -1417,7 +1492,7 @@ const toggleHabilitado = async (id, { rol, idSede } = {}) => {
     const { bloqueado, dependencias } = await verificarDependenciasSalida(id);
     if (bloqueado) {
       throw new AppError(
-        'No se puede inhabilitar esta ruta porque tiene encomiendas activas',
+        'No se puede inhabilitar esta salida porque tiene encomiendas activas',
         409,
         dependencias,
         'DEPENDENCY_CONFLICT'
@@ -1450,14 +1525,30 @@ const getAniosDisponibles = async ({ rol, idSede } = {}) => {
   return rows.map((r) => r.anio);
 };
 
-const getPageOf = async (id, { limit = 10, rol, idSede } = {}) => {
+// idRuta: la pantalla de Salidas SIEMPRE está scoped a una plantilla
+// (/transporte/rutas/:idRuta/salidas -- ver ListarSalidaProgramada.jsx), así que
+// "cuántas salidas hay antes que esta" tiene que contarse dentro de ESE mismo
+// conjunto, no contra la tabla completa -- si no, con pocas salidas en la ruta pero
+// muchas en el sistema, el cálculo devuelve una página que no existe en la vista
+// filtrada (ej. página 3 de una lista de 3 salidas con limit=5) y la tabla se ve
+// vacía aunque haya resultados; con un limit más grande a veces "se arregla" solo
+// porque cambiar filas por página resetea a la página 1, no porque el cálculo haya
+// quedado bien.
+const getPageOf = async (id, { limit = 10, idRuta, regresoDeRuta, rol, idSede } = {}) => {
   const record = await SalidaProgramada.findByPk(id, { attributes: ['idSalida'] });
-  if (!record) throw new AppError('Ruta no encontrada', 404);
+  if (!record) throw new AppError('Salida no encontrada', 404);
   const where = { idSalida: { [Op.gt]: parseInt(id) } };
+  if (idRuta) where.idRuta = idRuta;
+  // Mismo criterio que buildRutaWhere -- la vista "Rutas de regreso" cuenta contra
+  // el conjunto de regresos de ESA ruta, no contra sus idas (que es lo que daría
+  // `idRuta` directo, siempre la plantilla compartida "Medellín" para un regreso).
+  if (regresoDeRuta) {
+    where.idSalidaIda = { [Op.in]: sequelize.literal(`(SELECT id_salida FROM salida_programada WHERE id_ruta = ${parseInt(regresoDeRuta)})`) };
+  }
   if (rol === 'operador_sede') {
     where[Op.and] = [buildSedeCondition(idSede)];
     const visible = await SalidaProgramada.findOne({ where: { idSalida: id, [Op.and]: [buildSedeCondition(idSede)] }, attributes: ['idSalida'] });
-    if (!visible) throw new AppError('No tienes acceso a esta ruta', 403);
+    if (!visible) throw new AppError('No tienes acceso a esta salida', 403);
   }
   const before = await SalidaProgramada.count({ where });
   const page = Math.floor(before / limit) + 1;
@@ -1487,8 +1578,12 @@ const getDisponibilidad = async ({ idVehiculos = [], idConductores = [], idSalid
         as: 'salida',
         required: true,
         where: { habilitado: true, estado: { [Op.in]: ['Programada', 'En Ruta'] } },
-        attributes: ['idSalida', 'origen', 'estado', 'fechaSalida', 'fechaLlegadaEstimada'],
-        include: [{ model: Ruta, as: 'ruta', attributes: ['idDestino'], include: [{ model: Destino, as: 'destino', attributes: ['municipio', 'departamento'] }] }],
+        // horaSalida + idSalidaIda: el frontend (useDisponibilidadPares) los necesita
+        // para replicar la proyección de validarUbicacionParaRuta -- de las ocupaciones
+        // que arrancan antes que la candidata, cuál es la más tardía y si esa es un
+        // regreso (idSalidaIda) o no.
+        attributes: ['idSalida', 'origen', 'estado', 'fechaSalida', 'horaSalida', 'fechaLlegadaEstimada', 'idSalidaIda'],
+        include: [{ model: Ruta, as: 'ruta', attributes: ['idRuta', 'idDestino'], include: [{ model: Destino, as: 'destino', attributes: ['municipio', 'departamento'] }] }],
       },
       { model: Vehiculo, as: 'vehiculo', attributes: ['idVehiculo', 'placa'] },
       {
@@ -1502,11 +1597,14 @@ const getDisponibilidad = async ({ idVehiculos = [], idConductores = [], idSalid
 
   return pares.map((p) => ({
     idSalida: p.salida.idSalida,
+    idRuta: p.salida.ruta?.idRuta ?? null,
     origen: p.salida.origen,
     destino: p.salida.ruta?.destino ? { municipio: p.salida.ruta.destino.municipio, departamento: p.salida.ruta.destino.departamento } : null,
     estado: p.salida.estado,
     fechaSalida: p.salida.fechaSalida,
+    horaSalida: p.salida.horaSalida,
     fechaLlegadaEstimada: p.salida.fechaLlegadaEstimada,
+    idSalidaIda: p.salida.idSalidaIda,
     idVehiculo: p.idVehiculo,
     placa: p.vehiculo?.placa || null,
     idConductor: p.idConductor,

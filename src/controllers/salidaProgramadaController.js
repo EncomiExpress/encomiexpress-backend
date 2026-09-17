@@ -23,6 +23,7 @@ exports.getAll = async (req, res, next) => {
       idVehiculo: req.query.idVehiculo,
       idDestino: req.query.idDestino,
       idRuta: req.query.idRuta,
+      regresoDeRuta: req.query.regresoDeRuta,
       page,
       limit,
       sortBy,
@@ -147,7 +148,9 @@ exports.getPageOf = async (req, res, next) => {
   try {
     const { id } = req.params;
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
-    const result = await salidaProgramadaService.getPageOf(id, { limit, ...contextoSede(req) });
+    const idRuta = req.query.idRuta ? parseInt(req.query.idRuta) : undefined;
+    const regresoDeRuta = req.query.regresoDeRuta ? parseInt(req.query.regresoDeRuta) : undefined;
+    const result = await salidaProgramadaService.getPageOf(id, { limit, idRuta, regresoDeRuta, ...contextoSede(req) });
     res.json({ success: true, data: result });
   } catch (error) {
     next(error);

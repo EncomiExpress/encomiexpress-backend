@@ -132,7 +132,7 @@ const toggleHabilitado = async (id) => {
     const { bloqueado, dependencias } = await verificarDependenciasDestino(id);
     if (bloqueado) {
       throw new AppError(
-        'No se puede inhabilitar este destino: tiene rutas activas o programadas, o un convoy fuera de base con el regreso sin programar',
+        'No se puede inhabilitar este destino: tiene salidas activas o programadas, o un convoy fuera de base con el regreso sin programar',
         409,
         dependencias,
         'DEPENDENCY_CONFLICT'

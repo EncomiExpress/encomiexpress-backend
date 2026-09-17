@@ -4,6 +4,12 @@ const rutaService = require('../services/rutaService');
 // (agenda concreta: fecha/hora/estado/convoy) vive ahora en
 // salidaProgramadaController.js / routes/salidas.js.
 
+// Mismo criterio que salidaProgramadaController.js -- ver rutaService.buildRutaSedeCondition.
+const contextoSede = (req) => ({
+  rol: req.usuario?.rol?.codigo,
+  idSede: req.sede?.idDestino,
+});
+
 exports.getAll = async (req, res, next) => {
   try {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
@@ -13,8 +19,10 @@ exports.getAll = async (req, res, next) => {
       q: req.query.q,
       idDestino: req.query.idDestino,
       sortBy: req.query.sortBy,
+      tipo: req.query.tipo,
       page,
       limit,
+      ...contextoSede(req),
     });
     res.json({ success: true, data: result.data, total: result.total });
   } catch (error) {

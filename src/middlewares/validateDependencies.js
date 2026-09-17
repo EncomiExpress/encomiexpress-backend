@@ -38,14 +38,15 @@ const verificarDependenciasVehiculo = async (vehiculoId) => {
     where: { habilitado: true, estado: 'En Ruta' },
     include: [
       { model: SalidaVehiculoConductor, as: 'paresVehiculoConductor', where: { idVehiculo: vehiculoId, habilitado: true }, required: true, attributes: [] },
-      { model: Ruta, as: 'ruta', attributes: ['idDestino'], include: [{ model: Destino, as: 'destino', attributes: ['municipio', 'departamento'] }] },
+      { model: Ruta, as: 'ruta', attributes: ['idRuta', 'idDestino'], include: [{ model: Destino, as: 'destino', attributes: ['municipio', 'departamento'] }] },
     ],
     attributes: ['idSalida', 'origen', 'estado', 'fechaSalida']
   });
   salidas.forEach(s => dependencias.push({
-    tipo: 'Ruta',
+    tipo: 'Salida',
     id: s.idSalida,
-    descripcion: `${s.origen || `Ruta #${s.idSalida}`} → ${s.ruta?.destino?.municipio || ''} (${s.estado})`
+    idRuta: s.ruta?.idRuta ?? null,
+    descripcion: `${s.origen || `Salida #${s.idSalida}`} → ${s.ruta?.destino?.municipio || ''} (${s.estado})`
   }));
 
   return { bloqueado: dependencias.length > 0, dependencias };
@@ -72,14 +73,15 @@ const verificarDependenciasConductor = async (conductorId) => {
     where: { habilitado: true, estado: 'En Ruta' },
     include: [
       { model: SalidaVehiculoConductor, as: 'paresVehiculoConductor', where: { idConductor: conductorId, habilitado: true }, required: true, attributes: [] },
-      { model: Ruta, as: 'ruta', attributes: ['idDestino'], include: [{ model: Destino, as: 'destino', attributes: ['municipio'] }] },
+      { model: Ruta, as: 'ruta', attributes: ['idRuta', 'idDestino'], include: [{ model: Destino, as: 'destino', attributes: ['municipio'] }] },
     ],
     attributes: ['idSalida', 'origen', 'fechaSalida']
   });
   salidasEnCurso.forEach(s => dependencias.push({
-    tipo: 'Ruta activa',
+    tipo: 'Salida activa',
     id: s.idSalida,
-    descripcion: `${s.origen || `Ruta #${s.idSalida}`} → ${s.ruta?.destino?.municipio || ''} (En Ruta)`
+    idRuta: s.ruta?.idRuta ?? null,
+    descripcion: `${s.origen || `Salida #${s.idSalida}`} → ${s.ruta?.destino?.municipio || ''} (En Ruta)`
   }));
 
   const anticiposPendientes = await AnticipoExcedente.findAll({
@@ -105,13 +107,14 @@ const verificarDependenciasDestino = async (destinoId) => {
       habilitado: true,
       estado: { [Op.in]: ['Programada', 'En Ruta'] }
     },
-    include: [{ model: Ruta, as: 'ruta', required: true, attributes: ['idDestino'], where: { idDestino: destinoId } }],
+    include: [{ model: Ruta, as: 'ruta', required: true, attributes: ['idRuta', 'idDestino'], where: { idDestino: destinoId } }],
     attributes: ['idSalida', 'origen', 'estado', 'fechaSalida']
   });
   salidas.forEach(s => dependencias.push({
-    tipo: 'Ruta',
+    tipo: 'Salida',
     id: s.idSalida,
-    descripcion: `${s.origen || `Ruta #${s.idSalida}`} — ${s.fechaSalida || ''} (${s.estado})`
+    idRuta: s.ruta?.idRuta ?? null,
+    descripcion: `${s.origen || `Salida #${s.idSalida}`} — ${s.fechaSalida || ''} (${s.estado})`
   }));
 
   // "Regreso pendiente": la ida ya llegó (Completada) pero el convoy sigue fuera de
@@ -137,13 +140,14 @@ const verificarDependenciasDestino = async (destinoId) => {
         ),
       },
     },
-    include: [{ model: Ruta, as: 'ruta', required: true, attributes: ['idDestino'], where: { idDestino: destinoId } }],
+    include: [{ model: Ruta, as: 'ruta', required: true, attributes: ['idRuta', 'idDestino'], where: { idDestino: destinoId } }],
     attributes: ['idSalida', 'origen', 'fechaSalida']
   });
   regresosPendientes.forEach(s => dependencias.push({
     tipo: 'Regreso pendiente',
     id: s.idSalida,
-    descripcion: `${s.origen || `Ruta #${s.idSalida}`} — ${s.fechaSalida || ''} (convoy fuera de base, sin regreso programado)`
+    idRuta: s.ruta?.idRuta ?? null,
+    descripcion: `${s.origen || `Salida #${s.idSalida}`} — ${s.fechaSalida || ''} (convoy fuera de base, sin regreso programado)`
   }));
 
   return { bloqueado: dependencias.length > 0, dependencias };
