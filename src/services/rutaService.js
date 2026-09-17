@@ -3,7 +3,7 @@ const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 
 // CRUD de la plantilla reutilizable de corredor (origen->destino). Sin fecha, hora,
-// estado, convoy ni paradas -- eso vive en SalidaProgramada, una fila por cada viaje
+// estado ni convoy -- eso vive en SalidaProgramada, una fila por cada viaje
 // concreto y reservable de esta ruta (ver salidaProgramadaService.js, que absorbió
 // TODA la lógica de negocio de la máquina de estados que antes vivía acá). Ver
 // LOGICA.md, "Ruta -> plantilla + SalidaProgramada -> agenda" (Fase 3 del split).
@@ -12,12 +12,19 @@ const buildOrder = (sortBy) => {
   if (!sortBy) return [];
   const allowed = ['idRuta', 'habilitado'];
   const parts = sortBy.split('.');
-  const field = allowed.includes(parts[0]) ? parts[0] : 'idRuta';
+  const field = parts[0];
   const direction = parts[1] === 'desc' ? 'DESC' : 'ASC';
+  // "municipio" no es columna propia de Ruta: se ordena por el destino asociado
+  // (ver columna "Ruta" de la tabla en el frontend, que en realidad filtra por
+  // destino ya que el origen siempre es Medellín).
+  if (field === 'municipio') {
+    return [[{ model: Destino, as: 'destino' }, 'municipio', direction], ['idRuta', direction]];
+  }
+  const resolvedField = allowed.includes(field) ? field : 'idRuta';
   // Desempate por id: sin esto, filas con el mismo valor en "field" pueden salir en
   // distinto orden relativo según el LIMIT de cada consulta.
-  if (field === 'idRuta') return [[field, direction]];
-  return [[field, direction], ['idRuta', direction]];
+  if (resolvedField === 'idRuta') return [[resolvedField, direction]];
+  return [[resolvedField, direction], ['idRuta', direction]];
 };
 
 const getAll = async ({ habilitado, q, idDestino, page = 1, limit = 10, sortBy } = {}) => {
@@ -68,6 +75,14 @@ const create = async (data) => {
     throw new AppError('Destino no encontrado', 404);
   }
 
+  // Una plantilla por corredor: se crea una sola vez y se reutiliza indefinidamente
+  // (ver RUTAS-SALIDAS.md) — no importa si la que ya existe está inhabilitada, ahí
+  // lo que corresponde es rehabilitarla, no crear una segunda hacia el mismo destino.
+  const existente = await Ruta.findOne({ where: { idDestino } });
+  if (existente) {
+    throw new AppError('Ya existe una ruta registrada hacia ese destino', 400);
+  }
+
   const ruta = await Ruta.create({
     idDestino,
     observaciones: observaciones || null,
@@ -84,10 +99,14 @@ const update = async (id, data) => {
     throw new AppError('Ruta no encontrada', 404);
   }
 
-  if (idDestino !== undefined) {
+  if (idDestino !== undefined && parseInt(idDestino) !== ruta.idDestino) {
     const destino = await Destino.findByPk(idDestino);
     if (!destino) {
       throw new AppError('Destino no encontrado', 404);
+    }
+    const existente = await Ruta.findOne({ where: { idDestino, idRuta: { [Op.ne]: id } } });
+    if (existente) {
+      throw new AppError('Ya existe una ruta registrada hacia ese destino', 400);
     }
   }
 
