@@ -187,7 +187,7 @@ const create = async (data) => {
   // transaccionales, ver config/email.js).
   try {
     const { sendBienvenidaEmail } = require('../config/email');
-    await sendBienvenidaEmail(usuario.email, { nombre: usuario.nombre, rolLabel: rol.nombre.toLowerCase() });
+    await sendBienvenidaEmail(usuario.email, { nombre: `${usuario.nombre} ${usuario.apellido}`.trim(), rolLabel: rol.nombre.toLowerCase(), rolCodigo: rol.codigo });
   } catch (error) {
     console.error(`No se pudo enviar el correo de bienvenida (usuario #${usuario.idUsuario}):`, error.message);
   }

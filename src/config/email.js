@@ -34,6 +34,10 @@ const ICONS = {
   camion: '🚚',
   buzon: '📬',
   calendario: '📅',
+  recibo: '🧾',
+  campana: '🔔',
+  sede: '📍',
+  exito: '✅',
 };
 
 // Formatea una fecha DATEONLY ("YYYY-MM-DD") a texto largo en español, sin pasar
@@ -111,12 +115,40 @@ const sendPaqueteDevueltoEmail = async (email, { nombreCliente = '', numeroGuia 
   });
 };
 
+// Dónde entra y qué puede hacer cada rol, en una frase corta -- ver
+// database/init.sql (INSERT INTO rol) para la fuente de verdad de qué rol
+// tiene acceso a qué superficie. `admin` entra sobre todo por el panel web,
+// pero también tiene su propia sección en la app móvil (gestión de
+// anticipos), así que se menciona ambas.
+const BIENVENIDA_POR_ROL = {
+  admin: {
+    donde: 'el panel web (y la app móvil para gestionar anticipos)',
+    quePuede: 'gestionar usuarios, rutas, ventas, clientes y conductores',
+  },
+  operador_sede: {
+    donde: 'el panel web',
+    quePuede: 'registrar tus ventas y gestionar tus clientes desde tu sede',
+  },
+  conductor: {
+    donde: 'la app móvil',
+    quePuede: 'ver tus rutas asignadas, gestionar tus anticipos y confirmar tus entregas en sede',
+  },
+  distribuidor: {
+    donde: 'la app móvil',
+    quePuede: 'gestionar la entrega final de los paquetes que lleguen a tu sede',
+  },
+};
+
 // Bienvenida al crear un Usuario (panel: admin/operador_sede/distribuidor) o un
 // Conductor (que siempre nace con su propio Usuario, ver conductorService.create)
 // -- ambos ganan credenciales de acceso nuevas, así que ambos la reciben.
 // `rolLabel` es opcional y en minúscula sin artículo (ej. "conductor",
 // "distribuidor de sede") para que encaje en "te damos la bienvenida como ___".
-const sendBienvenidaEmail = async (email, { nombre = '', rolLabel = '' } = {}) => {
+// `rolCodigo` (ej. 'admin', 'conductor') busca en BIENVENIDA_POR_ROL para
+// agregar, brevemente, por dónde entra y qué puede hacer -- un código que no
+// esté en la tabla simplemente omite esa parte, sin romper el correo.
+const sendBienvenidaEmail = async (email, { nombre = '', rolLabel = '', rolCodigo = '' } = {}) => {
+  const info = BIENVENIDA_POR_ROL[rolCodigo];
   return sendBrevoEmail({
     to: email,
     subject: '¡Bienvenido a EncomiExpress!',
@@ -127,7 +159,10 @@ const sendBienvenidaEmail = async (email, { nombre = '', rolLabel = '' } = {}) =
       bodyHtml: `
         ¡Hola${nombre ? ` <b>${nombre}</b>` : ''}! Le damos la bienvenida a la familia <b>EncomiExpress</b>${rolLabel ? ` como ${rolLabel}` : ''}.
         <br><br>
-        Tu cuenta ya está activa y lista para usarse. Estamos muy contentos de tenerte en el equipo y confiamos en que, juntos, seguiremos haciendo de cada envío una entrega exitosa.
+        Tu cuenta ya está activa y lista para usarse${info ? ` desde ${info.donde}` : ''}.
+        ${info ? `<br><br>Ahí vas a poder ${info.quePuede}.` : ''}
+        <br><br>
+        Estamos muy contentos de tenerte en el equipo y confiamos en que, juntos, seguiremos haciendo de cada envío una entrega exitosa.
         <br><br>
         ¡Felicidades por unirte y bienvenido a bordo!
       `,
@@ -201,6 +236,113 @@ const sendDocumentoPorVencerEmail = async (email, { nombre = '', tipoDocumento =
   });
 };
 
+// P9, Notificación 2 — al remitente, apenas se registra la venta (encomiendaService.
+// create()). Distinta de sendPaqueteEnviadoEmail: esta es "ya quedó registrada tu
+// encomienda", no "ya salió" -- el camión puede partir días después, así que acá NO
+// se dice "en camino" para no adelantar algo que todavía no pasó.
+const sendEncomiendaRegistradaClienteEmail = async (email, { nombreCliente = '', numeroGuia = '', destinoMunicipio = '', fechaEstimadaEntrega = '' } = {}) => {
+  return sendBrevoEmail({
+    to: email,
+    subject: 'Registramos tu encomienda - EncomiExpress',
+    html: buildEmailShell({
+      badgeBg: '#1A2E6E20',
+      icon: ICONS.recibo,
+      heading: '¡Registramos tu encomienda!',
+      bodyHtml: `
+        Hola${nombreCliente ? ` <b>${nombreCliente}</b>` : ''}, confirmamos el registro de tu encomienda con guía <b>${numeroGuia}</b>
+        ${destinoMunicipio ? `con destino a <b>${destinoMunicipio}</b>` : ''}.
+        ${fechaEstimadaEntrega ? `<br><br>Fecha estimada de entrega: <b>${formatFechaLarga(fechaEstimadaEntrega)}</b>.` : ''}
+        <br><br>Te avisaremos apenas salga en camino.
+      `,
+    }),
+  });
+};
+
+// P9, Notificación 2 — mismo disparador, para el destinatario: le anticipa que le
+// llegará algo, antes incluso de que el camión salga.
+const sendEncomiendaRegistradaDestinatarioEmail = async (email, { nombreDestinatario = '', numeroGuia = '', origenMunicipio = '', fechaEstimadaEntrega = '' } = {}) => {
+  return sendBrevoEmail({
+    to: email,
+    subject: 'Te enviaron una encomienda - EncomiExpress',
+    html: buildEmailShell({
+      badgeBg: '#0EA5E920',
+      icon: ICONS.recibo,
+      heading: 'Te enviaron una encomienda',
+      bodyHtml: `
+        Hola${nombreDestinatario ? ` <b>${nombreDestinatario}</b>` : ''}, te informamos que se registró una encomienda para ti
+        con guía <b>${numeroGuia}</b>${origenMunicipio ? ` desde ${origenMunicipio}` : ''}.
+        ${fechaEstimadaEntrega ? `<br><br>Fecha estimada de entrega: <b>${formatFechaLarga(fechaEstimadaEntrega)}</b>.` : ''}
+        <br><br>Te avisaremos apenas salga en camino.
+      `,
+    }),
+  });
+};
+
+// P9, Notificación 3 — al destinatario, cuando el distribuidor registra un intento
+// fallido ('Intento') o cierra el paquete como no entregado ('Devuelto'). Invita a
+// coordinar la entrega o pasar a recoger -- distinto de sendPaqueteDevueltoEmail
+// (esa avisa al REMITENTE que su paquete no se pudo entregar; esta le habla
+// directo al destinatario, que es quien puede resolverlo).
+const sendInsistenciaDestinatarioEmail = async (email, { nombreDestinatario = '', numeroGuia = '', municipioSede = '', esFinal = false } = {}) => {
+  return sendBrevoEmail({
+    to: email,
+    subject: 'No pudimos entregarte tu encomienda - EncomiExpress',
+    html: buildEmailShell({
+      badgeBg: '#F59E0B20',
+      icon: ICONS.campana,
+      heading: 'No pudimos entregarte tu encomienda',
+      bodyHtml: `
+        Hola${nombreDestinatario ? ` <b>${nombreDestinatario}</b>` : ''}, intentamos entregarte la encomienda con guía <b>${numeroGuia}</b>
+        y no fue posible.
+        ${esFinal
+          ? `<br><br>Quedó retenida en nuestra sede${municipioSede ? ` en <b>${municipioSede}</b>` : ''}. Por favor coordina con nosotros la recepción o pasa a recogerla.`
+          : `<br><br>Seguiremos intentando la entrega, pero también puedes coordinar con nosotros o pasar a recogerla en nuestra sede${municipioSede ? ` en <b>${municipioSede}</b>` : ''}.`}
+      `,
+    }),
+  });
+};
+
+// P9, Notificación 4 (parte "Llegó a la sede") — al destinatario, cuando el
+// conductor deja el paquete en la sede de destino (encomiendaService.
+// dejarPaquetesEnSede()). Un correo por VENTA, no por paquete (varios paquetes de
+// la misma venta comparten guía y destinatario).
+const sendPaqueteEnSedeEmail = async (email, { nombreDestinatario = '', numeroGuia = '', municipioSede = '' } = {}) => {
+  return sendBrevoEmail({
+    to: email,
+    subject: 'Tu encomienda llegó a la sede - EncomiExpress',
+    html: buildEmailShell({
+      badgeBg: '#0EA5E920',
+      icon: ICONS.sede,
+      heading: '¡Tu encomienda llegó a la sede!',
+      bodyHtml: `
+        Hola${nombreDestinatario ? ` <b>${nombreDestinatario}</b>` : ''}, tu encomienda con guía <b>${numeroGuia}</b> ya llegó
+        a nuestra sede${municipioSede ? ` en <b>${municipioSede}</b>` : ''}. Muy pronto coordinaremos la entrega contigo.
+      `,
+    }),
+  });
+};
+
+// P9, Notificación 4 (parte "Entregado") — al remitente, cuando el distribuidor
+// cierra el paquete como entregado (encomiendaService.registrarEntregaFinal(),
+// accion === 'Entregado'). Cierra el ciclo que abrió sendEncomiendaRegistradaClienteEmail/
+// sendPaqueteEnviadoEmail.
+const sendEncomiendaEntregadaEmail = async (email, { nombreCliente = '', numeroGuia = '' } = {}) => {
+  return sendBrevoEmail({
+    to: email,
+    subject: 'Tu encomienda fue entregada - EncomiExpress',
+    html: buildEmailShell({
+      badgeBg: '#05966920',
+      icon: ICONS.exito,
+      heading: '¡Tu encomienda fue entregada!',
+      bodyHtml: `
+        Hola${nombreCliente ? ` <b>${nombreCliente}</b>` : ''}, te confirmamos que tu encomienda con guía <b>${numeroGuia}</b>
+        fue entregada exitosamente a su destinatario.
+        <br><br>Gracias por confiar en EncomiExpress.
+      `,
+    }),
+  });
+};
+
 module.exports = {
   sendPasswordRecoveryEmail,
   sendPaqueteDevueltoEmail,
@@ -208,4 +350,9 @@ module.exports = {
   sendPaqueteEnviadoEmail,
   sendPaquetePorRecibirEmail,
   sendDocumentoPorVencerEmail,
+  sendEncomiendaRegistradaClienteEmail,
+  sendEncomiendaRegistradaDestinatarioEmail,
+  sendInsistenciaDestinatarioEmail,
+  sendPaqueteEnSedeEmail,
+  sendEncomiendaEntregadaEmail,
 };

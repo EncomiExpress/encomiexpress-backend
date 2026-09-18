@@ -571,6 +571,33 @@ const create = async (data, { rol, idSede } = {}) => {
       ],
     });
 
+    // P9, Notificación 2 — "tu encomienda fue registrada", al remitente y al
+    // destinatario, apenas se guarda la venta (ya con la transacción confirmada).
+    // Nunca debe bloquear el registro si Brevo falla — mismo patrón fire-and-forget
+    // que el resto de correos transaccionales, ver config/email.js.
+    try {
+      const { sendEncomiendaRegistradaClienteEmail, sendEncomiendaRegistradaDestinatarioEmail } = require('../config/email');
+      const destinoMunicipio = encomiendaCompleta.destinatario?.destino?.municipio || '';
+      if (encomiendaCompleta.cliente?.email) {
+        await sendEncomiendaRegistradaClienteEmail(encomiendaCompleta.cliente.email, {
+          nombreCliente: `${encomiendaCompleta.cliente.nombre} ${encomiendaCompleta.cliente.apellido}`.trim(),
+          numeroGuia: encomiendaCompleta.numeroGuia,
+          destinoMunicipio,
+          fechaEstimadaEntrega: encomiendaCompleta.fechaEstimadaEntrega,
+        });
+      }
+      if (encomiendaCompleta.destinatario?.correoDestinatario) {
+        await sendEncomiendaRegistradaDestinatarioEmail(encomiendaCompleta.destinatario.correoDestinatario, {
+          nombreDestinatario: encomiendaCompleta.destinatario.nombreDestinatario,
+          numeroGuia: encomiendaCompleta.numeroGuia,
+          origenMunicipio: encomiendaCompleta.salida?.origen || '',
+          fechaEstimadaEntrega: encomiendaCompleta.fechaEstimadaEntrega,
+        });
+      }
+    } catch (error) {
+      console.error(`No se pudo enviar el correo de "encomienda registrada" (venta #${encomienda.idEncomiendaVenta}):`, error.message);
+    }
+
     return encomiendaCompleta;
   } catch (error) {
     await transaction.rollback();
@@ -1047,6 +1074,35 @@ const dejarPaquetesEnSede = async (idConductor, { idSalida, idDestino, novedades
   const autoCompletar = require('./salidaProgramadaService').intentarAutoCompletar;
   const autoResult = await autoCompletar(idSalida);
 
+  // P9, Notificación 4 ("Llegó a la sede") — al destinatario, un correo por VENTA
+  // (no por paquete: varios paquetes de la misma venta comparten guía y
+  // destinatario). Nunca debe bloquear la operación si Brevo falla.
+  try {
+    const { sendPaqueteEnSedeEmail } = require('../config/email');
+    const sede = await Destino.findByPk(idDestino, { attributes: ['municipio'] });
+    const destinatariosPorVenta = new Map();
+    for (const p of candidatos) {
+      if (destinatariosPorVenta.has(p.idEncomiendaVenta)) continue;
+      const destinatario = p.encomienda?.destinatario;
+      if (destinatario?.correoDestinatario) {
+        destinatariosPorVenta.set(p.idEncomiendaVenta, {
+          email: destinatario.correoDestinatario,
+          nombre: destinatario.nombreDestinatario,
+          numeroGuia: p.encomienda.numeroGuia,
+        });
+      }
+    }
+    for (const { email, nombre, numeroGuia } of destinatariosPorVenta.values()) {
+      try {
+        await sendPaqueteEnSedeEmail(email, { nombreDestinatario: nombre, numeroGuia, municipioSede: sede?.municipio || '' });
+      } catch (error) {
+        console.error(`No se pudo enviar el correo de "llegó a la sede" (guía ${numeroGuia}):`, error.message);
+      }
+    }
+  } catch (error) {
+    console.error(`No se pudieron enviar los correos de "llegó a la sede" (salida #${idSalida}):`, error.message);
+  }
+
   return {
     actualizados: candidatos.length,
     idSalida,
@@ -1253,6 +1309,45 @@ const registrarEntregaFinal = async (idPaquete, { accion, novedad = '', fotoEntr
       }
     } catch (error) {
       console.error(`No se pudo enviar el correo de paquete no entregado (paquete #${idPaquete}):`, error.message);
+    }
+  }
+
+  // P9, Notificación 3 — al DESTINATARIO (no al remitente, ver el bloque de arriba)
+  // cuando el distribuidor registra un intento fallido ('Intento') o cierra el
+  // paquete como no entregado ('Devuelto') -- lo invita a coordinar/recoger en
+  // sede. Nunca debe bloquear la operación si el envío falla.
+  if ((accion === 'Intento' || accion === 'Devuelto') && encomienda?.destinatario?.correoDestinatario) {
+    try {
+      const { sendInsistenciaDestinatarioEmail } = require('../config/email');
+      const sede = encomienda.destinatario.idDestino
+        ? await Destino.findByPk(encomienda.destinatario.idDestino, { attributes: ['municipio'] })
+        : null;
+      await sendInsistenciaDestinatarioEmail(encomienda.destinatario.correoDestinatario, {
+        nombreDestinatario: encomienda.destinatario.nombreDestinatario,
+        numeroGuia: encomienda.numeroGuia,
+        municipioSede: sede?.municipio || '',
+        esFinal: accion === 'Devuelto',
+      });
+    } catch (error) {
+      console.error(`No se pudo enviar el correo de insistencia al destinatario (paquete #${idPaquete}):`, error.message);
+    }
+  }
+
+  // P9, Notificación 4 (parte "Entregado") — al remitente, cuando el distribuidor
+  // cierra el paquete como entregado. Cierra el ciclo abierto por "encomienda
+  // registrada"/"ya va en camino".
+  if (accion === 'Entregado' && encomienda) {
+    try {
+      const { sendEncomiendaEntregadaEmail } = require('../config/email');
+      const cliente = await Cliente.findByPk(encomienda.idCliente);
+      if (cliente?.email) {
+        await sendEncomiendaEntregadaEmail(cliente.email, {
+          nombreCliente: `${cliente.nombre} ${cliente.apellido}`.trim(),
+          numeroGuia: encomienda.numeroGuia,
+        });
+      }
+    } catch (error) {
+      console.error(`No se pudo enviar el correo de encomienda entregada (paquete #${idPaquete}):`, error.message);
     }
   }
 
