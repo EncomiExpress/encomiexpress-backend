@@ -440,7 +440,7 @@ const update = async (id, data) => {
   });
 
   // Corregido 2026-09-13 (la usuaria: un regreso que sale SIN NADA asignado nunca
-  // tiene ningún paquete que dispare dejarPaquetesEnSede/actualizarEstadoPaquete, así
+  // tiene ningún paquete que dispare dejarPaquetesEnSede, así
   // que jamás llega a auto-completarse por esa vía -- se queda "En Ruta" para
   // siempre. En vez de completarlo apenas arranca, el disparador correcto es que EL
   // CONDUCTOR legalice el anticipo -- ese es el primer evento real que solo ocurre

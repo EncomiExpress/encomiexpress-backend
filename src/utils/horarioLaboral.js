@@ -1,13 +1,24 @@
-// Horario laboral de la empresa. Índice = Date.prototype.getDay() (0 = domingo).
+// Horario de SALIDA de las rutas (despacho). Los vehículos se despachan de noche, una
+// vez organizada la carga que se recibió en la oficina durante el día (dato del
+// cliente) — por eso la hora de salida de una SalidaProgramada solo puede ser nocturna.
+// Índice = Date.prototype.getDay() (0 = domingo: la empresa permanece cerrada).
 // DEBE coincidir con encomiexpress-frontend/src/shared/utils/horarioLaboral.js
-const HORARIO_LABORAL = {
+//
+// Cada rango tiene que caber dentro de UN solo día (min < max): SelectorHora, en el
+// frontend, no maneja rangos que cruzan la medianoche (ej. 19:00 → 05:00).
+//
+// El horario de recepción de paquetes en la oficina (lunes a viernes 08:00–19:00,
+// sábados 08:00–15:00, también dato del cliente) NO se valida en ningún lado — no
+// forma parte de esta tabla. La hora estimada de LLEGADA tampoco tiene ventana: un
+// despacho de noche llega de madrugada o esa misma noche.
+const HORARIO_SALIDA = {
   0: null,
-  1: { min: '07:00', max: '19:00' },
-  2: { min: '07:00', max: '19:00' },
-  3: { min: '07:00', max: '19:00' },
-  4: { min: '07:00', max: '19:00' },
-  5: { min: '07:00', max: '19:00' },
-  6: { min: '08:00', max: '15:00' },
+  1: { min: '19:00', max: '23:59' },
+  2: { min: '19:00', max: '23:59' },
+  3: { min: '19:00', max: '23:59' },
+  4: { min: '19:00', max: '23:59' },
+  5: { min: '19:00', max: '23:59' },
+  6: { min: '19:00', max: '23:59' },
 };
 
 const MIN_DIAS_SALIDA_LLEGADA = 0;
@@ -29,16 +40,18 @@ const parseFechaLocal = (iso) => {
   return new Date(y, m - 1, d);
 };
 
-const getRangoHorario = (iso) => (iso ? HORARIO_LABORAL[parseFechaLocal(iso).getDay()] || null : null);
+const getRangoSalida = (iso) => (iso ? HORARIO_SALIDA[parseFechaLocal(iso).getDay()] || null : null);
 
 const esDomingo = (iso) => !!iso && parseFechaLocal(iso).getDay() === 0;
 
-const horaDentroDeRango = (iso, horaStr) => {
+// ¿La hora de salida cae en la ventana nocturna del día? (sin fecha u hora no hay nada
+// que validar; en domingo nunca — no hay ventana)
+const horaSalidaValida = (iso, horaStr) => {
   if (!iso || !horaStr) return true;
-  const rango = getRangoHorario(iso);
+  const rango = getRangoSalida(iso);
   if (!rango) return false;
   const hora = horaStr.slice(0, 5);
   return hora >= rango.min && hora <= rango.max;
 };
 
-module.exports = { HORARIO_LABORAL, MIN_DIAS_SALIDA_LLEGADA, DIAS_MARGEN_ENTRE_RUTAS, MAX_DIAS_ANTICIPACION, getRangoHorario, esDomingo, horaDentroDeRango };
+module.exports = { HORARIO_SALIDA, MIN_DIAS_SALIDA_LLEGADA, DIAS_MARGEN_ENTRE_RUTAS, MAX_DIAS_ANTICIPACION, getRangoSalida, esDomingo, horaSalidaValida };

@@ -295,6 +295,11 @@ CREATE TABLE paquete (
   -- lo que mande el cliente), ver encomiendaService.resolverPoliza.
   ,valor_declarado            DECIMAL(12,2)
   ,valor_poliza               DECIMAL(12,2)
+  -- Parte del total de la venta que le toca a ESTE paquete (lo que el
+  -- distribuidor cobra al entregarlo en Contraentrega). Se calcula en el backend al
+  -- registrar/editar la venta, ver src/utils/repartoTotal.js. NULL en ventas
+  -- anteriores a la migración 007.
+  ,valor_cobro                DECIMAL(12,2)
 );
 
 -- Historial completo de la entrega final de un paquete (ver LOGICA.md, "Historial
@@ -348,6 +353,7 @@ COMMENT ON COLUMN vehiculo.id_destino_actual IS 'Igual que conductor.id_destino_
 COMMENT ON COLUMN paquete.id_usuario_entrega IS 'Usuario rol distribuidor que hizo la entrega final (Entregado/Devuelto) desde "En sede de destino"';
 COMMENT ON COLUMN paquete.intentos_entrega IS 'Contador de insistidera del distribuidor: intentos fallidos de entrega al destinatario (el paquete sigue "En sede de destino")';
 COMMENT ON COLUMN paquete.estado_pago IS 'Pendiente | Pagado — recaudo de ESTE paquete. Pago Inmediato: nace Pagado. Contraentrega: nace Pendiente, pasa a Pagado si el distribuidor lo marca Entregado; se queda Pendiente si lo marca Devuelto (cerrado sin cobro).';
+COMMENT ON COLUMN paquete.valor_cobro IS 'Parte del total de la venta (encomienda_venta.total) que le toca a ESTE paquete — lo que el distribuidor cobra al entregarlo en Contraentrega. La suma de los paquetes de una venta = su total. NULL en ventas anteriores a la migración 007.';
 
 -- ============================================
 -- LLAVES FORÁNEAS

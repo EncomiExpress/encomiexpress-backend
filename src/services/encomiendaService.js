@@ -1,9 +1,10 @@
-const { EncomiendaVenta, Destinatario, Paquete, PaqueteEntregaFinal, Cliente, SalidaProgramada, SalidaVehiculoConductor, Ruta, Vehiculo, Conductor, Destino, Usuario, UsuarioSede, sequelize } = require('../models');
+const { EncomiendaVenta, Destinatario, Paquete, PaqueteEntregaFinal, Cliente, SalidaProgramada, SalidaVehiculoConductor, Ruta, Vehiculo, Conductor, Destino, Usuario, UsuarioSede, Configuracion, sequelize } = require('../models');
 const AppError = require('../errors/appError');
 const crypto = require('crypto');
 const { normalizarEstadoPaquete, determinarEstadoEncomienda, determinarEstadoPago } = require('./paqueteStateUtils');
 const { sendPaqueteDevueltoEmail } = require('../config/email');
 const { MAX_DIAS_ANTICIPACION } = require('../utils/horarioLaboral');
+const { repartirTotalEntrePaquetes } = require('../utils/repartoTotal');
 
 const MODALIDADES_RECAUDO_VALIDAS = ['Pago Inmediato', 'Contraentrega'];
 // Póliza de seguro opcional sobre el valor declarado de la mercancía (1%), por
@@ -19,6 +20,26 @@ const resolverPoliza = (pkg) => {
   const valorDeclarado = pkg.valorDeclarado != null && pkg.valorDeclarado !== '' ? parseFloat(pkg.valorDeclarado) : null;
   if (!valorDeclarado || valorDeclarado <= 0) return { valorDeclarado: null, valorPoliza: null };
   return { valorDeclarado, valorPoliza: Math.round(valorDeclarado * PORCENTAJE_POLIZA * 100) / 100 };
+};
+
+// Parte del total de la venta que le toca a cada paquete (Paquete.valorCobro), en el
+// mismo orden que `paquetes`. La venta guarda un solo total, pero el distribuidor
+// entrega y cobra paquete por paquete -- ver utils/repartoTotal.js para la regla. Usa
+// las tarifas vigentes (por kg y por paquete de Configuracion, y la base del destino
+// de la salida) solo como pesos relativos entre los paquetes: la suma siempre es el
+// total, aunque haya sido editado a mano. Cada paquete necesita peso/dimensiones/
+// tipoCarga/valorPoliza.
+const calcularValoresCobro = async ({ total, paquetes, salida, transaction }) => {
+  const configuracion = await Configuracion.findOne({ where: { id: 1 }, transaction });
+  const destino = salida?.ruta?.idDestino
+    ? await Destino.findByPk(salida.ruta.idDestino, { attributes: ['idDestino', 'tarifaBase'], transaction })
+    : null;
+  return repartirTotalEntrePaquetes(total, paquetes, {
+    tarifaBase: destino?.tarifaBase,
+    tarifaPorKgHierro: configuracion?.tarifaPorKgHierro,
+    tarifaPorKgNormal: configuracion?.tarifaPorKgNormal,
+    tarifaPorPaquete: configuracion?.tarifaPorPaquete,
+  });
 };
 // Tope de la "novedad"/observación de un paquete en Entrega en dos fases — mismo
 // valor que ya usa "Observaciones" en Ruta/Venta (ver rutasValidator.js/
@@ -539,8 +560,15 @@ const create = async (data, { rol, idSede } = {}) => {
     }
 
     if (paquetes && paquetes.length > 0) {
-      for (const pkg of paquetes) {
-        const { valorDeclarado, valorPoliza } = resolverPoliza(pkg);
+      const polizas = paquetes.map(resolverPoliza);
+      const valoresCobro = await calcularValoresCobro({
+        total,
+        paquetes: paquetes.map((pkg, i) => ({ ...pkg, valorPoliza: polizas[i].valorPoliza })),
+        salida,
+        transaction,
+      });
+      for (const [i, pkg] of paquetes.entries()) {
+        const { valorDeclarado, valorPoliza } = polizas[i];
         await Paquete.create(
           {
             idEncomiendaVenta: encomienda.idEncomiendaVenta,
@@ -554,6 +582,7 @@ const create = async (data, { rol, idSede } = {}) => {
             estadoPago: esPagoInmediato ? 'Pagado' : 'Pendiente',
             valorDeclarado,
             valorPoliza,
+            valorCobro: valoresCobro[i],
           },
           { transaction }
         );
@@ -724,6 +753,9 @@ const update = async (id, data, { rol, idSede } = {}) => {
     const esPagoInmediatoVigente = modalidadRecaudoResuelta === 'Pago Inmediato';
     const estadoPagoPaqueteVigente = esPagoInmediatoVigente ? 'Pagado' : 'Pendiente';
 
+    // Antes del update de abajo: después ya no se puede saber si el total cambió.
+    const totalAnterior = parseDecimal(encomienda.total);
+
     // Si llegó hasta acá sin lanzar error, la salida/fecha nuevas ya son válidas
     // (Programada, fechaEstimadaEntrega dentro de rango) — una venta Cancelada se
     // reactiva sola a Programada en la misma operación, sin pedir un segundo paso
@@ -852,6 +884,31 @@ const update = async (id, data, { rol, idSede } = {}) => {
       );
     }
 
+    // Valor a cobrar de cada paquete (Paquete.valorCobro): se vuelve a repartir el
+    // total cuando cambió algo que lo determina -- los paquetes, el total o la salida
+    // (la tarifa base sale del destino de la salida). update() solo corre con la venta
+    // Programada/Cancelada, o sea que ningún paquete ha avanzado: recalcular todos es
+    // seguro. Editar solo la fecha u observaciones NO lo toca, para no repartir de
+    // nuevo con tarifas que pudieron cambiar desde que se registró la venta.
+    if ((paquetes && paquetes.length > 0) || salidaCambio || nuevoTotal !== totalAnterior) {
+      const paquetesActuales = await Paquete.findAll({
+        where: { idEncomiendaVenta: id },
+        order: [['idPaquete', 'ASC']],
+        transaction,
+      });
+      if (paquetesActuales.length > 0) {
+        const valoresCobro = await calcularValoresCobro({
+          total: nuevoTotal,
+          paquetes: paquetesActuales.map((p) => p.toJSON()),
+          salida: salidaNueva,
+          transaction,
+        });
+        for (const [i, paquete] of paquetesActuales.entries()) {
+          await paquete.update({ valorCobro: valoresCobro[i] }, { transaction });
+        }
+      }
+    }
+
     await transaction.commit();
 
     const encomiendaActualizada = await EncomiendaVenta.findByPk(id, {
@@ -868,107 +925,6 @@ const update = async (id, data, { rol, idSede } = {}) => {
     await transaction.rollback();
     throw error;
   }
-};
-
-// Único camino válido hoy para este endpoint legacy (ver ../../../LOGICA.md,
-// "Repartidor local — retirado"): Por entregar -> Entregado/Devuelto directo,
-// lo marca el conductor del tramo troncal mientras su ruta sigue "En Ruta". Un
-// paquete que ya llegó a "En sede de destino" YA NO se puede marcar
-// Entregado/Devuelto por acá — eso es exclusivo del distribuidor de esa sede
-// (PATCH /paquetes/:id/entrega-final, ver registrarEntregaFinal()).
-const actualizarEstadoPaquete = async (idPaquete, estado, { observacion = '', fotoEntrega = null } = {}) => {
-  const paquete = await Paquete.findByPk(idPaquete, {
-    include: [{ model: SalidaVehiculoConductor, as: 'asignacion', include: [{ model: SalidaProgramada, as: 'salida' }] }],
-  });
-  if (!paquete) {
-    throw new AppError('Paquete no encontrado', 404);
-  }
-
-  const estadoAnterior = paquete.estado;
-  if (estadoAnterior === 'Entregado' || estadoAnterior === 'Devuelto') {
-    throw new AppError('Este paquete ya tiene un estado final y no se puede modificar', 409);
-  }
-
-  const encomienda = await EncomiendaVenta.findByPk(paquete.idEncomiendaVenta);
-  if (encomienda?.estado === 'Cancelada') {
-    throw new AppError('No se puede actualizar un paquete de una venta cancelada', 409);
-  }
-
-  const estadoNormalizado = normalizarEstadoPaquete(estado);
-
-  if (estadoNormalizado === 'En sede de destino') {
-    if (estadoAnterior !== 'Por entregar') {
-      throw new AppError('Solo se puede marcar "En sede de destino" desde "Por entregar"', 409);
-    }
-    if (paquete.asignacion?.salida?.estado !== 'En Ruta') {
-      throw new AppError('Solo se puede actualizar un paquete mientras su ruta está "En Ruta"', 409);
-    }
-  } else if (estadoAnterior === 'En sede de destino') {
-    // Ya no aplica el flujo viejo de "repartidor local" (retirado, ver LOGICA.md)
-    // — un paquete que llegó a la sede solo lo cierra el distribuidor de esa sede.
-    throw new AppError('Este paquete ya está en sede de destino: la entrega final la registra el distribuidor de esa sede', 409);
-  } else {
-    // Entrega directa del tramo troncal (estadoAnterior === 'Por entregar') — mismo
-    // comportamiento de siempre.
-    if (paquete.asignacion?.salida?.estado !== 'En Ruta') {
-      throw new AppError('Solo se puede actualizar un paquete mientras su ruta está "En Ruta"', 409);
-    }
-  }
-
-  await sequelize.transaction(async (t) => {
-    // Espejo de registrarEntregaFinal, por consistencia: si este camino legacy
-    // marca "Entregado" una venta Contraentrega, ese paquete también se cobra.
-    const datosPaquete = {
-      estado: estadoNormalizado,
-      observacionEstado: observacion || paquete.observacionEstado || '',
-      fechaUltimoEstado: new Date(),
-      fotoEntrega: fotoEntrega || paquete.fotoEntrega || null,
-    };
-    if (estadoNormalizado === 'Entregado' && encomienda?.modalidadRecaudo === 'Contraentrega') {
-      datosPaquete.estadoPago = 'Pagado';
-    }
-    await paquete.update(datosPaquete, { transaction: t });
-
-    if (encomienda) {
-      const paquetes = await Paquete.findAll({ where: { idEncomiendaVenta: paquete.idEncomiendaVenta }, transaction: t });
-      await encomienda.update({
-        estado: determinarEstadoEncomienda(paquetes, encomienda.estado),
-        estadoPago: determinarEstadoPago(paquetes, encomienda.estadoPago),
-      }, { transaction: t });
-    }
-  });
-
-  // Este paquete acaba de salir de "Por entregar" a "Entregado"/"Devuelto" directo
-  // — puede que con eso la ruta ya tenga todas sus sedes completas. Mismo
-  // disparador best-effort que dejarPaquetesEnSede; sin esto, una ruta que se
-  // completa entera por esta vía directa (sin pasar nunca por
-  // dejarPaquetesEnSede) nunca dispara el auto-completado y se queda "En Ruta"
-  // para siempre aunque no le falte nada. require lazy para no atar el orden de
-  // carga de módulos.
-  if (estadoAnterior === 'Por entregar' && paquete.asignacion?.idSalida) {
-    const autoCompletar = require('./salidaProgramadaService').intentarAutoCompletar;
-    await autoCompletar(paquete.asignacion.idSalida);
-  }
-
-  // Notificación al cliente por correo cuando un paquete pasa a "Devuelto" — solo en
-  // la transición (no en cada re-guardado mientras ya estaba devuelto), y sin bloquear
-  // la actualización del paquete si el envío del correo falla (SMTP caído, etc.).
-  if (estadoNormalizado === 'Devuelto' && estadoAnterior !== 'Devuelto' && encomienda) {
-    try {
-      const cliente = await Cliente.findByPk(encomienda.idCliente);
-      if (cliente?.email) {
-        await sendPaqueteDevueltoEmail(cliente.email, {
-          nombreCliente: `${cliente.nombre} ${cliente.apellido}`.trim(),
-          numeroGuia: encomienda.numeroGuia,
-          motivo: observacion || '',
-        });
-      }
-    } catch (error) {
-      console.error(`No se pudo enviar el correo de paquete devuelto (paquete #${idPaquete}):`, error.message);
-    }
-  }
-
-  return paquete;
 };
 
 // El conductor del tramo troncal legaliza DE UNA SOLA VEZ todos los paquetes que
@@ -1777,7 +1733,6 @@ module.exports = {
   reactivar,
   getPageOf,
   getRangoFechas,
-  actualizarEstadoPaquete,
   dejarPaquetesEnSede,
   getPaquetesEnSede,
   getHistorialSedeDistribuidor,

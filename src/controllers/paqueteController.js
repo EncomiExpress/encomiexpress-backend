@@ -42,42 +42,6 @@ exports.getByConductor = async (req, res, next) => {
   }
 };
 
-exports.subirEvidencia = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-
-    const conductor = await Conductor.findOne({ where: { idUsuario: req.usuario.idUsuario } });
-    if (!conductor) {
-      return res.status(403).json({ success: false, message: 'Solo los conductores pueden actualizar sus paquetes' });
-    }
-
-    const paquete = await Paquete.findByPk(id, { include: [{ model: SalidaVehiculoConductor, as: 'asignacion' }] });
-    if (!paquete) {
-      return res.status(404).json({ success: false, message: 'Paquete no encontrado' });
-    }
-    // Solo el conductor del tramo troncal puede tocar este paquete por esta vía
-    // (el flujo viejo de "repartidor local" se retiró — ver LOGICA.md).
-    const esConductorTroncal = paquete.asignacion?.idConductor === conductor.idConductor;
-    if (!esConductorTroncal) {
-      return res.status(403).json({ success: false, message: 'Este paquete no está asignado a tu cuenta' });
-    }
-
-    // El resultado que entrega Cloudinary no trae ningún campo `.path` (eso es
-    // convención de multer.diskStorage) — la URL real de la imagen es
-    // `secure_url`. Mismo bug ya corregido antes en el soporte de anticipos.
-    const fileUrl = req.file?.secure_url || null;
-    if (!fileUrl) return res.status(400).json({ success: false, message: 'Archivo no proporcionado' });
-
-    const estado = req.body.estado;
-    if (!estado) return res.status(400).json({ success: false, message: 'El campo "estado" es requerido' });
-
-    const paqueteActualizado = await encomiendaService.actualizarEstadoPaquete(id, estado, { observacion: req.body.observacion || '', fotoEntrega: fileUrl });
-    res.json({ success: true, message: 'Evidencia subida y paquete actualizado', data: paqueteActualizado });
-  } catch (error) {
-    next(error);
-  }
-};
-
 exports.dejarEnSede = async (req, res, next) => {
   try {
     // El idConductor sale del token, no del body — un conductor solo legaliza sus
@@ -171,8 +135,14 @@ exports.registrarEntregaFinal = async (req, res, next) => {
     // Mensaje según la acción real -- antes decía "Entrega registrada" siempre,
     // aunque el distribuidor hubiera marcado "No entregado" o solo un intento
     // fallido, lo cual sonaba a que sí se entregó.
+    // En Contraentrega, 'Entregado' también deja el cobro registrado
+    // (registrarEntregaFinal -> Paquete.estadoPago = 'Pagado') -- se avisa para
+    // que el distribuidor vea confirmado el cobro y no solo la entrega.
+    const cobroRegistrado = accion === 'Entregado'
+      && paquete.encomienda?.modalidadRecaudo === 'Contraentrega'
+      && paquete.estadoPago === 'Pagado';
     const MENSAJES = {
-      Entregado: 'Entrega registrada',
+      Entregado: cobroRegistrado ? 'Entrega y cobro contraentrega registrados' : 'Entrega registrada',
       Devuelto: 'Paquete marcado como no entregado',
       Intento: 'Intento registrado',
     };

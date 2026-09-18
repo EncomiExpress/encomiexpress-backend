@@ -108,6 +108,14 @@ const Paquete = sequelize.define('Paquete', {
   valorPoliza: {
     type: DataTypes.DECIMAL(12, 2),
     allowNull: true
+  },
+  // Parte del total de la venta que le toca a ESTE paquete -- lo que el
+  // distribuidor cobra al entregarlo en Contraentrega. Los de una venta suman su
+  // total. Se calcula al registrar/editar la venta (utils/repartoTotal.js); NULL en
+  // ventas anteriores a la migración 007 (el móvil cae al total de la venta).
+  valorCobro: {
+    type: DataTypes.DECIMAL(12, 2),
+    allowNull: true
   }
 }, {
   tableName: 'paquete',

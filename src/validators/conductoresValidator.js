@@ -7,7 +7,10 @@ const ESTADOS_VALIDOS = ['Disponible', 'En Ruta'];
 // (Ley 769 de 2002 — ver CLAUDE.md). El backend lo recibe como espejo de
 // numeroIdentificacion, que ya se valida.
 
-const CATEGORIAS_VALIDAS = ['A1', 'A2', 'B1', 'B2', 'B3', 'C1', 'C2', 'C3'];
+// Solo licencias C (servicio público): los conductores manejan vehículos de transporte, no
+// motos ni vehículos particulares (A1/A2/B1/B2/B3). DEBE coincidir con CATEGORIAS_LICENCIA
+// de encomiexpress-frontend/src/features/conductores/validations/conductorValidation.js.
+const CATEGORIAS_VALIDAS = ['C1', 'C2', 'C3'];
 
 const createValidation = [
   r.tipoIdentificacion.required(r.TIPOS_DOC_CONDUCTOR),

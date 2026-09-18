@@ -7,7 +7,7 @@ const { Op } = require('sequelize');
 const AppError = require('../errors/appError');
 const { verificarDependenciasSalida } = require('../middlewares/validateDependencies');
 const { tieneLicenciaVigente } = require('../utils/licenciaHelper');
-const { esDomingo, getRangoHorario, horaDentroDeRango, MIN_DIAS_SALIDA_LLEGADA, DIAS_MARGEN_ENTRE_RUTAS, MAX_DIAS_ANTICIPACION } = require('../utils/horarioLaboral');
+const { esDomingo, getRangoSalida, horaSalidaValida, MIN_DIAS_SALIDA_LLEGADA, DIAS_MARGEN_ENTRE_RUTAS, MAX_DIAS_ANTICIPACION } = require('../utils/horarioLaboral');
 const { determinarEstadoEncomienda, determinarEstadoPago, paqueteLiberaRuta } = require('./paqueteStateUtils');
 
 // Absorbe TODA la lógica de negocio que antes vivía en rutaService.js (máquina de
@@ -54,9 +54,9 @@ const tienePaquetesPendientes = async (idSalida) => {
 // legaliza después desde el móvil sin que la ruta ya esté Completada le importe
 // (anticipoService.update no depende del estado de la ruta). Si updateEstado rechaza
 // por otra razón (condición de carrera, etc.), se deja la ruta "En Ruta" y NO se
-// propaga el error: el admin siempre puede completarla a mano. La llaman
-// encomiendaService.dejarPaquetesEnSede y encomiendaService.actualizarEstadoPaquete
-// (los dos caminos por los que un paquete puede salir de "Por entregar").
+// propaga el error: el admin siempre puede completarla a mano. La llama
+// encomiendaService.dejarPaquetesEnSede (el camino por el que un paquete sale de
+// "Por entregar"; el endpoint viejo de evidencia directa se eliminó el 2026-09-18).
 const intentarAutoCompletar = async (idSalida) => {
   try {
     const salida = await SalidaProgramada.findByPk(idSalida, { attributes: ['idSalida', 'estado'] });
@@ -470,9 +470,16 @@ const validarChoqueVehiculoConductor = async ({ idVehiculo, idConductor, fechaSa
   }
 };
 
-// Horario laboral de la empresa: valida que la salida y la llegada de la SalidaProgramada
-// caigan en día/hora hábil, y que la llegada no sea anterior a la salida.
-const validarHorarioRuta = ({ fechaSalida, horaSalida, fechaLlegadaEstimada, horaLlegadaEstimada, exigirFechaSalidaFutura = false }) => {
+// Valida que la salida y la llegada de la SalidaProgramada caigan en día hábil (no
+// domingo), que la HORA DE SALIDA sea nocturna (los vehículos se despachan de noche,
+// ver HORARIO_SALIDA) y que la llegada no sea anterior a la salida. La hora de llegada
+// no tiene ventana: un despacho de noche llega de madrugada o esa misma noche.
+//
+// validarHoraSalida=false: para editar una salida ya creada SIN cambiarle fecha ni hora
+// (ej. solo el vehículo) -- las que se programaron antes de que el despacho fuera
+// nocturno conservan su hora de día y no se bloquean por eso; en cuanto se les cambia la
+// fecha o la hora, sí tiene que ser de noche.
+const validarHorarioRuta = ({ fechaSalida, horaSalida, fechaLlegadaEstimada, horaLlegadaEstimada, exigirFechaSalidaFutura = false, validarHoraSalida = true }) => {
   const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
   const maxPermitido = sumarDias(hoy, MAX_DIAS_ANTICIPACION);
 
@@ -486,9 +493,9 @@ const validarHorarioRuta = ({ fechaSalida, horaSalida, fechaLlegadaEstimada, hor
   if (fechaSalida && fechaSalida > maxPermitido) {
     throw new AppError(`La fecha de salida no puede ser más de ${MAX_DIAS_ANTICIPACION} días a partir de hoy (máximo el ${maxPermitido})`, 400);
   }
-  if (fechaSalida && horaSalida && !horaDentroDeRango(fechaSalida, horaSalida)) {
-    const r = getRangoHorario(fechaSalida);
-    throw new AppError(`La hora de salida debe estar entre las ${r.min} y las ${r.max}`, 400);
+  if (validarHoraSalida && fechaSalida && horaSalida && !horaSalidaValida(fechaSalida, horaSalida)) {
+    const r = getRangoSalida(fechaSalida);
+    throw new AppError(`La hora de salida debe ser de noche, entre las ${r.min} y las ${r.max}`, 400);
   }
   if (fechaLlegadaEstimada) {
     if (esDomingo(fechaLlegadaEstimada)) {
@@ -506,14 +513,11 @@ const validarHorarioRuta = ({ fechaSalida, horaSalida, fechaLlegadaEstimada, hor
         throw new AppError(mensaje, 400);
       }
     }
-    if (horaLlegadaEstimada && !horaDentroDeRango(fechaLlegadaEstimada, horaLlegadaEstimada)) {
-      const r = getRangoHorario(fechaLlegadaEstimada);
-      throw new AppError(`La hora estimada de llegada debe estar entre las ${r.min} y las ${r.max}`, 400);
-    }
     // Mismo día: la llegada tiene que ser un rato después de la salida, no antes --
     // MIN_DIAS_SALIDA_LLEGADA=0 permite que sea el mismo día (chequeo de arriba), pero
-    // eso no garantiza el orden de las horas dentro de ese día.
-    if (horaLlegadaEstimada && horaSalida && fechaLlegadaEstimada === fechaSalida && horaLlegadaEstimada <= horaSalida) {
+    // eso no garantiza el orden de las horas dentro de ese día. Se comparan como HH:MM:
+    // la hora puede venir del body ("20:00") o de la BD ("20:00:00").
+    if (horaLlegadaEstimada && horaSalida && fechaLlegadaEstimada === fechaSalida && horaLlegadaEstimada.slice(0, 5) <= horaSalida.slice(0, 5)) {
       throw new AppError('La hora estimada de llegada debe ser posterior a la hora de salida cuando es el mismo día', 400);
     }
   }
@@ -983,6 +987,8 @@ const update = async (id, data, { rol, idSede } = {}) => {
     fechaSalida: nuevaFechaSalida, horaSalida: nuevaHoraSalida,
     fechaLlegadaEstimada: nuevaFechaLlegadaEstimada, horaLlegadaEstimada: nuevaHoraLlegadaEstimada,
     exigirFechaSalidaFutura: nuevaFechaSalida !== salida.fechaSalida,
+    // Solo se exige hora nocturna si esta edición mueve la fecha o la hora de salida.
+    validarHoraSalida: salidaCambioHora,
   });
   // Si se mueve la fecha de salida y/o llegada, la fechaEstimadaEntrega que ya tenía
   // prometida cada venta de esta salida deja de tener sentido -- se sincroniza a la
@@ -1347,16 +1353,24 @@ const updateEstado = async (id, estado, { rol, idSede, interno = false } = {}) =
     // para varios días después y dejaría "ya va en camino" siendo falso). Nunca
     // debe bloquear el cambio de estado si Brevo falla -- ver config/email.js,
     // mismo patrón fire-and-forget que el resto de correos transaccionales.
+    // 2026-09-18: además de no fallar, ahora TAMPOCO hace esperar: antes el
+    // `await` de cada correo (hasta 2 por venta, uno tras otro) dejaba la
+    // respuesta del cambio de estado colgada mientras Brevo respondía -- con muchas
+    // ventas en la salida eso se notaba. Se dispara en segundo plano; el try/catch
+    // de adentro atrapa todo, así que la promesa nunca rechaza sin manejar.
+    const idSalidaCorreos = salida.idSalida;
+    const origenCorreos = salida.origen;
+    const destinoMunicipio = salida.ruta?.destino?.municipio || '';
+    (async () => {
     try {
       const { sendPaqueteEnviadoEmail, sendPaquetePorRecibirEmail } = require('../config/email');
       const ventasEnviadas = await EncomiendaVenta.findAll({
-        where: { idSalida: salida.idSalida, habilitado: true, estado: 'En Ruta' },
+        where: { idSalida: idSalidaCorreos, habilitado: true, estado: 'En Ruta' },
         include: [
           { model: Cliente, as: 'cliente', attributes: ['nombre', 'apellido', 'email'] },
           { model: Destinatario, as: 'destinatario', attributes: ['nombreDestinatario', 'correoDestinatario'] },
         ],
       });
-      const destinoMunicipio = salida.ruta?.destino?.municipio || '';
       for (const venta of ventasEnviadas) {
         if (venta.cliente?.email) {
           try {
@@ -1375,7 +1389,7 @@ const updateEstado = async (id, estado, { rol, idSede, interno = false } = {}) =
             await sendPaquetePorRecibirEmail(venta.destinatario.correoDestinatario, {
               nombreDestinatario: venta.destinatario.nombreDestinatario,
               numeroGuia: venta.numeroGuia,
-              origenMunicipio: salida.origen,
+              origenMunicipio: origenCorreos,
               fechaEstimadaEntrega: venta.fechaEstimadaEntrega,
             });
           } catch (error) {
@@ -1384,8 +1398,9 @@ const updateEstado = async (id, estado, { rol, idSede, interno = false } = {}) =
         }
       }
     } catch (error) {
-      console.error(`No se pudieron enviar los correos de salida "En Ruta" (salida #${salida.idSalida}):`, error.message);
+      console.error(`No se pudieron enviar los correos de salida "En Ruta" (salida #${idSalidaCorreos}):`, error.message);
     }
+    })();
   }
 
   if ((estado === 'Completada' || estado === 'Cancelada') && salida.estado === 'En Ruta') {

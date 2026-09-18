@@ -45,12 +45,6 @@ router.patch('/sede', authorize('conductor'), upload.single('file'), paqueteCont
 router.get('/retorno', authorize('conductor'), paqueteController.getParaRetorno);
 
 /**
- * PATCH /paquetes/:id/evidencia
- * Subir foto de entrega (form-data file) — flujo del conductor.
- */
-router.patch('/:id/evidencia', upload.single('file'), paqueteController.subirEvidencia);
-
-/**
  * PATCH /paquetes/:id/entrega-final  (solo rol distribuidor, form-data file
  * OBLIGATORIO + body novedad OBLIGATORIA)
  * Entrega final al destinatario desde "En sede de destino": accion =
